@@ -60,7 +60,7 @@ public sealed class SqliteReferenceMaterialSearch : IReferenceMaterialSearch
         command.CommandText = """
             SELECT material_id, generation_id, anchor_id, chapter_index, ordinal,
                    material_type, text, description, tags_json, text_hash
-            FROM reference_materialization_materials
+            FROM reference_materials
             WHERE anchor_id = $anchor_id
               AND generation_id = $generation_id
             ORDER BY chapter_index, ordinal
@@ -233,7 +233,7 @@ public sealed class SqliteReferenceMaterialSearch : IReferenceMaterialSearch
         await using var command = connection.CreateCommand();
         command.CommandText = """
             SELECT COUNT(*)
-            FROM reference_materialization_materials
+            FROM reference_materials
             WHERE anchor_id = $anchor_id
               AND generation_id = $generation_id;
             """;
@@ -335,11 +335,11 @@ public sealed class SqliteReferenceMaterialSearch : IReferenceMaterialSearch
                    vector.table_name, vector.provider, vector.model_id,
                    vector.dimensions, vector.vector_count,
                    (SELECT COUNT(*)
-                    FROM reference_materialization_materials material
+                    FROM reference_materials material
                     WHERE material.anchor_id = state.anchor_id
                       AND material.generation_id = state.active_generation_id) AS material_count,
                    (SELECT COUNT(*)
-                    FROM reference_materialization_material_embeddings embedding
+                    FROM reference_material_embeddings embedding
                     WHERE embedding.generation_id = state.active_generation_id) AS embedding_count
             FROM reference_anchor_materialization_state state
             JOIN reference_materialization_vector_indexes vector
@@ -476,8 +476,8 @@ public sealed class SqliteReferenceMaterialSearch : IReferenceMaterialSearch
                    material.material_id, material.generation_id, material.anchor_id,
                    material.chapter_index, material.ordinal, material.material_type,
                    material.text, material.description, material.tags_json, material.text_hash
-            FROM reference_materialization_material_embeddings embedding
-            JOIN reference_materialization_materials material
+            FROM reference_material_embeddings embedding
+            JOIN reference_materials material
               ON material.material_id = embedding.material_id
             JOIN reference_anchor_materialization_state state
               ON state.anchor_id = material.anchor_id

@@ -353,8 +353,8 @@ internal sealed partial class SqliteReferenceMaterializationRunStore
         await using var command = connection.CreateCommand();
         command.Transaction = transaction;
         command.CommandText = """
-            INSERT INTO reference_anchor_materialization_state (anchor_id, active_generation_id, previous_generation_id, row_version, updated_at)
-            VALUES ($anchor_id, NULL, NULL, 0, $updated_at)
+            INSERT INTO reference_anchor_materialization_state (anchor_id, active_generation_id, row_version, updated_at)
+            VALUES ($anchor_id, NULL, 0, $updated_at)
             ON CONFLICT(anchor_id) DO NOTHING;
             """;
         command.Parameters.AddWithValue("$anchor_id", anchorId);
@@ -376,12 +376,11 @@ internal sealed partial class SqliteReferenceMaterializationRunStore
             command.Transaction = transaction;
             command.CommandText = """
                 INSERT INTO reference_materialization_chapter_progress (
-                  run_id, chapter_node_id, chapter_index, batch_index, status, current_stage)
+                  run_id, chapter_index, batch_index, status, current_stage)
                 VALUES (
-                  $run_id, $chapter_node_id, $chapter_index, $batch_index, $status, $current_stage);
+                  $run_id, $chapter_index, $batch_index, $status, $current_stage);
                 """;
             command.Parameters.AddWithValue("$run_id", runId);
-            command.Parameters.AddWithValue("$chapter_node_id", $"split-chapter:{boundary.ChapterIndex}:{boundary.TextHash}");
             command.Parameters.AddWithValue("$chapter_index", boundary.ChapterIndex);
             command.Parameters.AddWithValue("$batch_index", (boundary.ChapterIndex - 1) / chapterBatchSize);
             command.Parameters.AddWithValue("$status", ReferenceMaterializationChapterStates.Pending);

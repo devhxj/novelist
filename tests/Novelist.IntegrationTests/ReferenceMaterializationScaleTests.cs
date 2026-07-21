@@ -208,7 +208,7 @@ public sealed class ReferenceMaterializationScaleTests : IDisposable
             SELECT COUNT(*)
             FROM (
               SELECT material_id, provider, model_id, dimensions, COUNT(*) AS count
-              FROM reference_materialization_material_embeddings
+              FROM reference_material_embeddings
               GROUP BY material_id, provider, model_id, dimensions
               HAVING count > 1
             );

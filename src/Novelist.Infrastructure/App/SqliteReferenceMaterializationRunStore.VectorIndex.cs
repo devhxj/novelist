@@ -187,8 +187,8 @@ internal sealed partial class SqliteReferenceMaterializationRunStore
         command.Transaction = transaction;
         command.CommandText = """
             SELECT embedding.rowid, embedding.material_id, embedding.embedding_blob
-            FROM reference_materialization_material_embeddings embedding
-            JOIN reference_materialization_materials material
+            FROM reference_material_embeddings embedding
+            JOIN reference_materials material
               ON material.material_id = embedding.material_id
             WHERE embedding.generation_id = $generation_id
               AND material.run_id = $run_id
@@ -225,7 +225,7 @@ internal sealed partial class SqliteReferenceMaterializationRunStore
         command.Transaction = transaction;
         command.CommandText = """
             SELECT COUNT(*)
-            FROM reference_materialization_materials
+            FROM reference_materials
             WHERE run_id = $run_id
               AND generation_id = $generation_id;
             """;

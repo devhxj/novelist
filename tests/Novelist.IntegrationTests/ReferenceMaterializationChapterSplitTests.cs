@@ -399,7 +399,7 @@ public sealed class ReferenceMaterializationChapterSplitTests : IDisposable
     {
         await using var connection = await OpenConnectionAsync(options);
         await using var command = connection.CreateCommand();
-        command.CommandText = "SELECT COUNT(*) FROM reference_materialization_materials WHERE anchor_id = $anchor_id;";
+        command.CommandText = "SELECT COUNT(*) FROM reference_materials WHERE anchor_id = $anchor_id;";
         command.Parameters.AddWithValue("$anchor_id", anchorId);
         return Convert.ToInt32(await command.ExecuteScalarAsync(CancellationToken.None));
     }

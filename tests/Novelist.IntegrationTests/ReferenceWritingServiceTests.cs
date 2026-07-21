@@ -197,7 +197,7 @@ public sealed class ReferenceWritingServiceTests : IDisposable
             CancellationToken.None);
         await ExecuteMaterialCommandAsync(
             options,
-            "DELETE FROM reference_materialization_materials WHERE material_id = 'material-a';");
+            "DELETE FROM reference_materials WHERE material_id = 'material-a';");
 
         var exception = await Assert.ThrowsAsync<ReferenceWritingException>(async () =>
             await service.GetSessionAsync(
@@ -232,7 +232,7 @@ public sealed class ReferenceWritingServiceTests : IDisposable
             CancellationToken.None);
         await ExecuteMaterialCommandAsync(
             options,
-            "UPDATE reference_materialization_materials SET text = 'tampered' WHERE material_id = 'material-a';");
+            "UPDATE reference_materials SET text = 'tampered' WHERE material_id = 'material-a';");
 
         var exception = await Assert.ThrowsAsync<ReferenceWritingException>(async () =>
             await service.GetSessionAsync(
@@ -340,7 +340,7 @@ public sealed class ReferenceWritingServiceTests : IDisposable
               anchor_id, active_generation_id, updated_at)
             VALUES ($anchor_id, $generation_id, $now);
 
-            INSERT INTO reference_materialization_materials (
+            INSERT INTO reference_materials (
               material_id, generation_id, run_id, anchor_id, chapter_index, ordinal,
               material_type, text, description, tags_json, text_hash, created_at)
             VALUES (

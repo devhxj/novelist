@@ -429,7 +429,7 @@ internal sealed partial class SqliteReferenceMaterializationRunStore
             command.CommandText = """
                 SELECT EXISTS(
                   SELECT 1
-                  FROM reference_materialization_materials
+                  FROM reference_materials
                   WHERE generation_id = $generation_id
                     AND text_hash = $text_hash
                     AND text = $text);
@@ -455,7 +455,7 @@ internal sealed partial class SqliteReferenceMaterializationRunStore
         await using var command = connection.CreateCommand();
         command.Transaction = transaction;
         command.CommandText = """
-            INSERT INTO reference_materialization_materials (
+            INSERT INTO reference_materials (
               material_id, generation_id, run_id, anchor_id, chapter_index, ordinal,
               material_type, text, description, tags_json, text_hash, created_at)
             VALUES (
@@ -490,7 +490,7 @@ internal sealed partial class SqliteReferenceMaterializationRunStore
         await using var command = connection.CreateCommand();
         command.Transaction = transaction;
         command.CommandText = """
-            INSERT INTO reference_materialization_material_embeddings (
+            INSERT INTO reference_material_embeddings (
               material_id, generation_id, provider, model_id, dimensions,
               embedding_hash, embedding_blob, created_at)
             VALUES (

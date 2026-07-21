@@ -522,8 +522,8 @@ public sealed class SqliteReferenceAnchorService : IReferenceAnchorService
     {
         var statements = new[]
         {
-            "DELETE FROM reference_materialization_material_embeddings WHERE material_id IN (SELECT material_id FROM reference_materialization_materials WHERE anchor_id = $anchor_id);",
-            "DELETE FROM reference_materialization_materials WHERE anchor_id = $anchor_id;",
+            "DELETE FROM reference_material_embeddings WHERE material_id IN (SELECT material_id FROM reference_materials WHERE anchor_id = $anchor_id);",
+            "DELETE FROM reference_materials WHERE anchor_id = $anchor_id;",
             "DELETE FROM reference_materialization_vector_indexes WHERE generation_id IN (SELECT generation_id FROM reference_materialization_runs WHERE anchor_id = $anchor_id);",
             "DELETE FROM reference_materialization_chapter_progress WHERE run_id IN (SELECT run_id FROM reference_materialization_runs WHERE anchor_id = $anchor_id);",
             "DELETE FROM reference_materialization_run_leases WHERE run_id IN (SELECT run_id FROM reference_materialization_runs WHERE anchor_id = $anchor_id);",

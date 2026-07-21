@@ -1,14 +1,176 @@
+using System.Text.Json;
 using Microsoft.Data.Sqlite;
 
 namespace Novelist.Infrastructure.App;
 
 internal static class ReferenceCorpusSchemaProvisioner
 {
+    private const int CurrentSchemaVersion = 2;
+    private const string SchemaKey = "reference-materialization";
+    private static readonly SemaphoreSlim ProvisioningGate = new(1, 1);
+
+    private static readonly string[] RetiredTables =
+    [
+        "reference_text_nodes",
+        "reference_source_segments",
+        "reference_material_candidates",
+        "reference_material_candidate_nodes",
+        "reference_materialization_candidate_embeddings",
+        "reference_materialization_material_nodes",
+        "reference_materialization_blueprint_preview_sessions",
+        "reference_materialization_blueprint_preview_sources",
+        "reference_materialization_blueprint_preview_candidates",
+        "reference_materialization_blueprint_preview_beats",
+        "reference_materialization_blueprint_preview_material_links",
+        "reference_session_library_scope_state",
+        "reference_analysis_runs",
+        "reference_feature_observations",
+        "reference_text_node_embeddings",
+        "reference_current_chapter_embedding_cache",
+        "reference_obs_sensory",
+        "reference_technique_specimens",
+        "reference_technique_vectors",
+        "reference_technique_vector_rows",
+        "reference_technique_vector_index_state",
+        "reference_specimen_evidence",
+        "reference_template_examples",
+        "reference_blueprint_beat_pieces",
+        "reference_corpus_blueprints",
+        "reference_corpus_blueprint_beats",
+        "reference_user_feedback",
+        "reference_aggregate_provenance",
+        "reference_analysis_input_snapshots",
+        "reference_analysis_work_items",
+        "reference_analysis_jobs",
+        "reference_analysis_job_attempts",
+        "reference_analysis_work_item_completions"
+    ];
+
+    // All entries are fixed identifiers. Their order removes FK dependents before parents.
+    private static readonly string[] DerivedTablesToReset =
+    [
+        "reference_materialization_blueprint_preview_material_links",
+        "reference_materialization_blueprint_preview_beats",
+        "reference_materialization_blueprint_preview_candidates",
+        "reference_materialization_blueprint_preview_sources",
+        "reference_materialization_blueprint_preview_sessions",
+        "reference_materialization_material_nodes",
+        "reference_materialization_candidate_embeddings",
+        "reference_material_candidate_nodes",
+        "reference_material_candidates",
+        "reference_materialization_material_embeddings",
+        "reference_materialization_materials",
+        "reference_material_embeddings",
+        "reference_materials",
+        "reference_materialization_vector_indexes",
+        "reference_materialization_chapter_progress",
+        "reference_materialization_run_leases",
+        "reference_materialization_runs",
+        "reference_anchor_materialization_state",
+        "reference_chapter_split_boundaries",
+        "reference_chapter_split_profiles",
+        "reference_session_library_scope_state",
+        "reference_writing_sessions",
+        "reference_analysis_work_item_completions",
+        "reference_analysis_job_attempts",
+        "reference_analysis_jobs",
+        "reference_analysis_work_items",
+        "reference_analysis_input_snapshots",
+        "reference_analysis_runs",
+        "reference_aggregate_provenance",
+        "reference_user_feedback",
+        "reference_corpus_blueprint_beats",
+        "reference_corpus_blueprints",
+        "reference_blueprint_beat_pieces",
+        "reference_template_examples",
+        "reference_specimen_evidence",
+        "reference_technique_vector_rows",
+        "reference_technique_vectors",
+        "reference_technique_vector_index_state",
+        "reference_technique_specimens",
+        "reference_obs_sensory",
+        "reference_current_chapter_embedding_cache",
+        "reference_text_node_embeddings",
+        "reference_feature_observations",
+        "reference_source_segments",
+        "reference_text_nodes",
+        "reference_schema_metadata"
+    ];
+
     public static async ValueTask EnsureCoreTablesAsync(
         SqliteConnection connection,
         CancellationToken cancellationToken)
     {
+        ArgumentNullException.ThrowIfNull(connection);
+        await ProvisioningGate.WaitAsync(cancellationToken);
+        try
+        {
+            if (await HasRetiredTablesAsync(connection, cancellationToken))
+            {
+                await UpgradeLegacySchemaAsync(connection, cancellationToken);
+                return;
+            }
+
+            await using var transaction = (SqliteTransaction)await connection.BeginTransactionAsync(cancellationToken);
+            await EnsureCurrentSchemaAsync(connection, transaction, cancellationToken);
+            await transaction.CommitAsync(cancellationToken);
+        }
+        finally
+        {
+            ProvisioningGate.Release();
+        }
+    }
+
+    private static async ValueTask UpgradeLegacySchemaAsync(
+        SqliteConnection connection,
+        CancellationToken cancellationToken)
+    {
+        var sourcePath = GetDatabasePath(connection);
+        var migration = CreateMigrationPaths(sourcePath);
+        await CreateBackupAsync(connection, migration.BackupPath, cancellationToken);
+        await WriteManifestAsync(migration.ManifestPath, new SchemaMigrationManifest(
+            "started",
+            sourcePath,
+            migration.BackupPath,
+            CurrentSchemaVersion,
+            DateTimeOffset.UtcNow,
+            null), cancellationToken);
+
+        try
+        {
+            await using var transaction = (SqliteTransaction)await connection.BeginTransactionAsync(cancellationToken);
+            await DropDerivedTablesAsync(connection, transaction, cancellationToken);
+            await EnsureCurrentSchemaAsync(connection, transaction, cancellationToken);
+            await transaction.CommitAsync(cancellationToken);
+        }
+        catch (Exception exception)
+        {
+            await WriteManifestAsync(migration.ManifestPath, new SchemaMigrationManifest(
+                "failed",
+                sourcePath,
+                migration.BackupPath,
+                CurrentSchemaVersion,
+                DateTimeOffset.UtcNow,
+                exception.Message), CancellationToken.None);
+            throw;
+        }
+
+        await WriteManifestAsync(migration.ManifestPath, new SchemaMigrationManifest(
+            "completed",
+            sourcePath,
+            migration.BackupPath,
+            CurrentSchemaVersion,
+            DateTimeOffset.UtcNow,
+            null), cancellationToken);
+    }
+
+    private static async ValueTask EnsureCurrentSchemaAsync(
+        SqliteConnection connection,
+        SqliteTransaction transaction,
+        CancellationToken cancellationToken)
+    {
         await using var command = connection.CreateCommand();
+        command.Transaction = transaction;
         command.CommandText = """
             CREATE TABLE IF NOT EXISTS reference_anchors (
               anchor_id INTEGER PRIMARY KEY,
@@ -26,24 +188,6 @@ internal static class ReferenceCorpusSchemaProvisioner
               corpus_visibility TEXT NOT NULL DEFAULT 'private',
               source_trust TEXT NOT NULL DEFAULT 'user_verified',
               user_tags_json TEXT NOT NULL DEFAULT '[]'
-            );
-
-            CREATE TABLE IF NOT EXISTS reference_text_nodes (
-              node_id TEXT PRIMARY KEY,
-              anchor_id INTEGER NOT NULL,
-              parent_node_id TEXT,
-              node_type TEXT NOT NULL,
-              sequence_index INTEGER NOT NULL,
-              depth INTEGER NOT NULL,
-              chapter_index INTEGER,
-              start_offset INTEGER NOT NULL,
-              end_offset INTEGER NOT NULL,
-              char_len INTEGER NOT NULL,
-              text_hash TEXT NOT NULL,
-              text TEXT NOT NULL,
-              created_at TEXT NOT NULL,
-              FOREIGN KEY(anchor_id) REFERENCES reference_anchors(anchor_id) ON DELETE CASCADE,
-              FOREIGN KEY(parent_node_id) REFERENCES reference_text_nodes(node_id) ON DELETE CASCADE
             );
 
             CREATE TABLE IF NOT EXISTS reference_chapter_split_profiles (
@@ -102,13 +246,8 @@ internal static class ReferenceCorpusSchemaProvisioner
               current_batch_index INTEGER,
               current_batch_start_chapter INTEGER,
               current_batch_end_chapter INTEGER,
-              candidate_count INTEGER NOT NULL DEFAULT 0 CHECK(candidate_count >= 0),
-              accepted_count INTEGER NOT NULL DEFAULT 0 CHECK(accepted_count >= 0),
-              rejected_count INTEGER NOT NULL DEFAULT 0 CHECK(rejected_count >= 0),
-              review_count INTEGER NOT NULL DEFAULT 0 CHECK(review_count >= 0),
               material_count INTEGER NOT NULL DEFAULT 0 CHECK(material_count >= 0),
               vector_count INTEGER NOT NULL DEFAULT 0 CHECK(vector_count >= 0),
-              tokens_spent INTEGER NOT NULL DEFAULT 0 CHECK(tokens_spent >= 0),
               last_error_code TEXT,
               last_error_message TEXT,
               started_at TEXT NOT NULL,
@@ -127,7 +266,6 @@ internal static class ReferenceCorpusSchemaProvisioner
             CREATE TABLE IF NOT EXISTS reference_anchor_materialization_state (
               anchor_id INTEGER PRIMARY KEY,
               active_generation_id TEXT,
-              previous_generation_id TEXT,
               row_version INTEGER NOT NULL DEFAULT 0 CHECK(row_version >= 0),
               updated_at TEXT NOT NULL,
               FOREIGN KEY(anchor_id) REFERENCES reference_anchors(anchor_id) ON DELETE CASCADE
@@ -135,16 +273,10 @@ internal static class ReferenceCorpusSchemaProvisioner
 
             CREATE TABLE IF NOT EXISTS reference_materialization_chapter_progress (
               run_id TEXT NOT NULL,
-              chapter_node_id TEXT NOT NULL,
               chapter_index INTEGER NOT NULL CHECK(chapter_index > 0),
               batch_index INTEGER NOT NULL CHECK(batch_index >= 0),
               status TEXT NOT NULL,
               current_stage TEXT NOT NULL,
-              candidate_count INTEGER NOT NULL DEFAULT 0 CHECK(candidate_count >= 0),
-              decided_count INTEGER NOT NULL DEFAULT 0 CHECK(decided_count >= 0),
-              accepted_count INTEGER NOT NULL DEFAULT 0 CHECK(accepted_count >= 0),
-              rejected_count INTEGER NOT NULL DEFAULT 0 CHECK(rejected_count >= 0),
-              review_count INTEGER NOT NULL DEFAULT 0 CHECK(review_count >= 0),
               material_count INTEGER NOT NULL DEFAULT 0 CHECK(material_count >= 0),
               vector_count INTEGER NOT NULL DEFAULT 0 CHECK(vector_count >= 0),
               model_call_count INTEGER NOT NULL DEFAULT 0 CHECK(model_call_count >= 0),
@@ -153,8 +285,7 @@ internal static class ReferenceCorpusSchemaProvisioner
               last_error_code TEXT,
               last_error_message TEXT,
               row_version INTEGER NOT NULL DEFAULT 0 CHECK(row_version >= 0),
-              PRIMARY KEY(run_id, chapter_node_id),
-              UNIQUE(run_id, chapter_index),
+              PRIMARY KEY(run_id, chapter_index),
               FOREIGN KEY(run_id) REFERENCES reference_materialization_runs(run_id) ON DELETE CASCADE
             );
 
@@ -169,70 +300,6 @@ internal static class ReferenceCorpusSchemaProvisioner
               updated_at TEXT NOT NULL,
               FOREIGN KEY(run_id) REFERENCES reference_materialization_runs(run_id) ON DELETE CASCADE
             );
-
-            CREATE TABLE IF NOT EXISTS reference_material_candidates (
-              candidate_id TEXT PRIMARY KEY,
-              candidate_key TEXT NOT NULL,
-              run_id TEXT NOT NULL,
-              anchor_id INTEGER NOT NULL,
-              candidate_type TEXT NOT NULL,
-              text_hash TEXT NOT NULL,
-              decision TEXT NOT NULL,
-              decision_origin TEXT NOT NULL,
-              quality_score REAL,
-              confidence REAL,
-              scores_json TEXT NOT NULL,
-              tags_json TEXT NOT NULL,
-              reason_codes_json TEXT NOT NULL,
-              created_at TEXT NOT NULL,
-              reviewed_at TEXT,
-              row_version INTEGER NOT NULL DEFAULT 0 CHECK(row_version >= 0),
-              FOREIGN KEY(run_id) REFERENCES reference_materialization_runs(run_id) ON DELETE CASCADE,
-              FOREIGN KEY(anchor_id) REFERENCES reference_anchors(anchor_id) ON DELETE CASCADE
-            );
-
-            CREATE UNIQUE INDEX IF NOT EXISTS ux_reference_material_candidates_run_key
-              ON reference_material_candidates(run_id, candidate_key);
-
-            CREATE INDEX IF NOT EXISTS idx_reference_material_candidates_run_decision
-              ON reference_material_candidates(run_id, decision, candidate_id);
-
-            CREATE TABLE IF NOT EXISTS reference_material_candidate_nodes (
-              candidate_id TEXT NOT NULL,
-              node_id TEXT NOT NULL,
-              ordinal INTEGER NOT NULL CHECK(ordinal >= 0),
-              evidence_start INTEGER NOT NULL CHECK(evidence_start >= 0),
-              evidence_end INTEGER NOT NULL CHECK(evidence_end > evidence_start),
-              text_hash TEXT NOT NULL,
-              PRIMARY KEY(candidate_id, ordinal),
-              FOREIGN KEY(candidate_id) REFERENCES reference_material_candidates(candidate_id) ON DELETE CASCADE,
-              FOREIGN KEY(node_id) REFERENCES reference_text_nodes(node_id) ON DELETE RESTRICT
-            );
-
-            CREATE INDEX IF NOT EXISTS idx_reference_material_candidate_nodes_node
-              ON reference_material_candidate_nodes(node_id, candidate_id);
-
-            CREATE TABLE IF NOT EXISTS reference_materialization_candidate_embeddings (
-              embedding_id TEXT PRIMARY KEY,
-              generation_id TEXT NOT NULL,
-              run_id TEXT NOT NULL,
-              candidate_id TEXT NOT NULL,
-              provider TEXT NOT NULL,
-              model_id TEXT NOT NULL,
-              dimensions INTEGER NOT NULL CHECK(dimensions > 0),
-              text_hash TEXT NOT NULL,
-              embedding_hash TEXT NOT NULL,
-              embedding_json TEXT NOT NULL,
-              created_at TEXT NOT NULL,
-              FOREIGN KEY(run_id) REFERENCES reference_materialization_runs(run_id) ON DELETE CASCADE,
-              FOREIGN KEY(candidate_id) REFERENCES reference_material_candidates(candidate_id) ON DELETE CASCADE
-            );
-
-            CREATE UNIQUE INDEX IF NOT EXISTS ux_reference_materialization_candidate_embeddings_model
-              ON reference_materialization_candidate_embeddings(candidate_id, provider, model_id, dimensions);
-
-            CREATE INDEX IF NOT EXISTS idx_reference_materialization_candidate_embeddings_generation
-              ON reference_materialization_candidate_embeddings(generation_id, candidate_id);
 
             CREATE TABLE IF NOT EXISTS reference_materialization_vector_indexes (
               generation_id TEXT PRIMARY KEY,
@@ -251,7 +318,7 @@ internal static class ReferenceCorpusSchemaProvisioner
             CREATE UNIQUE INDEX IF NOT EXISTS ux_reference_materialization_vector_indexes_run
               ON reference_materialization_vector_indexes(run_id);
 
-            CREATE TABLE IF NOT EXISTS reference_materialization_materials (
+            CREATE TABLE IF NOT EXISTS reference_materials (
               material_id TEXT PRIMARY KEY,
               generation_id TEXT NOT NULL,
               run_id TEXT NOT NULL,
@@ -268,16 +335,16 @@ internal static class ReferenceCorpusSchemaProvisioner
               FOREIGN KEY(anchor_id) REFERENCES reference_anchors(anchor_id) ON DELETE CASCADE
             );
 
-            CREATE UNIQUE INDEX IF NOT EXISTS ux_reference_materialization_materials_generation_ordinal
-              ON reference_materialization_materials(generation_id, chapter_index, ordinal);
+            CREATE UNIQUE INDEX IF NOT EXISTS ux_reference_materials_generation_ordinal
+              ON reference_materials(generation_id, chapter_index, ordinal);
 
-            CREATE UNIQUE INDEX IF NOT EXISTS ux_reference_materialization_materials_generation_text
-              ON reference_materialization_materials(generation_id, text_hash, text);
+            CREATE UNIQUE INDEX IF NOT EXISTS ux_reference_materials_generation_text
+              ON reference_materials(generation_id, text_hash, text);
 
-            CREATE INDEX IF NOT EXISTS idx_reference_materialization_materials_active_lookup
-              ON reference_materialization_materials(anchor_id, generation_id, chapter_index, ordinal);
+            CREATE INDEX IF NOT EXISTS idx_reference_materials_active_lookup
+              ON reference_materials(anchor_id, generation_id, chapter_index, ordinal);
 
-            CREATE TABLE IF NOT EXISTS reference_materialization_material_embeddings (
+            CREATE TABLE IF NOT EXISTS reference_material_embeddings (
               material_id TEXT PRIMARY KEY,
               generation_id TEXT NOT NULL,
               provider TEXT NOT NULL,
@@ -286,134 +353,11 @@ internal static class ReferenceCorpusSchemaProvisioner
               embedding_hash TEXT NOT NULL,
               embedding_blob BLOB NOT NULL,
               created_at TEXT NOT NULL,
-              FOREIGN KEY(material_id) REFERENCES reference_materialization_materials(material_id) ON DELETE CASCADE
+              FOREIGN KEY(material_id) REFERENCES reference_materials(material_id) ON DELETE CASCADE
             );
 
-            CREATE INDEX IF NOT EXISTS idx_reference_materialization_material_embeddings_generation
-              ON reference_materialization_material_embeddings(generation_id, material_id);
-
-            CREATE TABLE IF NOT EXISTS reference_materialization_material_nodes (
-              material_id TEXT NOT NULL,
-              node_id TEXT NOT NULL,
-              ordinal INTEGER NOT NULL CHECK(ordinal >= 0),
-              evidence_start INTEGER NOT NULL CHECK(evidence_start >= 0),
-              evidence_end INTEGER NOT NULL CHECK(evidence_end > evidence_start),
-              text_hash TEXT NOT NULL,
-              PRIMARY KEY(material_id, ordinal),
-              FOREIGN KEY(material_id) REFERENCES reference_materialization_materials(material_id) ON DELETE CASCADE,
-              FOREIGN KEY(node_id) REFERENCES reference_text_nodes(node_id) ON DELETE RESTRICT
-            );
-
-            CREATE TABLE IF NOT EXISTS reference_materialization_blueprint_preview_sessions (
-              session_id TEXT PRIMARY KEY,
-              novel_id INTEGER NOT NULL,
-              goal TEXT NOT NULL,
-              status TEXT NOT NULL CHECK(status IN ('active', 'stale')),
-              next_action TEXT NOT NULL CHECK(next_action IN ('none', 'rebuild')),
-              created_at TEXT NOT NULL,
-              updated_at TEXT NOT NULL
-            );
-
-            CREATE TABLE IF NOT EXISTS reference_materialization_blueprint_preview_sources (
-              session_id TEXT NOT NULL,
-              anchor_id INTEGER NOT NULL,
-              generation_id TEXT NOT NULL,
-              material_count INTEGER NOT NULL CHECK(material_count > 0),
-              PRIMARY KEY(session_id, anchor_id),
-              FOREIGN KEY(session_id) REFERENCES reference_materialization_blueprint_preview_sessions(session_id) ON DELETE CASCADE
-            );
-
-            CREATE TABLE IF NOT EXISTS reference_materialization_blueprint_preview_candidates (
-              session_id TEXT NOT NULL,
-              blueprint_id TEXT NOT NULL,
-              candidate_index INTEGER NOT NULL CHECK(candidate_index >= 0),
-              strategy TEXT NOT NULL,
-              PRIMARY KEY(session_id, blueprint_id),
-              UNIQUE(session_id, candidate_index),
-              FOREIGN KEY(session_id) REFERENCES reference_materialization_blueprint_preview_sessions(session_id) ON DELETE CASCADE
-            );
-
-            CREATE TABLE IF NOT EXISTS reference_materialization_blueprint_preview_beats (
-              session_id TEXT NOT NULL,
-              blueprint_id TEXT NOT NULL,
-              beat_id TEXT NOT NULL,
-              beat_index INTEGER NOT NULL CHECK(beat_index >= 0),
-              intent TEXT NOT NULL,
-              narrative_function TEXT NOT NULL,
-              PRIMARY KEY(session_id, blueprint_id, beat_id),
-              UNIQUE(session_id, blueprint_id, beat_index),
-              FOREIGN KEY(session_id, blueprint_id)
-                REFERENCES reference_materialization_blueprint_preview_candidates(session_id, blueprint_id)
-                ON DELETE CASCADE
-            );
-
-            CREATE TABLE IF NOT EXISTS reference_materialization_blueprint_preview_material_links (
-              session_id TEXT NOT NULL,
-              blueprint_id TEXT NOT NULL,
-              beat_id TEXT NOT NULL,
-              material_id TEXT NOT NULL,
-              anchor_id INTEGER NOT NULL,
-              generation_id TEXT NOT NULL,
-              material_type TEXT NOT NULL,
-              text_preview TEXT NOT NULL,
-              quality_score REAL NOT NULL,
-              vector_score REAL NOT NULL,
-              fit_explanation TEXT NOT NULL,
-              material_rank INTEGER NOT NULL CHECK(material_rank >= 0),
-              PRIMARY KEY(session_id, blueprint_id, beat_id, material_id),
-              FOREIGN KEY(session_id, blueprint_id, beat_id)
-                REFERENCES reference_materialization_blueprint_preview_beats(session_id, blueprint_id, beat_id)
-                ON DELETE CASCADE
-            );
-
-            CREATE INDEX IF NOT EXISTS idx_reference_materialization_blueprint_preview_sources_generation
-              ON reference_materialization_blueprint_preview_sources(anchor_id, generation_id);
-
- CREATE TABLE IF NOT EXISTS reference_analysis_runs (
-              run_id TEXT PRIMARY KEY,
-              anchor_id INTEGER NOT NULL,
-              analyzer_version TEXT NOT NULL,
-              schema_version TEXT NOT NULL,
-              model_provider TEXT NOT NULL,
-              model_id TEXT NOT NULL,
-              scope TEXT NOT NULL,
-              status TEXT NOT NULL,
-              token_budget INTEGER,
-              tokens_spent INTEGER NOT NULL DEFAULT 0,
-              resume_cursor TEXT,
-              started_at TEXT NOT NULL,
-              completed_at TEXT,
-              observation_count INTEGER NOT NULL DEFAULT 0,
-              diagnostics_json TEXT NOT NULL DEFAULT '[]',
- FOREIGN KEY(anchor_id) REFERENCES reference_anchors(anchor_id) ON DELETE CASCADE
- );
-
-            CREATE TABLE IF NOT EXISTS reference_feature_observations (
-              observation_id TEXT PRIMARY KEY,
-              node_id TEXT NOT NULL,
-              node_type TEXT NOT NULL,
-              run_id TEXT NOT NULL,
-              anchor_id INTEGER NOT NULL,
-              feature_family TEXT NOT NULL,
-              feature_key TEXT NOT NULL,
-              value_kind TEXT NOT NULL,
-              value_text TEXT,
-              value_num REAL,
-              value_bool INTEGER,
-              value_json TEXT,
-              intensity REAL,
-              confidence REAL NOT NULL,
-              evidence_start INTEGER,
-              evidence_end INTEGER,
-              explanation TEXT,
-              review_state TEXT NOT NULL DEFAULT 'unverified',
-              validity_state TEXT NOT NULL DEFAULT 'active',
-              superseded_by_run_id TEXT,
-              created_at TEXT NOT NULL,
-              FOREIGN KEY(node_id) REFERENCES reference_text_nodes(node_id) ON DELETE CASCADE,
-              FOREIGN KEY(run_id) REFERENCES reference_analysis_runs(run_id) ON DELETE CASCADE,
-              FOREIGN KEY(anchor_id) REFERENCES reference_anchors(anchor_id) ON DELETE CASCADE
-            );
+            CREATE INDEX IF NOT EXISTS idx_reference_material_embeddings_generation
+              ON reference_material_embeddings(generation_id, material_id);
 
             CREATE TABLE IF NOT EXISTS reference_corpus_libraries (
               library_id TEXT PRIMARY KEY,
@@ -435,18 +379,15 @@ internal static class ReferenceCorpusSchemaProvisioner
               FOREIGN KEY(anchor_id) REFERENCES reference_anchors(anchor_id) ON DELETE CASCADE
             );
 
-CREATE TABLE IF NOT EXISTS reference_session_library_binding (
+            CREATE INDEX IF NOT EXISTS idx_reference_library_members_anchor
+              ON reference_library_members(anchor_id, enabled);
+
+            CREATE TABLE IF NOT EXISTS reference_session_library_binding (
               session_id TEXT NOT NULL,
               library_id TEXT NOT NULL,
               PRIMARY KEY(session_id, library_id),
               FOREIGN KEY(library_id) REFERENCES reference_corpus_libraries(library_id) ON DELETE CASCADE
-);
-
- CREATE TABLE IF NOT EXISTS reference_session_library_scope_state (
- session_id TEXT PRIMARY KEY,
- is_explicit INTEGER NOT NULL DEFAULT 1,
- updated_at TEXT NOT NULL
- );
+            );
 
             CREATE TABLE IF NOT EXISTS reference_source_license (
               anchor_id INTEGER PRIMARY KEY,
@@ -459,483 +400,163 @@ CREATE TABLE IF NOT EXISTS reference_session_library_binding (
               FOREIGN KEY(anchor_id) REFERENCES reference_anchors(anchor_id) ON DELETE CASCADE
             );
 
-            CREATE TABLE IF NOT EXISTS reference_text_node_embeddings (
-              embedding_id TEXT PRIMARY KEY,
-              node_id TEXT NOT NULL,
-              anchor_id INTEGER NOT NULL,
-              provider_key TEXT NOT NULL,
-              model_id TEXT NOT NULL,
-              dimensions INTEGER NOT NULL,
-              text_hash TEXT NOT NULL,
-              embedding_json TEXT NOT NULL,
-              updated_at TEXT NOT NULL,
-              FOREIGN KEY(node_id) REFERENCES reference_text_nodes(node_id) ON DELETE CASCADE,
-              FOREIGN KEY(anchor_id) REFERENCES reference_anchors(anchor_id) ON DELETE CASCADE
-            );
-
-            CREATE UNIQUE INDEX IF NOT EXISTS ux_reference_text_node_embeddings_generation
-              ON reference_text_node_embeddings(node_id, provider_key, model_id, dimensions);
-
-            CREATE INDEX IF NOT EXISTS idx_reference_text_node_embeddings_lookup
-              ON reference_text_node_embeddings(provider_key, model_id, dimensions, anchor_id);
-
-            CREATE TABLE IF NOT EXISTS reference_current_chapter_embedding_cache (
-              cache_id TEXT PRIMARY KEY,
-              novel_id INTEGER NOT NULL,
-              chapter_number INTEGER NOT NULL,
-              draft_text_hash TEXT NOT NULL,
-              provider_key TEXT NOT NULL,
-              model_id TEXT NOT NULL,
-              dimensions INTEGER NOT NULL,
-              embedding_json TEXT NOT NULL,
+            CREATE TABLE IF NOT EXISTS reference_schema_metadata (
+              schema_key TEXT PRIMARY KEY,
+              schema_version INTEGER NOT NULL,
               updated_at TEXT NOT NULL
             );
+            """;
+        await command.ExecuteNonQueryAsync(cancellationToken);
+        await EnsureAnchorMetadataColumnsAsync(connection, transaction, cancellationToken);
+        await WriteSchemaVersionAsync(connection, transaction, cancellationToken);
+    }
 
-            CREATE UNIQUE INDEX IF NOT EXISTS ux_reference_current_chapter_embedding_cache_generation
-              ON reference_current_chapter_embedding_cache(
-                novel_id,
-                chapter_number,
-                draft_text_hash,
-                provider_key,
-                model_id,
-                dimensions);
+    private static async ValueTask EnsureAnchorMetadataColumnsAsync(
+        SqliteConnection connection,
+        SqliteTransaction transaction,
+        CancellationToken cancellationToken)
+    {
+        var columns = new HashSet<string>(StringComparer.Ordinal);
+        await using (var query = connection.CreateCommand())
+        {
+            query.Transaction = transaction;
+            query.CommandText = "PRAGMA table_info(reference_anchors);";
+            await using var reader = await query.ExecuteReaderAsync(cancellationToken);
+            while (await reader.ReadAsync(cancellationToken))
+            {
+                columns.Add(reader.GetString(1));
+            }
+        }
 
-            CREATE TABLE IF NOT EXISTS reference_obs_sensory (
-              observation_id TEXT NOT NULL,
-              node_id TEXT NOT NULL,
-              anchor_id INTEGER NOT NULL,
-              sense TEXT NOT NULL,
-              intensity REAL NOT NULL,
-              PRIMARY KEY(observation_id, sense),
-              FOREIGN KEY(observation_id) REFERENCES reference_feature_observations(observation_id) ON DELETE CASCADE,
-              FOREIGN KEY(node_id) REFERENCES reference_text_nodes(node_id) ON DELETE CASCADE,
-              FOREIGN KEY(anchor_id) REFERENCES reference_anchors(anchor_id) ON DELETE CASCADE
-            );
+        await EnsureColumnAsync(connection, transaction, columns, "corpus_visibility", "TEXT NOT NULL DEFAULT 'private'", cancellationToken);
+        await EnsureColumnAsync(connection, transaction, columns, "source_trust", "TEXT NOT NULL DEFAULT 'user_verified'", cancellationToken);
+        await EnsureColumnAsync(connection, transaction, columns, "user_tags_json", "TEXT NOT NULL DEFAULT '[]'", cancellationToken);
+    }
 
-CREATE TABLE IF NOT EXISTS reference_technique_specimens (
-              specimen_id TEXT PRIMARY KEY,
-              source_node_id TEXT NOT NULL,
-              source_anchor_id INTEGER NOT NULL,
-              analysis_run_id TEXT NOT NULL,
-              technique_family TEXT NOT NULL,
-              technique_abstract TEXT NOT NULL,
-              trigger_context TEXT NOT NULL,
-              transfer_template TEXT NOT NULL,
-              transfer_slots_json TEXT NOT NULL,
-              effect_on_reader TEXT NOT NULL,
-              applicability_conditions TEXT NOT NULL,
-              failure_modes TEXT NOT NULL,
-              anti_patterns TEXT NOT NULL,
-              world_context_dependencies TEXT,
-              why_it_works_json TEXT NOT NULL,
-              confidence REAL NOT NULL,
-              review_state TEXT NOT NULL DEFAULT 'unverified',
-              validity_state TEXT NOT NULL DEFAULT 'active',
-              superseded_by_run_id TEXT,
-              mastery_notes TEXT,
-              created_at TEXT NOT NULL,
-              FOREIGN KEY(source_node_id) REFERENCES reference_text_nodes(node_id) ON DELETE CASCADE,
-              FOREIGN KEY(source_anchor_id) REFERENCES reference_anchors(anchor_id) ON DELETE CASCADE,
-              FOREIGN KEY(analysis_run_id) REFERENCES reference_analysis_runs(run_id) ON DELETE CASCADE
-);
+    private static async ValueTask EnsureColumnAsync(
+        SqliteConnection connection,
+        SqliteTransaction transaction,
+        ISet<string> columns,
+        string columnName,
+        string definition,
+        CancellationToken cancellationToken)
+    {
+        if (!columns.Add(columnName))
+        {
+            return;
+        }
 
- CREATE UNIQUE INDEX IF NOT EXISTS ux_reference_technique_specimens_generation
- ON reference_technique_specimens(analysis_run_id, source_node_id, technique_family);
+        await using var command = connection.CreateCommand();
+        command.Transaction = transaction;
+        command.CommandText = $"ALTER TABLE reference_anchors ADD COLUMN {columnName} {definition};";
+        await command.ExecuteNonQueryAsync(cancellationToken);
+    }
 
-            CREATE TABLE IF NOT EXISTS reference_technique_vectors (
-              vector_id TEXT PRIMARY KEY,
-              specimen_id TEXT NOT NULL,
-              source_node_id TEXT NOT NULL,
-              source_anchor_id INTEGER NOT NULL,
-              provider_key TEXT NOT NULL,
-              model_id TEXT NOT NULL,
-              dimensions INTEGER NOT NULL,
-              technique_hash TEXT NOT NULL,
-              embedding_json TEXT NOT NULL,
-              updated_at TEXT NOT NULL,
-              FOREIGN KEY(specimen_id) REFERENCES reference_technique_specimens(specimen_id) ON DELETE CASCADE,
-              FOREIGN KEY(source_node_id) REFERENCES reference_text_nodes(node_id) ON DELETE CASCADE,
-              FOREIGN KEY(source_anchor_id) REFERENCES reference_anchors(anchor_id) ON DELETE CASCADE
-            );
+    private static async ValueTask WriteSchemaVersionAsync(
+        SqliteConnection connection,
+        SqliteTransaction transaction,
+        CancellationToken cancellationToken)
+    {
+        await using var command = connection.CreateCommand();
+        command.Transaction = transaction;
+        command.CommandText = """
+            INSERT INTO reference_schema_metadata (schema_key, schema_version, updated_at)
+            VALUES ($schema_key, $schema_version, $updated_at)
+            ON CONFLICT(schema_key) DO UPDATE SET
+              schema_version = excluded.schema_version,
+              updated_at = excluded.updated_at;
+            """;
+        command.Parameters.AddWithValue("$schema_key", SchemaKey);
+        command.Parameters.AddWithValue("$schema_version", CurrentSchemaVersion);
+        command.Parameters.AddWithValue("$updated_at", DateTimeOffset.UtcNow.ToString("O"));
+        await command.ExecuteNonQueryAsync(cancellationToken);
+    }
 
-            CREATE UNIQUE INDEX IF NOT EXISTS ux_reference_technique_vectors_generation
-              ON reference_technique_vectors(specimen_id, provider_key, model_id, dimensions);
+    private static async ValueTask<bool> HasRetiredTablesAsync(
+        SqliteConnection connection,
+        CancellationToken cancellationToken)
+    {
+        await using var command = connection.CreateCommand();
+        var placeholders = RetiredTables.Select((_, index) => "$name" + index).ToArray();
+        command.CommandText = $"SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type = 'table' AND name IN ({string.Join(", ", placeholders)}));";
+        for (var index = 0; index < RetiredTables.Length; index++)
+        {
+            command.Parameters.AddWithValue(placeholders[index], RetiredTables[index]);
+        }
 
-            CREATE INDEX IF NOT EXISTS idx_reference_technique_vectors_node
-              ON reference_technique_vectors(source_node_id, provider_key, model_id, dimensions);
+        return Convert.ToInt64(await command.ExecuteScalarAsync(cancellationToken)) != 0;
+    }
 
-            CREATE INDEX IF NOT EXISTS idx_reference_technique_vectors_anchor
-              ON reference_technique_vectors(source_anchor_id, provider_key, model_id, dimensions);
+    private static async ValueTask DropDerivedTablesAsync(
+        SqliteConnection connection,
+        SqliteTransaction transaction,
+        CancellationToken cancellationToken)
+    {
+        foreach (var tableName in DerivedTablesToReset)
+        {
+            await using var command = connection.CreateCommand();
+            command.Transaction = transaction;
+            command.CommandText = $"DROP TABLE IF EXISTS {tableName};";
+            await command.ExecuteNonQueryAsync(cancellationToken);
+        }
+    }
 
-            CREATE TABLE IF NOT EXISTS reference_technique_vector_rows (
-              index_scope_key TEXT NOT NULL,
-              row_id INTEGER NOT NULL,
-              vector_id TEXT NOT NULL,
-              specimen_id TEXT NOT NULL,
-              source_node_id TEXT NOT NULL,
-              source_anchor_id INTEGER NOT NULL,
-              provider_key TEXT NOT NULL,
-              model_id TEXT NOT NULL,
-              dimensions INTEGER NOT NULL,
-              technique_hash TEXT NOT NULL,
-              table_name TEXT NOT NULL,
-              updated_at TEXT NOT NULL,
-              PRIMARY KEY(index_scope_key, row_id),
-              FOREIGN KEY(vector_id) REFERENCES reference_technique_vectors(vector_id) ON DELETE CASCADE,
-              FOREIGN KEY(specimen_id) REFERENCES reference_technique_specimens(specimen_id) ON DELETE CASCADE,
-              FOREIGN KEY(source_node_id) REFERENCES reference_text_nodes(node_id) ON DELETE CASCADE,
-              FOREIGN KEY(source_anchor_id) REFERENCES reference_anchors(anchor_id) ON DELETE CASCADE
-            );
+    private static async ValueTask CreateBackupAsync(
+        SqliteConnection source,
+        string backupPath,
+        CancellationToken cancellationToken)
+    {
+        Directory.CreateDirectory(Path.GetDirectoryName(backupPath)!);
+        await using var backup = new SqliteConnection(new SqliteConnectionStringBuilder
+        {
+            DataSource = backupPath,
+            Mode = SqliteOpenMode.ReadWriteCreate,
+            Pooling = false
+        }.ToString());
+        await backup.OpenAsync(cancellationToken);
+        source.BackupDatabase(backup);
+    }
 
-            CREATE UNIQUE INDEX IF NOT EXISTS ux_reference_technique_vector_rows_vector
-              ON reference_technique_vector_rows(index_scope_key, vector_id);
+    private static string GetDatabasePath(SqliteConnection connection)
+    {
+        if (string.IsNullOrWhiteSpace(connection.DataSource) ||
+            string.Equals(connection.DataSource, ":memory:", StringComparison.OrdinalIgnoreCase))
+        {
+            throw new InvalidOperationException("Legacy reference schema migration requires a file-backed SQLite database.");
+        }
 
-            CREATE INDEX IF NOT EXISTS idx_reference_technique_vector_rows_scope_node
-              ON reference_technique_vector_rows(index_scope_key, source_node_id);
+        return Path.GetFullPath(connection.DataSource);
+    }
 
-            CREATE TABLE IF NOT EXISTS reference_technique_vector_index_state (
-              index_scope_key TEXT PRIMARY KEY,
-              table_name TEXT NOT NULL,
-              provider_key TEXT NOT NULL,
-              model_id TEXT NOT NULL,
-              dimensions INTEGER NOT NULL,
-              source_hash TEXT NOT NULL,
-              source_count INTEGER NOT NULL,
-              updated_at TEXT NOT NULL
-            );
+    private static SchemaMigrationPaths CreateMigrationPaths(string databasePath)
+    {
+        var stamp = DateTimeOffset.UtcNow.ToString("yyyyMMddHHmmssfff");
+        var suffix = $"{stamp}-{Guid.NewGuid():N}";
+        var directory = Path.GetDirectoryName(databasePath)!;
+        var fileName = Path.GetFileName(databasePath);
+        return new SchemaMigrationPaths(
+            Path.Combine(directory, $"{fileName}.reference-schema-v{CurrentSchemaVersion}-{suffix}.bak"),
+            Path.Combine(directory, $"reference-schema-migration-v{CurrentSchemaVersion}-{suffix}.json"));
+    }
 
-            CREATE TABLE IF NOT EXISTS reference_specimen_evidence (
-              specimen_id TEXT NOT NULL,
-              observation_id TEXT NOT NULL,
-              PRIMARY KEY(specimen_id, observation_id),
-              FOREIGN KEY(specimen_id) REFERENCES reference_technique_specimens(specimen_id) ON DELETE CASCADE,
-              FOREIGN KEY(observation_id) REFERENCES reference_feature_observations(observation_id) ON DELETE CASCADE
-            );
+    private static async ValueTask WriteManifestAsync(
+        string manifestPath,
+        SchemaMigrationManifest manifest,
+        CancellationToken cancellationToken)
+    {
+        var temporaryPath = manifestPath + ".tmp";
+        var payload = JsonSerializer.Serialize(manifest, new JsonSerializerOptions { WriteIndented = true });
+        await File.WriteAllTextAsync(temporaryPath, payload, cancellationToken);
+        File.Move(temporaryPath, manifestPath, overwrite: true);
+    }
 
-            CREATE TABLE IF NOT EXISTS reference_template_examples (
-              template_id TEXT NOT NULL,
-              node_id TEXT NOT NULL,
-              PRIMARY KEY(template_id, node_id),
-              FOREIGN KEY(node_id) REFERENCES reference_text_nodes(node_id) ON DELETE CASCADE
-            );
+    private sealed record SchemaMigrationPaths(string BackupPath, string ManifestPath);
 
-            CREATE TABLE IF NOT EXISTS reference_blueprint_beat_pieces (
-              beat_id TEXT NOT NULL,
-              node_id TEXT NOT NULL,
-              observation_id TEXT,
-              role_in_beat TEXT,
-              sequence_index INTEGER NOT NULL,
-              PRIMARY KEY(beat_id, node_id),
-              FOREIGN KEY(node_id) REFERENCES reference_text_nodes(node_id) ON DELETE CASCADE,
-              FOREIGN KEY(observation_id) REFERENCES reference_feature_observations(observation_id) ON DELETE SET NULL
-            );
-
-            CREATE TABLE IF NOT EXISTS reference_corpus_blueprints (
-              blueprint_id TEXT PRIMARY KEY,
-              novel_id INTEGER NOT NULL,
-              chapter_number INTEGER NOT NULL,
-              query_context_hash TEXT NOT NULL,
-              assembly_strategy TEXT NOT NULL,
-              coverage_score REAL NOT NULL,
-              gap_reasons_json TEXT NOT NULL,
-              gap_positions_json TEXT NOT NULL,
-              query_context_json TEXT NOT NULL,
-              source_distribution_json TEXT NOT NULL,
-              feedback_reason TEXT NOT NULL,
-              created_at TEXT NOT NULL,
-              updated_at TEXT NOT NULL
-            );
-
-            CREATE TABLE IF NOT EXISTS reference_corpus_blueprint_beats (
-              blueprint_id TEXT NOT NULL,
-              beat_id TEXT NOT NULL,
-              beat_index INTEGER NOT NULL,
-              role_in_beat TEXT NOT NULL,
-              narrative_function TEXT NOT NULL,
-              PRIMARY KEY(blueprint_id, beat_id),
-              FOREIGN KEY(blueprint_id) REFERENCES reference_corpus_blueprints(blueprint_id) ON DELETE CASCADE
-            );
-
-            CREATE TABLE IF NOT EXISTS reference_user_feedback (
-              feedback_id TEXT PRIMARY KEY,
-              novel_id INTEGER NOT NULL,
-              target_type TEXT NOT NULL,
-              target_id TEXT NOT NULL,
-              decision TEXT NOT NULL,
-              material_id TEXT NOT NULL,
-              candidate_id TEXT NOT NULL,
-              blueprint_id INTEGER NOT NULL,
-              beat_id TEXT NOT NULL,
-              feedback_tags_json TEXT NOT NULL,
-              note TEXT NOT NULL,
-              edited_text_hash TEXT NOT NULL,
-              origin TEXT NOT NULL,
-              created_at TEXT NOT NULL
-            );
-
-            CREATE TABLE IF NOT EXISTS reference_aggregate_provenance (
-              aggregate_id TEXT NOT NULL,
-              aggregate_kind TEXT NOT NULL,
-              library_id TEXT,
-              anchor_id INTEGER NOT NULL,
-              run_id TEXT NOT NULL,
-              PRIMARY KEY(aggregate_id, anchor_id, run_id),
-              FOREIGN KEY(anchor_id) REFERENCES reference_anchors(anchor_id) ON DELETE CASCADE,
-              FOREIGN KEY(run_id) REFERENCES reference_analysis_runs(run_id) ON DELETE CASCADE
-            );
-
-            CREATE INDEX IF NOT EXISTS idx_reference_text_nodes_parent
-              ON reference_text_nodes(parent_node_id, sequence_index);
-
-            CREATE INDEX IF NOT EXISTS idx_reference_text_nodes_anchor_type
-              ON reference_text_nodes(anchor_id, node_type);
-
-            CREATE INDEX IF NOT EXISTS idx_reference_text_nodes_chapter
-              ON reference_text_nodes(anchor_id, chapter_index, sequence_index);
-
- CREATE INDEX IF NOT EXISTS idx_reference_observations_family
- ON reference_feature_observations(anchor_id, feature_family, feature_key, value_text);
-
-            CREATE INDEX IF NOT EXISTS idx_reference_observations_num
-              ON reference_feature_observations(anchor_id, feature_family, feature_key, value_num);
-
-            CREATE INDEX IF NOT EXISTS idx_reference_observations_node
-              ON reference_feature_observations(node_id, run_id, validity_state);
-
-            CREATE INDEX IF NOT EXISTS idx_reference_observations_list
-              ON reference_feature_observations(anchor_id, validity_state, created_at, observation_id);
-
-            CREATE INDEX IF NOT EXISTS idx_reference_observations_node_family_list
-              ON reference_feature_observations(anchor_id, node_id, validity_state, feature_family, created_at, observation_id);
-
-            CREATE UNIQUE INDEX IF NOT EXISTS ux_obs_generation_key
-              ON reference_feature_observations(
-                run_id,
-                node_id,
-                feature_family,
-                feature_key,
-                IFNULL(evidence_start, -1),
-                IFNULL(evidence_end, -1));
-
-            CREATE INDEX IF NOT EXISTS idx_reference_library_members_anchor
-              ON reference_library_members(anchor_id, enabled);
-
-            CREATE INDEX IF NOT EXISTS idx_reference_obs_sensory_query
-              ON reference_obs_sensory(anchor_id, sense, intensity);
-
-            CREATE INDEX IF NOT EXISTS idx_reference_technique_specimens_source
-              ON reference_technique_specimens(source_anchor_id, source_node_id, validity_state);
-
-            CREATE INDEX IF NOT EXISTS idx_reference_technique_specimens_list
-              ON reference_technique_specimens(source_anchor_id, validity_state, created_at, specimen_id);
-
-            CREATE INDEX IF NOT EXISTS idx_reference_specimen_evidence_observation
-              ON reference_specimen_evidence(observation_id, specimen_id);
-
-            CREATE INDEX IF NOT EXISTS idx_reference_blueprint_beat_pieces_beat
-              ON reference_blueprint_beat_pieces(beat_id, sequence_index);
-
-            CREATE INDEX IF NOT EXISTS idx_reference_corpus_blueprints_chapter
-              ON reference_corpus_blueprints(novel_id, chapter_number, updated_at DESC, blueprint_id);
-
-            CREATE INDEX IF NOT EXISTS idx_reference_corpus_blueprints_query
-              ON reference_corpus_blueprints(query_context_hash, assembly_strategy);
-
-            CREATE INDEX IF NOT EXISTS idx_reference_corpus_blueprint_beats_blueprint
-              ON reference_corpus_blueprint_beats(blueprint_id, beat_index);
-
-            CREATE INDEX IF NOT EXISTS idx_reference_feedback_novel_target
-              ON reference_user_feedback(novel_id, target_type, target_id, created_at);
-
-            CREATE INDEX IF NOT EXISTS idx_reference_aggregate_provenance_anchor_run
-              ON reference_aggregate_provenance(anchor_id, run_id, aggregate_kind);
-""";
-await command.ExecuteNonQueryAsync(cancellationToken);
- await EnsureAnalysisJobTablesAsync(connection, cancellationToken);
- }
-
- private static async ValueTask EnsureAnalysisJobTablesAsync(
- SqliteConnection connection,
- CancellationToken cancellationToken)
- {
- await using var command = connection.CreateCommand();
- command.CommandText = """
- CREATE TABLE IF NOT EXISTS reference_analysis_input_snapshots (
- input_snapshot_id TEXT PRIMARY KEY,
- anchor_id INTEGER NOT NULL,
- analysis_stage TEXT NOT NULL,
- scope TEXT NOT NULL,
- node_set_hash TEXT NOT NULL,
- family_set_json TEXT NOT NULL,
- schema_version TEXT NOT NULL,
- analyzer_version TEXT NOT NULL,
- model_provider TEXT NOT NULL,
- model_id TEXT NOT NULL,
- total_nodes INTEGER NOT NULL CHECK(total_nodes > 0),
- total_work_items INTEGER NOT NULL CHECK(total_work_items > 0),
- created_at TEXT NOT NULL,
- FOREIGN KEY(anchor_id) REFERENCES reference_anchors(anchor_id) ON DELETE CASCADE
- );
-
- CREATE TABLE IF NOT EXISTS reference_analysis_work_items (
- input_snapshot_id TEXT NOT NULL,
- ordinal INTEGER NOT NULL,
- node_id TEXT NOT NULL,
- chapter_node_id TEXT,
- feature_family TEXT NOT NULL,
- node_text_hash TEXT NOT NULL,
- input_payload_json TEXT NOT NULL,
- input_payload_hash TEXT NOT NULL,
- work_state TEXT NOT NULL DEFAULT 'pending',
- execution_worker_id TEXT,
- execution_lease_token TEXT,
- execution_attempt_no INTEGER,
- invocation_no INTEGER NOT NULL DEFAULT 0,
- reserved_tokens INTEGER NOT NULL DEFAULT 0 CHECK(reserved_tokens >= 0),
- committed_run_id TEXT,
- committed_at TEXT,
- PRIMARY KEY(input_snapshot_id, ordinal),
- UNIQUE(input_snapshot_id, node_id, feature_family),
- FOREIGN KEY(input_snapshot_id) REFERENCES reference_analysis_input_snapshots(input_snapshot_id) ON DELETE CASCADE,
- FOREIGN KEY(node_id) REFERENCES reference_text_nodes(node_id) ON DELETE CASCADE,
- FOREIGN KEY(chapter_node_id) REFERENCES reference_text_nodes(node_id) ON DELETE SET NULL
- );
-
- CREATE TABLE IF NOT EXISTS reference_analysis_jobs (
- job_id TEXT PRIMARY KEY,
- run_id TEXT NOT NULL UNIQUE,
- input_snapshot_id TEXT NOT NULL,
- novel_id INTEGER NOT NULL,
- anchor_id INTEGER NOT NULL,
- job_kind TEXT NOT NULL,
- input_json TEXT NOT NULL,
- input_hash TEXT NOT NULL,
- dependency_job_id TEXT,
- priority_class TEXT NOT NULL,
- priority_value INTEGER NOT NULL DEFAULT 0,
- status TEXT NOT NULL,
- total_nodes INTEGER NOT NULL CHECK(total_nodes > 0),
- total_work_items INTEGER NOT NULL CHECK(total_work_items > 0),
- processed_work_items INTEGER NOT NULL DEFAULT 0,
- succeeded_work_items INTEGER NOT NULL DEFAULT 0,
- skipped_work_items INTEGER NOT NULL DEFAULT 0,
- failed_work_items INTEGER NOT NULL DEFAULT 0,
- retrying_work_items INTEGER NOT NULL DEFAULT 0,
- token_budget INTEGER CHECK(token_budget IS NULL OR token_budget >= 0),
- tokens_spent INTEGER NOT NULL DEFAULT 0,
- tokens_reserved INTEGER NOT NULL DEFAULT 0 CHECK(tokens_reserved >= 0),
- resume_cursor TEXT,
- current_stage TEXT NOT NULL,
- current_chapter INTEGER,
- attempt_count INTEGER NOT NULL DEFAULT 0,
- failure_attempt_count INTEGER NOT NULL DEFAULT 0 CHECK(failure_attempt_count >= 0),
- max_attempts INTEGER NOT NULL DEFAULT 3 CHECK(max_attempts > 0),
- next_attempt_at TEXT,
- lease_owner TEXT,
- lease_token TEXT,
- lease_acquired_at TEXT,
- lease_expires_at TEXT,
- heartbeat_at TEXT,
- pause_requested_at TEXT,
- cancel_requested_at TEXT,
- queued_at TEXT NOT NULL,
- started_at TEXT,
- completed_at TEXT,
- updated_at TEXT NOT NULL,
- last_error_code TEXT,
- last_error_message TEXT,
- row_version INTEGER NOT NULL DEFAULT 0 CHECK(row_version >= 0),
- FOREIGN KEY(input_snapshot_id) REFERENCES reference_analysis_input_snapshots(input_snapshot_id) ON DELETE RESTRICT,
- FOREIGN KEY(run_id) REFERENCES reference_analysis_runs(run_id) ON DELETE RESTRICT,
- FOREIGN KEY(anchor_id) REFERENCES reference_anchors(anchor_id) ON DELETE CASCADE,
- FOREIGN KEY(dependency_job_id) REFERENCES reference_analysis_jobs(job_id) ON DELETE RESTRICT
- );
-
- CREATE TABLE IF NOT EXISTS reference_analysis_job_attempts (
- job_id TEXT NOT NULL,
- attempt_no INTEGER NOT NULL,
- worker_id TEXT NOT NULL,
- lease_token TEXT NOT NULL,
- started_at TEXT NOT NULL,
- completed_at TEXT,
- outcome TEXT,
- error_code TEXT,
- error_message TEXT,
- tokens_spent INTEGER NOT NULL DEFAULT 0,
- PRIMARY KEY(job_id, attempt_no),
- FOREIGN KEY(job_id) REFERENCES reference_analysis_jobs(job_id) ON DELETE CASCADE
- );
-
- CREATE TABLE IF NOT EXISTS reference_analysis_work_item_completions (
- completion_key TEXT PRIMARY KEY,
- job_id TEXT NOT NULL,
- run_id TEXT NOT NULL,
- input_snapshot_id TEXT NOT NULL,
- ordinal INTEGER NOT NULL,
- invocation_no INTEGER NOT NULL,
- attempt_no INTEGER NOT NULL,
- reserved_tokens INTEGER NOT NULL CHECK(reserved_tokens > 0),
- output_kind TEXT NOT NULL,
- output_payload_json TEXT NOT NULL,
- output_payload_hash TEXT NOT NULL,
- tokens_spent INTEGER NOT NULL CHECK(tokens_spent >= 0),
- diagnostics_json TEXT NOT NULL,
- model_completed_at TEXT NOT NULL,
- finalized_at TEXT,
- UNIQUE(input_snapshot_id, ordinal, invocation_no),
- FOREIGN KEY(job_id) REFERENCES reference_analysis_jobs(job_id) ON DELETE CASCADE,
- FOREIGN KEY(input_snapshot_id, ordinal) REFERENCES reference_analysis_work_items(input_snapshot_id, ordinal) ON DELETE CASCADE
- );
-
- CREATE INDEX IF NOT EXISTS idx_reference_analysis_jobs_claim
- ON reference_analysis_jobs(status, next_attempt_at, priority_value DESC, queued_at, job_id);
-
- CREATE INDEX IF NOT EXISTS idx_reference_analysis_jobs_anchor
- ON reference_analysis_jobs(anchor_id, updated_at DESC, job_id);
-
- CREATE INDEX IF NOT EXISTS idx_reference_analysis_jobs_dependency
- ON reference_analysis_jobs(dependency_job_id, status);
-
- CREATE INDEX IF NOT EXISTS idx_reference_analysis_jobs_lease
- ON reference_analysis_jobs(status, lease_expires_at);
-
- CREATE INDEX IF NOT EXISTS idx_reference_analysis_work_items_state
- ON reference_analysis_work_items(input_snapshot_id, work_state, ordinal);
-
- CREATE INDEX IF NOT EXISTS idx_reference_analysis_completions_unfinalized
- ON reference_analysis_work_item_completions(input_snapshot_id, finalized_at, ordinal);
- """;
- await command.ExecuteNonQueryAsync(cancellationToken);
- await EnsureAnalysisJobColumnAsync(connection, "reference_analysis_work_items", "execution_worker_id", "TEXT", cancellationToken);
- await EnsureAnalysisJobColumnAsync(connection, "reference_analysis_work_items", "execution_lease_token", "TEXT", cancellationToken);
- await EnsureAnalysisJobColumnAsync(connection, "reference_analysis_work_items", "execution_attempt_no", "INTEGER", cancellationToken);
- await EnsureAnalysisJobColumnAsync(connection, "reference_analysis_work_items", "invocation_no", "INTEGER NOT NULL DEFAULT 0", cancellationToken);
- await EnsureAnalysisJobColumnAsync(connection, "reference_analysis_work_items", "reserved_tokens", "INTEGER NOT NULL DEFAULT 0", cancellationToken);
- await EnsureAnalysisJobColumnAsync(connection, "reference_analysis_work_items", "input_payload_json", "TEXT", cancellationToken);
- await EnsureAnalysisJobColumnAsync(connection, "reference_analysis_work_items", "input_payload_hash", "TEXT", cancellationToken);
- await EnsureAnalysisJobColumnAsync(connection, "reference_analysis_jobs", "tokens_reserved", "INTEGER NOT NULL DEFAULT 0", cancellationToken);
- await EnsureAnalysisJobColumnAsync(
- connection, "reference_analysis_jobs", "failure_attempt_count",
- "INTEGER NOT NULL DEFAULT 0", cancellationToken);
- }
-
- private static async ValueTask EnsureAnalysisJobColumnAsync(
- SqliteConnection connection,
- string tableName,
- string columnName,
- string definition,
- CancellationToken cancellationToken)
- {
- await using var inspect = connection.CreateCommand();
- inspect.CommandText = $"PRAGMA table_info({tableName});";
- await using var reader = await inspect.ExecuteReaderAsync(cancellationToken);
- while (await reader.ReadAsync(cancellationToken))
- {
- if (string.Equals(reader.GetString(1), columnName, StringComparison.Ordinal)) return;
- }
- await reader.DisposeAsync();
- await using var alter = connection.CreateCommand();
- alter.CommandText = $"ALTER TABLE {tableName} ADD COLUMN {columnName} {definition};";
- await alter.ExecuteNonQueryAsync(cancellationToken);
- }
+    private sealed record SchemaMigrationManifest(
+        string Status,
+        string SourceDatabase,
+        string BackupDatabase,
+        int TargetSchemaVersion,
+        DateTimeOffset RecordedAt,
+        string? Error);
 }

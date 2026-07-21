@@ -291,7 +291,7 @@ public sealed class SqliteReferenceWritingService : IReferenceWritingService
             SELECT material.material_id, material.generation_id, material.anchor_id,
                    material.chapter_index, material.text, material.text_hash,
                    license.license_state, license.reuse_policy
-            FROM reference_materialization_materials material
+            FROM reference_materials material
             JOIN reference_anchor_materialization_state state
               ON state.anchor_id = material.anchor_id
              AND state.active_generation_id = material.generation_id
@@ -361,7 +361,7 @@ public sealed class SqliteReferenceWritingService : IReferenceWritingService
         await using var command = connection.CreateCommand();
         command.CommandText = """
             SELECT material.generation_id, state.active_generation_id
-            FROM reference_materialization_materials material
+            FROM reference_materials material
             LEFT JOIN reference_anchor_materialization_state state
               ON state.anchor_id = material.anchor_id
             WHERE material.material_id = $material_id;

@@ -1,4 +1,3 @@
-using Microsoft.Data.Sqlite;
 using Novelist.Contracts.App;
 using Novelist.Core.App;
 using Novelist.Infrastructure.App;
@@ -16,17 +15,6 @@ public sealed class ReferenceMaterializationBlueprintPreviewServiceTests : IDisp
     [Fact]
     public async Task GenerateUsesActiveMaterialSearchAndDoesNotPersistPreviewState()
     {
-        var options = CreateOptions();
-        await new FileSystemAppInitializationService(options).InitializeAsync(
-            options.DefaultDataDirectory,
-            CancellationToken.None);
-        var databasePath = await new ReferenceCorpusDatabasePathResolver(options).ResolveAsync(CancellationToken.None);
-        Directory.CreateDirectory(Path.GetDirectoryName(databasePath)!);
-        await using (var connection = await OpenConnectionAsync(databasePath))
-        {
-            await ReferenceCorpusSchemaProvisioner.EnsureCoreTablesAsync(connection, CancellationToken.None);
-        }
-        var before = await CountPreviewRowsAsync(databasePath);
         var search = new FakeSearch(new Dictionary<long, IReadOnlyList<ReferenceMaterialSearchHit>>
         {
             [11] =
@@ -45,7 +33,6 @@ public sealed class ReferenceMaterializationBlueprintPreviewServiceTests : IDisp
                 2),
             CancellationToken.None);
 
-        Assert.Equal(before, await CountPreviewRowsAsync(databasePath));
         var request = Assert.Single(search.Requests);
         Assert.Equal([11], request.AnchorIds);
         Assert.Equal("Escalate the conflict.", request.Query);
@@ -103,13 +90,6 @@ public sealed class ReferenceMaterializationBlueprintPreviewServiceTests : IDisp
         }
     }
 
-    private AppInitializationOptions CreateOptions() => new()
-    {
-        ConfigDirectory = Path.Combine(_root, "config"),
-        DefaultDataDirectory = Path.Combine(_root, "data"),
-        EnableLegacyMigration = false
-    };
-
     private static ReferenceMaterialSearchHit Hit(
         string materialId,
         string generationId,
@@ -128,39 +108,6 @@ public sealed class ReferenceMaterializationBlueprintPreviewServiceTests : IDisp
             [materialType],
             "text-hash",
             distance);
-
-    private static async ValueTask<int> CountPreviewRowsAsync(string databasePath)
-    {
-        await using var connection = await OpenConnectionAsync(databasePath);
-        var tables = new[]
-        {
-            "reference_materialization_blueprint_preview_sessions",
-            "reference_materialization_blueprint_preview_sources",
-            "reference_materialization_blueprint_preview_candidates",
-            "reference_materialization_blueprint_preview_beats",
-            "reference_materialization_blueprint_preview_material_links"
-        };
-        var count = 0;
-        foreach (var table in tables)
-        {
-            await using var command = connection.CreateCommand();
-            command.CommandText = $"SELECT COUNT(*) FROM {table};";
-            count += Convert.ToInt32(await command.ExecuteScalarAsync(CancellationToken.None));
-        }
-
-        return count;
-    }
-
-    private static async ValueTask<SqliteConnection> OpenConnectionAsync(string databasePath)
-    {
-        var connection = new SqliteConnection(new SqliteConnectionStringBuilder
-        {
-            DataSource = databasePath,
-            Pooling = false
-        }.ToString());
-        await connection.OpenAsync(CancellationToken.None);
-        return connection;
-    }
 
     private sealed class FakeSearch(
         IReadOnlyDictionary<long, IReadOnlyList<ReferenceMaterialSearchHit>> hitsByAnchor)

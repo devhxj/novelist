@@ -384,10 +384,10 @@ internal sealed partial class SqliteReferenceMaterializationRunStore
         {
             materialEmbeddings.Transaction = transaction;
             materialEmbeddings.CommandText = """
-                DELETE FROM reference_materialization_material_embeddings
+                DELETE FROM reference_material_embeddings
                 WHERE material_id IN (
                   SELECT material.material_id
-                  FROM reference_materialization_materials material
+                  FROM reference_materials material
                   JOIN reference_materialization_chapter_progress progress
                     ON progress.run_id = material.run_id
                    AND progress.chapter_index = material.chapter_index
@@ -405,7 +405,7 @@ internal sealed partial class SqliteReferenceMaterializationRunStore
         {
             materials.Transaction = transaction;
             materials.CommandText = """
-                DELETE FROM reference_materialization_materials
+                DELETE FROM reference_materials
                 WHERE run_id = $run_id
                   AND chapter_index IN (
                     SELECT chapter_index

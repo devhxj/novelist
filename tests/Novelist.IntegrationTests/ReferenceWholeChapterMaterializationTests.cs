@@ -170,7 +170,7 @@ public sealed class ReferenceWholeChapterMaterializationTests : IDisposable
         Assert.Equal("pending_split", anchor.Status);
         await using var connection = await OpenConnectionAsync();
         await using var command = connection.CreateCommand();
-        command.CommandText = "SELECT COUNT(*) FROM reference_materialization_materials WHERE anchor_id = $anchor_id;";
+        command.CommandText = "SELECT COUNT(*) FROM reference_materials WHERE anchor_id = $anchor_id;";
         command.Parameters.AddWithValue("$anchor_id", anchor.AnchorId);
         Assert.Equal(0L, (long)(await command.ExecuteScalarAsync(CancellationToken.None))!);
     }
@@ -186,8 +186,8 @@ public sealed class ReferenceWholeChapterMaterializationTests : IDisposable
         var failed = await ReadStatusAsync(scenario);
         Assert.Equal(ReferenceMaterializationRunStates.Failed, failed.Status);
         Assert.Equal(ReferenceMaterializationErrorCodes.NoMaterials, failed.LastErrorCode);
-        Assert.Equal(0, await CountRowsAsync("reference_materialization_materials"));
-        Assert.Equal(0, await CountRowsAsync("reference_materialization_material_embeddings"));
+        Assert.Equal(0, await CountRowsAsync("reference_materials"));
+        Assert.Equal(0, await CountRowsAsync("reference_material_embeddings"));
         Assert.Null(await ReadActiveGenerationAsync(scenario.Anchor.AnchorId));
     }
 
@@ -202,8 +202,8 @@ public sealed class ReferenceWholeChapterMaterializationTests : IDisposable
         var failed = await ReadStatusAsync(scenario);
         Assert.Equal(ReferenceMaterializationRunStates.Failed, failed.Status);
         Assert.Equal(ReferenceMaterializationErrorCodes.EmbeddingInvalid, failed.LastErrorCode);
-        Assert.Equal(0, await CountRowsAsync("reference_materialization_materials"));
-        Assert.Equal(0, await CountRowsAsync("reference_materialization_material_embeddings"));
+        Assert.Equal(0, await CountRowsAsync("reference_materials"));
+        Assert.Equal(0, await CountRowsAsync("reference_material_embeddings"));
         Assert.Null(await ReadActiveGenerationAsync(scenario.Anchor.AnchorId));
     }
 
@@ -221,7 +221,7 @@ public sealed class ReferenceWholeChapterMaterializationTests : IDisposable
         Assert.Equal(ReferenceMaterializationRunStates.Failed, failed.Status);
         Assert.Equal(ReferenceMaterializationErrorCodes.SourceChanged, failed.LastErrorCode);
         Assert.Empty(extractor.Requests);
-        Assert.Equal(0, await CountRowsAsync("reference_materialization_materials"));
+        Assert.Equal(0, await CountRowsAsync("reference_materials"));
         Assert.Null(await ReadActiveGenerationAsync(scenario.Anchor.AnchorId));
     }
 
@@ -487,8 +487,8 @@ public sealed class ReferenceWholeChapterMaterializationTests : IDisposable
     {
         var allowed = new HashSet<string>(StringComparer.Ordinal)
         {
-            "reference_materialization_materials",
-            "reference_materialization_material_embeddings"
+            "reference_materials",
+            "reference_material_embeddings"
         };
         if (!allowed.Contains(tableName))
         {

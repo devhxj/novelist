@@ -120,10 +120,10 @@ internal sealed partial class SqliteReferenceMaterializationRunStore
         command.CommandText = """
             SELECT vector_count,
                    (SELECT COUNT(*)
-                    FROM reference_materialization_materials
+                    FROM reference_materials
                     WHERE generation_id = $generation_id),
                    (SELECT COUNT(*)
-                    FROM reference_materialization_material_embeddings
+                    FROM reference_material_embeddings
                     WHERE generation_id = $generation_id)
             FROM reference_materialization_vector_indexes
             WHERE generation_id = $generation_id
@@ -175,11 +175,10 @@ internal sealed partial class SqliteReferenceMaterializationRunStore
             state.Transaction = transaction;
             state.CommandText = """
                 INSERT INTO reference_anchor_materialization_state (
-                  anchor_id, active_generation_id, previous_generation_id, row_version, updated_at)
-                VALUES ($anchor_id, $generation_id, NULL, 0, $updated_at)
+                  anchor_id, active_generation_id, row_version, updated_at)
+                VALUES ($anchor_id, $generation_id, 0, $updated_at)
                 ON CONFLICT(anchor_id) DO UPDATE SET
                   active_generation_id = excluded.active_generation_id,
-                  previous_generation_id = NULL,
                   row_version = reference_anchor_materialization_state.row_version + 1,
                   updated_at = excluded.updated_at;
                 """;
@@ -223,7 +222,7 @@ internal sealed partial class SqliteReferenceMaterializationRunStore
         {
             embeddings.Transaction = transaction;
             embeddings.CommandText = """
-                DELETE FROM reference_materialization_material_embeddings
+                DELETE FROM reference_material_embeddings
                 WHERE generation_id = $generation_id;
                 """;
             embeddings.Parameters.AddWithValue("$generation_id", generationId);
@@ -234,7 +233,7 @@ internal sealed partial class SqliteReferenceMaterializationRunStore
         {
             materials.Transaction = transaction;
             materials.CommandText = """
-                DELETE FROM reference_materialization_materials
+                DELETE FROM reference_materials
                 WHERE generation_id = $generation_id;
                 """;
             materials.Parameters.AddWithValue("$generation_id", generationId);
