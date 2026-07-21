@@ -37,7 +37,7 @@ public sealed class SqliteReferenceAnchorService : IReferenceAnchorService
     }
 
     public async ValueTask<ReferenceAnchorPayload> RegisterMaterializationSourceAsync(
-        CreateReferenceAnchorPayload input,
+        RegisterReferenceMaterializationSourcePayload input,
         CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(input);

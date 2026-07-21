@@ -9,7 +9,7 @@ public sealed class ReferenceSourceContractTests
     [Fact]
     public void SourcePayloadsUseStableSnakeCaseNames()
     {
-        var input = new CreateReferenceAnchorPayload(
+        var input = new RegisterReferenceMaterializationSourcePayload(
             42,
             "Reference",
             "Author",

@@ -10,7 +10,7 @@ namespace Novelist.Core.App;
 public interface IReferenceAnchorService
 {
     ValueTask<ReferenceAnchorPayload> RegisterMaterializationSourceAsync(
-        CreateReferenceAnchorPayload input,
+        RegisterReferenceMaterializationSourcePayload input,
         CancellationToken cancellationToken);
 
     ValueTask<IReadOnlyList<ReferenceAnchorPayload>> GetAnchorsAsync(

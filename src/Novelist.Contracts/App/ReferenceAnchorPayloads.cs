@@ -36,7 +36,7 @@ public static class ReferenceAnchorOwnerScopes
     public const string WorkspaceCorpus = "workspace_corpus";
 }
 
-public sealed record CreateReferenceAnchorPayload(
+public sealed record RegisterReferenceMaterializationSourcePayload(
     [property: JsonPropertyName("novel_id")] long NovelId,
     [property: JsonPropertyName("title")] string Title,
     [property: JsonPropertyName("author")] string? Author,

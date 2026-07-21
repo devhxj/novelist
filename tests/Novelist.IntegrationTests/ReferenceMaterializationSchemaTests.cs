@@ -128,7 +128,7 @@ public sealed class ReferenceMaterializationSchemaTests : IDisposable
         await File.WriteAllTextAsync(sourcePath, "# 第一章\n\n雨声压住窗沿。\n\n# 第二章\n\n门外响起第三次敲门。\n");
         var anchors = new SqliteReferenceAnchorService(options, novels);
         return await anchors.RegisterMaterializationSourceAsync(
-            new CreateReferenceAnchorPayload(novel.Id, "schema 来源", null, sourcePath, "markdown", "user_provided"),
+            new RegisterReferenceMaterializationSourcePayload(novel.Id, "schema 来源", null, sourcePath, "markdown", "user_provided"),
             CancellationToken.None);
     }
 

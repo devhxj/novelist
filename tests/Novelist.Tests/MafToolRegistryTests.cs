@@ -723,7 +723,7 @@ public sealed class MafToolRegistryTests
         public long LastNovelId { get; private set; }
 
         public ValueTask<ReferenceAnchorPayload> RegisterMaterializationSourceAsync(
-            CreateReferenceAnchorPayload input,
+            RegisterReferenceMaterializationSourcePayload input,
             CancellationToken cancellationToken) =>
             ValueTask.FromResult(Anchor(input.NovelId, input.Title));
 

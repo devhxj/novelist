@@ -32,7 +32,7 @@ public sealed class ReferenceWholeChapterMaterializationTests : IDisposable
             $"\u7b2c1\u7ae0 \u7b49\u5f85\n\n{MultiParagraphDialogue}\n\n\u7b2c2\u7ae0 \u56de\u58f0\n\n\u96e8\u505c\u4e86\uff0c\u95e8\u5916\u7684\u4eba\u5374\u6ca1\u6709\u8d70\u3002\n");
         var anchors = new SqliteReferenceAnchorService(options, novels);
         var anchor = await anchors.RegisterMaterializationSourceAsync(
-            new CreateReferenceAnchorPayload(
+            new RegisterReferenceMaterializationSourcePayload(
                 novel.Id,
                 "\u6574\u7ae0\u6765\u6e90",
                 null,
@@ -158,7 +158,7 @@ public sealed class ReferenceWholeChapterMaterializationTests : IDisposable
 
         var anchors = new SqliteReferenceAnchorService(options, novels);
         var anchor = await anchors.RegisterMaterializationSourceAsync(
-            new CreateReferenceAnchorPayload(
+            new RegisterReferenceMaterializationSourcePayload(
                 novel.Id,
                 "待处理来源",
                 null,
@@ -431,7 +431,7 @@ public sealed class ReferenceWholeChapterMaterializationTests : IDisposable
         await File.WriteAllTextAsync(sourcePath, source);
         var anchors = new SqliteReferenceAnchorService(options, novels);
         var anchor = await anchors.RegisterMaterializationSourceAsync(
-            new CreateReferenceAnchorPayload(
+            new RegisterReferenceMaterializationSourcePayload(
                 novel.Id,
                 "Failure source",
                 null,

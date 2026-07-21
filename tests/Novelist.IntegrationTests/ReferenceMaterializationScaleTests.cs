@@ -126,7 +126,7 @@ public sealed class ReferenceMaterializationScaleTests : IDisposable
             var sourcePath = Path.Combine(sourcesDirectory, $"materialization-scale-{index + 1}.md");
             await File.WriteAllTextAsync(sourcePath, source);
             var anchor = await anchors.RegisterMaterializationSourceAsync(
-                new CreateReferenceAnchorPayload(
+                new RegisterReferenceMaterializationSourcePayload(
                     novel.Id,
                     $"规模来源 {index + 1}",
                     null,

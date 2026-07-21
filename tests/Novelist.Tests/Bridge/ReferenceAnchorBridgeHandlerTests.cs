@@ -17,7 +17,7 @@ public sealed class ReferenceAnchorBridgeHandlerTests
         var registered = await DispatchOkAsync(
             dispatcher,
             "RegisterReferenceMaterializationSource",
-            new CreateReferenceAnchorPayload(
+            new RegisterReferenceMaterializationSourcePayload(
                 42,
                 "Reference",
                 "Author",
@@ -73,7 +73,7 @@ public sealed class ReferenceAnchorBridgeHandlerTests
         public List<string> Calls { get; } = [];
 
         public ValueTask<ReferenceAnchorPayload> RegisterMaterializationSourceAsync(
-            CreateReferenceAnchorPayload input,
+            RegisterReferenceMaterializationSourcePayload input,
             CancellationToken cancellationToken)
         {
             Calls.Add("register");

@@ -17,7 +17,7 @@ public static class ReferenceAnchorBridgeHandlers
         dispatcher.Register("RegisterReferenceMaterializationSource", async (context, cancellationToken) =>
             ReferencePayloadSanitizer.SanitizeAnchor(
                 await service.RegisterMaterializationSourceAsync(
-                    ReadObjectArg<CreateReferenceAnchorPayload>(context.Payload, 0, "input"),
+                    ReadObjectArg<RegisterReferenceMaterializationSourcePayload>(context.Payload, 0, "input"),
                     cancellationToken)));
 
         dispatcher.Register("GetReferenceAnchors", async (context, cancellationToken) =>
