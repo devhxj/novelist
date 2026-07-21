@@ -139,24 +139,41 @@ public sealed class ReferenceMaterializationWorker : IAsyncDisposable
         try
         {
             using var batchCancellation = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, leaseLost.Token);
-            Task[] tasks = [];
+            Task<PreparedChapter>[] extractionTasks = [];
             try
             {
-                tasks = claim.ChapterIndexes
-                    .Select(chapterIndex => ProcessChapterAsync(
+                extractionTasks = claim.ChapterIndexes
+                    .Select(chapterIndex => PrepareChapterAsync(
                         store,
                         claim.RunId,
                         chapterIndex,
                         batchCancellation.Token))
                     .ToArray();
-                await Task.WhenAll(tasks);
+                var preparedChapters = await Task.WhenAll(extractionTasks);
+
+                ThrowIfLeaseLost(leaseLost);
+                await store.MarkBatchEmbeddingAsync(
+                    claim.RunId,
+                    preparedChapters.Select(chapter => chapter.WorkItem).ToArray(),
+                    batchCancellation.Token);
+                ThrowIfLeaseLost(leaseLost);
+                var embeddedChapters = await Task.WhenAll(
+                    preparedChapters.Select(chapter => EmbedChapterAsync(chapter, batchCancellation.Token)));
+                foreach (var chapter in embeddedChapters)
+                {
+                    await store.PersistChapterAsync(
+                        chapter.WorkItem,
+                        chapter.Materials,
+                        chapter.Embeddings,
+                        batchCancellation.Token);
+                }
             }
             catch
             {
                 batchCancellation.Cancel();
                 try
                 {
-                    await Task.WhenAll(tasks);
+                    await Task.WhenAll(extractionTasks);
                 }
                 catch
                 {
@@ -267,7 +284,7 @@ public sealed class ReferenceMaterializationWorker : IAsyncDisposable
         }
     }
 
-    private async Task ProcessChapterAsync(
+    private async Task<PreparedChapter> PrepareChapterAsync(
         SqliteReferenceMaterializationRunStore store,
         string runId,
         int chapterIndex,
@@ -285,15 +302,7 @@ public sealed class ReferenceMaterializationWorker : IAsyncDisposable
                     workItem.ChapterText),
                 cancellationToken);
             var materials = SqliteReferenceMaterializationRunStore.PrepareMaterials(workItem, extraction);
-            await store.MarkChapterEmbeddingAsync(workItem, cancellationToken);
-            var embeddings = await _embedder.EmbedAsync(
-                new ReferenceMaterializationEmbeddingRequest(
-                    workItem.EmbeddingModel,
-                    materials.Select(material => new ReferenceMaterializationEmbeddingItem(
-                        material.MaterialId,
-                        material.Text)).ToArray()),
-                cancellationToken);
-            await store.PersistChapterAsync(workItem, materials, embeddings, cancellationToken);
+            return new PreparedChapter(workItem, materials);
         }
         catch (ReferenceMaterializationException exception)
         {
@@ -301,6 +310,20 @@ public sealed class ReferenceMaterializationWorker : IAsyncDisposable
                 exception.ErrorCode,
                 $"Chapter {chapterIndex}: {exception.Message}");
         }
+    }
+
+    private async Task<EmbeddedChapter> EmbedChapterAsync(
+        PreparedChapter chapter,
+        CancellationToken cancellationToken)
+    {
+        var embeddings = await _embedder.EmbedAsync(
+            new ReferenceMaterializationEmbeddingRequest(
+                chapter.WorkItem.EmbeddingModel,
+                chapter.Materials.Select(material => new ReferenceMaterializationEmbeddingItem(
+                    material.MaterialId,
+                    material.Text)).ToArray()),
+            cancellationToken);
+        return new EmbeddedChapter(chapter.WorkItem, chapter.Materials, embeddings);
     }
 
     private async Task MaintainLeaseAsync(
@@ -351,4 +374,13 @@ public sealed class ReferenceMaterializationWorker : IAsyncDisposable
         var normalized = value?.Replace('\r', ' ').Replace('\n', ' ').Trim() ?? string.Empty;
         return normalized.Length <= 1_200 ? normalized : normalized[..1_200];
     }
+
+    private sealed record PreparedChapter(
+        ReferenceChapterMaterializationWorkItem WorkItem,
+        IReadOnlyList<PreparedReferenceMaterial> Materials);
+
+    private sealed record EmbeddedChapter(
+        ReferenceChapterMaterializationWorkItem WorkItem,
+        IReadOnlyList<PreparedReferenceMaterial> Materials,
+        ReferenceMaterializationEmbeddingResult Embeddings);
 }

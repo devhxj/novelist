@@ -29,6 +29,7 @@ public sealed class ReferenceMaterializationSchemaTests : IDisposable
         Assert.DoesNotContain("reference_material_candidates", tables);
         Assert.DoesNotContain("reference_materialization_blueprint_preview_sessions", tables);
         Assert.DoesNotContain("reference_session_library_scope_state", tables);
+        Assert.Equal("wal", await ReadJournalModeAsync(options));
 
         var runIndexes = await ReadIndexesAsync(options, "reference_materialization_runs");
         Assert.Contains("ux_reference_materialization_runs_generation", runIndexes);
@@ -81,6 +82,7 @@ public sealed class ReferenceMaterializationSchemaTests : IDisposable
         Assert.DoesNotContain("reference_session_library_scope_state", tables);
         Assert.Equal(0, await ReadCountAsync(options, "reference_materials"));
         Assert.Equal(1, await ReadCountAsync(options, "reference_anchors"));
+        Assert.Equal("wal", await ReadJournalModeAsync(options));
 
         var referenceDirectory = Path.Combine(options.DefaultDataDirectory, "reference-anchor");
         var backupPath = Assert.Single(Directory.GetFiles(referenceDirectory, "index.sqlite.reference-schema-v2-*.bak"));
@@ -233,6 +235,9 @@ public sealed class ReferenceMaterializationSchemaTests : IDisposable
             """;
         command.Parameters.AddWithValue("$anchor_id", anchorId);
         await command.ExecuteNonQueryAsync(CancellationToken.None);
+        command.Parameters.Clear();
+        command.CommandText = "PRAGMA journal_mode = DELETE;";
+        await command.ExecuteScalarAsync(CancellationToken.None);
     }
 
     private static async ValueTask<int> ReadCountAsync(AppInitializationOptions options, string tableName)
@@ -254,6 +259,15 @@ public sealed class ReferenceMaterializationSchemaTests : IDisposable
         command.CommandText = "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = $name);";
         command.Parameters.AddWithValue("$name", tableName);
         return Convert.ToInt64(await command.ExecuteScalarAsync(CancellationToken.None)) != 0;
+    }
+
+    private static async ValueTask<string> ReadJournalModeAsync(AppInitializationOptions options)
+    {
+        await using var connection = await OpenConnectionAsync(options);
+        await using var command = connection.CreateCommand();
+        command.CommandText = "PRAGMA journal_mode;";
+        return (string?)await command.ExecuteScalarAsync(CancellationToken.None)
+            ?? throw new InvalidOperationException("SQLite did not report a journal mode.");
     }
 
     private static async ValueTask<SqliteConnection> OpenConnectionAsync(AppInitializationOptions options)

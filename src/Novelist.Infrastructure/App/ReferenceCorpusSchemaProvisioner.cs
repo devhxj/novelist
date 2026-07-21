@@ -102,15 +102,26 @@ internal static class ReferenceCorpusSchemaProvisioner
         CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(connection);
+        if (await IsCurrentSchemaAsync(connection, cancellationToken))
+        {
+            return;
+        }
+
         await ProvisioningGate.WaitAsync(cancellationToken);
         try
         {
+            if (await IsCurrentSchemaAsync(connection, cancellationToken))
+            {
+                return;
+            }
+
             if (await HasRetiredTablesAsync(connection, cancellationToken))
             {
                 await UpgradeLegacySchemaAsync(connection, cancellationToken);
                 return;
             }
 
+            await EnableWriteAheadLoggingAsync(connection, cancellationToken);
             await using var transaction = (SqliteTransaction)await connection.BeginTransactionAsync(cancellationToken);
             await EnsureCurrentSchemaAsync(connection, transaction, cancellationToken);
             await transaction.CommitAsync(cancellationToken);
@@ -142,6 +153,7 @@ internal static class ReferenceCorpusSchemaProvisioner
             await DropDerivedTablesAsync(connection, transaction, cancellationToken);
             await EnsureCurrentSchemaAsync(connection, transaction, cancellationToken);
             await transaction.CommitAsync(cancellationToken);
+            await EnableWriteAheadLoggingAsync(connection, cancellationToken);
         }
         catch (Exception exception)
         {
@@ -485,6 +497,57 @@ internal static class ReferenceCorpusSchemaProvisioner
         }
 
         return Convert.ToInt64(await command.ExecuteScalarAsync(cancellationToken)) != 0;
+    }
+
+    private static async ValueTask<bool> IsCurrentSchemaAsync(
+        SqliteConnection connection,
+        CancellationToken cancellationToken)
+    {
+        await using var command = connection.CreateCommand();
+        command.CommandText = """
+            SELECT schema_version
+            FROM reference_schema_metadata
+            WHERE schema_key = $schema_key;
+            """;
+        command.Parameters.AddWithValue("$schema_key", SchemaKey);
+
+        try
+        {
+            var version = await command.ExecuteScalarAsync(cancellationToken);
+            return version is long schemaVersion &&
+                   schemaVersion == CurrentSchemaVersion &&
+                   !await HasRetiredTablesAsync(connection, cancellationToken) &&
+                   await HasWriteAheadLoggingAsync(connection, cancellationToken);
+        }
+        catch (SqliteException exception) when (exception.SqliteErrorCode == 1)
+        {
+            return false;
+        }
+    }
+
+    private static async ValueTask<bool> HasWriteAheadLoggingAsync(
+        SqliteConnection connection,
+        CancellationToken cancellationToken)
+    {
+        await using var command = connection.CreateCommand();
+        command.CommandText = "PRAGMA journal_mode;";
+        return string.Equals(
+            (string?)await command.ExecuteScalarAsync(cancellationToken),
+            "wal",
+            StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static async ValueTask EnableWriteAheadLoggingAsync(
+        SqliteConnection connection,
+        CancellationToken cancellationToken)
+    {
+        await using var command = connection.CreateCommand();
+        command.CommandText = "PRAGMA journal_mode = WAL;";
+        var mode = (string?)await command.ExecuteScalarAsync(cancellationToken);
+        if (!string.Equals(mode, "wal", StringComparison.OrdinalIgnoreCase))
+        {
+            throw new InvalidOperationException("Reference materialization requires SQLite WAL mode.");
+        }
     }
 
     private static async ValueTask DropDerivedTablesAsync(

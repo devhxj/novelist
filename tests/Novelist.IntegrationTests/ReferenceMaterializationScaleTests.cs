@@ -33,12 +33,14 @@ public sealed class ReferenceMaterializationScaleTests : IDisposable
             new ReferenceMaterializationVectorIndexer(resolver, vec),
             workerId: "materialization-50k-worker");
         var runs = new List<ReferenceMaterializationStatusPayload>();
+        var batchDurations = new List<TimeSpan>();
 
         // Exclude one-time JIT and index initialization from the steady-state fake-provider throughput gate.
         var warmup = await store.CreateAsync(
             CreateSeed(sources[0].Anchor.AnchorId, sources[0].Profile.SplitProfileId, batchSize: 5),
             CancellationToken.None);
-        await DrainRunAsync(worker, store, warmup.RunId);
+        await DrainRunAsync(worker, store, warmup.RunId, batchDurations);
+        batchDurations.Clear();
         var stopwatch = Stopwatch.StartNew();
 
         var schedule = new[]
@@ -53,7 +55,7 @@ public sealed class ReferenceMaterializationScaleTests : IDisposable
             var run = await store.CreateAsync(
                 CreateSeed(work.Source.Anchor.AnchorId, work.Source.Profile.SplitProfileId, work.BatchSize),
                 CancellationToken.None);
-            runs.Add(await DrainRunAsync(worker, store, run.RunId));
+            runs.Add(await DrainRunAsync(worker, store, run.RunId, batchDurations));
         }
 
         stopwatch.Stop();
@@ -72,7 +74,10 @@ public sealed class ReferenceMaterializationScaleTests : IDisposable
         Assert.True(processedMaterials > 0);
         if (ShouldEnforceThroughput())
         {
-            Assert.True(throughput >= 20, $"Fake materialization throughput was {throughput:F2} materials/s.");
+            Assert.True(
+                throughput >= 20,
+                $"Fake materialization throughput was {throughput:F2} materials/s. " +
+                $"Batch durations: {string.Join(", ", batchDurations.Select(duration => $"{duration.TotalMilliseconds:F0}ms"))}.");
         }
         Assert.Equal(0, await CountActiveLeasesAsync(options));
         Assert.Equal(0, await CountDuplicateEmbeddingsAsync(options));
@@ -174,7 +179,8 @@ public sealed class ReferenceMaterializationScaleTests : IDisposable
     private static async ValueTask<ReferenceMaterializationStatusPayload> DrainRunAsync(
         ReferenceMaterializationWorker worker,
         SqliteReferenceMaterializationRunStore store,
-        string runId)
+        string runId,
+        ICollection<TimeSpan>? batchDurations = null)
     {
         for (var attempt = 0; attempt < 1_000; attempt++)
         {
@@ -185,7 +191,10 @@ public sealed class ReferenceMaterializationScaleTests : IDisposable
                 return status;
             }
 
+            var stopwatch = Stopwatch.StartNew();
             Assert.True(await worker.ProcessRunOnceAsync(runId, CancellationToken.None));
+            stopwatch.Stop();
+            batchDurations?.Add(stopwatch.Elapsed);
         }
 
         throw new TimeoutException("Materialization scale run did not settle.");

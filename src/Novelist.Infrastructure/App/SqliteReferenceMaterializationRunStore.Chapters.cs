@@ -80,31 +80,47 @@ internal sealed partial class SqliteReferenceMaterializationRunStore
             snapshot.ChapterTextHash);
     }
 
-    public async ValueTask MarkChapterEmbeddingAsync(
-        ReferenceChapterMaterializationWorkItem workItem,
+    public async ValueTask MarkBatchEmbeddingAsync(
+        string runId,
+        IReadOnlyList<ReferenceChapterMaterializationWorkItem> workItems,
         CancellationToken cancellationToken)
     {
-        ArgumentNullException.ThrowIfNull(workItem);
+        if (string.IsNullOrWhiteSpace(runId) || workItems is null || workItems.Count == 0 ||
+            workItems.Any(workItem => !string.Equals(workItem.RunId, runId, StringComparison.Ordinal)) ||
+            workItems.Select(workItem => workItem.ChapterIndex).Distinct().Count() != workItems.Count)
+        {
+            throw new ArgumentException("Materialization batch work items are invalid.", nameof(workItems));
+        }
+
         var databasePath = await EnsureSchemaAsync(cancellationToken);
         await using var connection = await OpenConnectionAsync(databasePath, cancellationToken);
+        await using var transaction = (SqliteTransaction)await connection.BeginTransactionAsync(cancellationToken);
         await using var command = connection.CreateCommand();
-        command.CommandText = """
+        command.Transaction = transaction;
+        var chapterParameters = workItems.Select((_, index) => "$chapter_" + index).ToArray();
+        command.CommandText = $"""
             UPDATE reference_materialization_chapter_progress
             SET status = $embedding,
                 current_stage = $embedding,
                 row_version = row_version + 1
             WHERE run_id = $run_id
-              AND chapter_index = $chapter_index
-              AND status = $extracting;
+              AND status = $extracting
+              AND chapter_index IN ({string.Join(", ", chapterParameters)});
             """;
         command.Parameters.AddWithValue("$embedding", ReferenceMaterializationChapterStates.Embedding);
-        command.Parameters.AddWithValue("$run_id", workItem.RunId);
-        command.Parameters.AddWithValue("$chapter_index", workItem.ChapterIndex);
+        command.Parameters.AddWithValue("$run_id", runId);
         command.Parameters.AddWithValue("$extracting", ReferenceMaterializationChapterStates.Extracting);
-        if (await command.ExecuteNonQueryAsync(cancellationToken) != 1)
+        for (var index = 0; index < workItems.Count; index++)
         {
-            throw new InvalidOperationException("Materialization chapter changed before embedding started.");
+            command.Parameters.AddWithValue(chapterParameters[index], workItems[index].ChapterIndex);
         }
+
+        if (await command.ExecuteNonQueryAsync(cancellationToken) != workItems.Count)
+        {
+            throw new InvalidOperationException("Materialization batch changed before embedding started.");
+        }
+
+        await transaction.CommitAsync(cancellationToken);
     }
 
     public async ValueTask PersistChapterAsync(
