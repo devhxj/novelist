@@ -149,11 +149,11 @@ internal static class ReferenceCorpusSchemaProvisioner
 
         try
         {
+            await EnableWriteAheadLoggingAsync(connection, cancellationToken);
             await using var transaction = (SqliteTransaction)await connection.BeginTransactionAsync(cancellationToken);
             await DropDerivedTablesAsync(connection, transaction, cancellationToken);
             await EnsureCurrentSchemaAsync(connection, transaction, cancellationToken);
             await transaction.CommitAsync(cancellationToken);
-            await EnableWriteAheadLoggingAsync(connection, cancellationToken);
         }
         catch (Exception exception)
         {
