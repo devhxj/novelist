@@ -14,7 +14,7 @@ import ArcListView from '@/components/storyarc/ArcListView'
 import TimelineView from '@/components/timeline/TimelineView'
 import ReaderView from '@/components/reader/ReaderView'
 import PreferenceView from '@/components/preference/PreferenceView'
-import ReferenceCorpusWorkspace from '@/components/reference-anchor/ReferenceCorpusWorkspace'
+import ReferenceMaterialWorkspace from '@/components/reference-anchor/ReferenceMaterialWorkspace'
 import BlueprintPreviewPanel from '@/components/reference-anchor/BlueprintPreviewPanel'
 import StyleSampleLibraryView from '@/components/style/StyleSampleLibraryView'
 import NarrativePatternView from '@/components/pattern/NarrativePatternView'
@@ -525,7 +525,7 @@ export default function WorkspaceView({ initialNovelId, initialShowHelp, startup
         ) : activePanel === 'preferences' ? (
           <PreferenceView novelId={activeNovelId} focusId={preferenceFocusId} />
         ) : activePanel === 'reference' ? (
-          <ReferenceCorpusWorkspace
+          <ReferenceMaterialWorkspace
             key={activeNovelId}
             novelId={activeNovelId}
             refreshKey={referenceRefreshKey}

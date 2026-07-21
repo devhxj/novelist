@@ -72,31 +72,6 @@ export async function verifyStyleSampleWorkflow(page) {
   await waitForSaveContent(page, 'skills/全局雨夜技能.md', 'source_sample_ids: 1')
   await expectVisible(page.getByText('技能已保存').first(), 'style skill saved state')
 
-  await page.getByLabel('画像标题').fill('样本风格画像')
-  await page.getByRole('button', { name: '构建画像' }).click()
-  await expectVisible(page.getByText('风格画像已构建').first(), 'style sample profile built state')
-
-  const profileBuildCall = await page.evaluate(() =>
-    window.__appMockState.calls.find((call) => call.method === 'BuildReferenceStyleProfile'))
-  assert(profileBuildCall, 'style sample workflow must build a reference style profile from selected samples')
-  assert.deepEqual(profileBuildCall.args?.[0]?.style_sample_ids, [1], 'style sample profile build must pass selected style_sample_ids')
-  assert.deepEqual(profileBuildCall.args?.[0]?.anchor_ids, [], 'style sample profile build must not fabricate reference anchors')
-  const sampleProfile = await page.evaluate(() =>
-    window.__appMockState.referenceStyleProfiles?.find((profile) =>
-      Array.isArray(profile.source_style_sample_ids) &&
-      profile.source_style_sample_ids.includes(1)))
-  assert(sampleProfile, 'style sample workflow must persist a mock reference style profile payload')
-  assert.deepEqual(sampleProfile.source_anchor_ids, [], 'sample-backed profile payload must not contain fabricated anchors')
-  assert.deepEqual(sampleProfile.source_style_sample_ids, [1], 'sample-backed profile payload must preserve source style sample ids')
-  assert(sampleProfile.evidence_spans?.length > 0, 'sample-backed profile payload must include source evidence')
-  assert(
-    sampleProfile.evidence_spans.every((evidence) =>
-      evidence.source_type === 'style_sample' &&
-      evidence.style_sample_id === 1 &&
-      !Object.prototype.hasOwnProperty.call(evidence, 'text') &&
-      !Object.prototype.hasOwnProperty.call(evidence, 'content')),
-    'sample-backed profile evidence must use sample source metadata without copied text')
-
   await page.evaluate(() => { window.__appMockState.nextStyleSkillExtractionDelayMs = 900 })
   await page.getByLabel('技能名称').fill('取消风格技能')
   await page.getByRole('button', { name: '开始抽取' }).click()

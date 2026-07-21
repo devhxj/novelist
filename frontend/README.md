@@ -13,7 +13,7 @@ npm run build
 npm run lint
 npm run verify
 npm run test:chapter-reference
-npm run test:corpus-library
+npm run test:reference-workspace
 npm run test:app:usability
 ```
 

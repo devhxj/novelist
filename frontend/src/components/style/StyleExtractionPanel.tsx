@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { BookOpenCheck, CheckCircle2, Loader2, Sparkles, XCircle } from 'lucide-react'
+import { CheckCircle2, Loader2, Sparkles, XCircle } from 'lucide-react'
 import ErrorCallout from '@/components/shared/ErrorCallout'
 import { useApp } from '@/hooks/useApp'
 import { buildCopyableDiagnostic, diagnosticMessage } from '@/lib/diagnostics'
@@ -18,9 +18,6 @@ export default function StyleExtractionPanel({ novelId, selectedIds }: Props) {
   const [selectedKey, setSelectedKey] = useState('')
   const [reasoningEffort, setReasoningEffort] = useState('')
   const [skillName, setSkillName] = useState('样本文风技能')
-  const [profileTitle, setProfileTitle] = useState('样本风格画像')
-  const [profileDescription, setProfileDescription] = useState('')
-  const [profileBuilding, setProfileBuilding] = useState(false)
   const [phase, setPhase] = useState<Phase>('idle')
   const [run, setRun] = useState<styleSample.StyleSkillExtractionRun | null>(null)
   const [activeTaskId, setActiveTaskId] = useState<string | null>(null)
@@ -40,7 +37,6 @@ export default function StyleExtractionPanel({ novelId, selectedIds }: Props) {
   )
   const canStart = selectedIds.length > 0 && selectedKey.length > 0 && skillName.trim().length > 0 && phase !== 'extracting'
   const canSave = run?.status === 'completed' && run.skill_preview.length > 0 && phase !== 'saved'
-  const canBuildProfile = selectedIds.length > 0 && profileTitle.trim().length > 0 && !profileBuilding && phase !== 'extracting'
 
   const setLocalError = useCallback((message: string) => {
     setErrorTitle('操作失败')
@@ -230,48 +226,6 @@ export default function StyleExtractionPanel({ novelId, selectedIds }: Props) {
     }
   }, [app, novelId, run, setErrorState])
 
-  const buildStyleProfile = useCallback(async () => {
-    if (!canBuildProfile) {
-      setLocalError(selectedIds.length === 0 ? '请先选择至少一个风格样本' : '请填写画像标题')
-      return
-    }
-
-    const buildId = `style-sample-profile-${Date.now()}-${Math.random().toString(16).slice(2)}`
-    setProfileBuilding(true)
-    setErrorTitle('构建风格画像失败')
-    setError('')
-    setErrorDiagnostic(null)
-    setNotice('')
-    try {
-      await app.BuildReferenceStyleProfile({
-        build_id: buildId,
-        novel_id: novelId,
-        title: profileTitle.trim(),
-        description: profileDescription.trim(),
-        anchor_ids: [],
-        allowed_license_statuses: [],
-        allowed_source_trust_levels: [],
-        style_sample_ids: selectedIds,
-      })
-      setNotice('风格画像已构建')
-    } catch (err) {
-      setErrorState(
-        err,
-        '构建风格画像失败',
-        'BuildReferenceStyleProfile',
-        {
-          phase: 'build_style_profile',
-          build_id: buildId,
-          novel_id: novelId,
-          style_sample_ids: selectedIds,
-        },
-        buildId,
-      )
-    } finally {
-      setProfileBuilding(false)
-    }
-  }, [app, canBuildProfile, novelId, profileDescription, profileTitle, selectedIds, setErrorState, setLocalError])
-
   return (
     <section className="rounded-lg border border-border bg-card p-4">
       <div className="flex items-center gap-2">
@@ -392,44 +346,6 @@ export default function StyleExtractionPanel({ novelId, selectedIds }: Props) {
         </div>
       )}
 
-      <div className="mt-4 border-t border-border pt-4">
-        <div className="flex items-center gap-2">
-          <BookOpenCheck className="h-4 w-4 text-primary" />
-          <h3 className="text-sm font-semibold text-foreground">构建风格画像</h3>
-        </div>
-        <div className="mt-3 grid grid-cols-1 gap-3">
-          <label className="block">
-            <span className="mb-1 block text-xs font-medium text-muted-foreground">画像标题</span>
-            <input
-              value={profileTitle}
-              onChange={event => setProfileTitle(event.target.value)}
-              disabled={profileBuilding}
-              className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm text-foreground outline-none focus:border-ring focus:ring-2 focus:ring-ring/20 disabled:opacity-60"
-            />
-          </label>
-          <label className="block">
-            <span className="mb-1 block text-xs font-medium text-muted-foreground">画像说明</span>
-            <textarea
-              value={profileDescription}
-              onChange={event => setProfileDescription(event.target.value)}
-              disabled={profileBuilding}
-              className="min-h-16 w-full resize-y rounded-md border border-input bg-background px-3 py-2 text-sm leading-relaxed text-foreground outline-none focus:border-ring focus:ring-2 focus:ring-ring/20 disabled:opacity-60"
-            />
-          </label>
-        </div>
-        <div className="mt-3 flex flex-wrap items-center justify-between gap-2">
-          <span className="text-xs text-muted-foreground">已选 {selectedIds.length} 个样本</span>
-          <button
-            type="button"
-            onClick={() => { void buildStyleProfile() }}
-            disabled={!canBuildProfile}
-            className="inline-flex h-9 items-center gap-2 rounded-md bg-secondary px-3 text-sm font-medium text-foreground transition-colors hover:bg-secondary/80 disabled:cursor-not-allowed disabled:opacity-60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-          >
-            {profileBuilding ? <Loader2 className="h-4 w-4 animate-spin" /> : <BookOpenCheck className="h-4 w-4" />}
-            构建画像
-          </button>
-        </div>
-      </div>
     </section>
   )
 }

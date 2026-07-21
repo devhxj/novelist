@@ -10,7 +10,6 @@ import {
   assertActiveTabTitle,
   assertBridgeCallCount,
   assertChapterTitle,
-  assertCreatedReferenceAnchor,
   assertEditorContains,
   assertEditorNotContains,
   assertExportedNovels,
@@ -28,7 +27,6 @@ import {
   dispatchNovelImportDrop,
   expectHidden,
   expectInputValue,
-  expectSelectedValue,
   expectVisible,
   insertEditorText,
   replaceEditorText,
@@ -621,18 +619,25 @@ export async function verifyImportExportFilePickerWorkflow(browser, url, console
   await assertSavedAvatar(page, { byte_count: 4 })
 
   await clickActivity(page, '素材库')
-  await page.getByRole('button', { name: '选择参考源文件' }).click()
+  await page.getByRole('button', { name: '添加参考书籍' }).click()
+  await page.getByRole('button', { name: '选择参考书文件' }).click()
   await waitForBridgeCall(page, 'PickReferenceSourceFile')
-  await expectInputValue(page.getByLabel('本地路径'), pickedReferenceSourceFile)
-  await expectSelectedValue(page.locator('select').first(), 'markdown')
-  await page.getByPlaceholder('参考书名').fill('文件选择参考')
-  await page.getByRole('button', { name: /^创建$/ }).click()
-  await waitForBridgeCall(page, 'CreateReferenceAnchor')
-  await expectVisible(page.getByText('参考锚点已创建'), 'reference anchor created from picked file')
-  await assertCreatedReferenceAnchor(page, {
+  await expectInputValue(page.getByLabel('参考书文件路径'), pickedReferenceSourceFile)
+  await page.getByLabel('参考书标题').fill('文件选择参考')
+  await page.getByRole('button', { name: '添加参考书' }).click()
+  await waitForBridgeCall(page, 'RegisterReferenceMaterializationSource')
+  await expectVisible(page.getByText('文件选择参考'), 'reference book created from picked file')
+  await expectVisible(page.getByText('待切分'), 'new reference book requires chapter splitting')
+  assert.equal(
+    await page.getByRole('button', { name: '取消选择《文件选择参考》' }).getAttribute('aria-pressed'),
+    'true',
+    'a newly registered pending source must be selectable for chapter splitting',
+  )
+  await assertLastBridgeCallInput(page, 'RegisterReferenceMaterializationSource', {
+    novel_id: 42,
     title: '文件选择参考',
-    sourcePath: pickedReferenceSourceFile,
-    sourceKind: 'markdown',
+    source_path: pickedReferenceSourceFile,
+    source_kind: 'markdown',
   })
 
   await assertBridgeCallCount(page, 'PickReferenceSourceFile', 1)
@@ -793,7 +798,10 @@ export async function verifyReferenceWorkspaceWorkflow(page) {
   await corpusWorkspace.getByRole('button', { name: '启动材料化' }).click()
   await waitForBridgeCallCountAfter(page, 'EnqueueReferenceMaterialization', enqueueCount)
   await expectVisible(corpusWorkspace.getByText('向量索引完整'), 'completed materialization index state')
-  await expectVisible(corpusWorkspace.getByText('她没有回答，目光越过他落在雨幕里。'), 'complete multiline active material')
+  await expectVisible(
+    corpusWorkspace.getByText('她把杯底半圈水痕压进记忆里。\n\n她没有回答，目光越过他落在雨幕里。', { exact: true }),
+    'complete multiline active material',
+  )
 
   await blueprintPreview.getByLabel('预演目标').fill('让林岚确认门口线索，并在结尾留下新的悬念。')
   await expectVisible(blueprintPreview.getByText('可预演 1 本'), 'active material source count')

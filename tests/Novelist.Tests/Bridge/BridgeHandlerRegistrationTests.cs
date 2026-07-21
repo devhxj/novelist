@@ -135,92 +135,60 @@ public sealed class BridgeHandlerRegistrationTests
     [Fact]
     public void CompatibilityAppMethodListHasExpectedCoverage()
     {
-        Assert.Equal(182, BridgeCompatibilityAppMethods.MethodNames.Count);
+        Assert.Equal(136, BridgeCompatibilityAppMethods.MethodNames.Count);
         Assert.Equal(BridgeCompatibilityAppMethods.MethodNames.Count, BridgeCompatibilityAppMethods.MethodNames.Distinct(StringComparer.Ordinal).Count());
         Assert.Contains("Chat", BridgeCompatibilityAppMethods.MethodNames);
         Assert.Contains("GetCover", BridgeCompatibilityAppMethods.MethodNames);
-        Assert.Contains("CreateReferenceAnchor", BridgeCompatibilityAppMethods.MethodNames);
         Assert.Contains("RegisterReferenceMaterializationSource", BridgeCompatibilityAppMethods.MethodNames);
-        Assert.Contains("CreateReferenceAnchors", BridgeCompatibilityAppMethods.MethodNames);
-        Assert.Contains("CreateReferenceAnchorsWithResult", BridgeCompatibilityAppMethods.MethodNames);
-        Assert.Contains("AnalyzeReferenceChapterSplit", BridgeCompatibilityAppMethods.MethodNames);
-        Assert.Contains("PreviewReferenceChapterSplit", BridgeCompatibilityAppMethods.MethodNames);
-        Assert.Contains("ConfirmReferenceChapterSplit", BridgeCompatibilityAppMethods.MethodNames);
-        Assert.Contains("EnqueueReferenceMaterialization", BridgeCompatibilityAppMethods.MethodNames);
-        Assert.Contains("GetReferenceMaterializationStatus", BridgeCompatibilityAppMethods.MethodNames);
-        Assert.Contains("RetryReferenceMaterialization", BridgeCompatibilityAppMethods.MethodNames);
-        Assert.Contains("ListReferenceMaterializationChapterProgress", BridgeCompatibilityAppMethods.MethodNames);
-        Assert.Contains("ListReferenceMaterials", BridgeCompatibilityAppMethods.MethodNames);
-        Assert.DoesNotContain("ListReferenceMaterializationCandidates", BridgeCompatibilityAppMethods.MethodNames);
-        Assert.DoesNotContain("ReviewReferenceMaterializationCandidate", BridgeCompatibilityAppMethods.MethodNames);
-        Assert.DoesNotContain("ListActiveReferenceMaterializationMaterials", BridgeCompatibilityAppMethods.MethodNames);
-        Assert.DoesNotContain("SearchActiveReferenceMaterializationMaterials", BridgeCompatibilityAppMethods.MethodNames);
-        Assert.Contains("GenerateReferenceMaterializationBlueprintPreview", BridgeCompatibilityAppMethods.MethodNames);
-        Assert.DoesNotContain("GetReferenceMaterializationBlueprintPreview", BridgeCompatibilityAppMethods.MethodNames);
-        Assert.Contains("RecordReferenceUserFeedback", BridgeCompatibilityAppMethods.MethodNames);
-        Assert.Contains("GetReferenceUserFeedback", BridgeCompatibilityAppMethods.MethodNames);
-        Assert.Contains("UpdateReferenceMaterialTags", BridgeCompatibilityAppMethods.MethodNames);
-        Assert.Contains("GetReferenceMaterialCoverage", BridgeCompatibilityAppMethods.MethodNames);
-        Assert.Contains("GetReferenceMaterialTagReviewQueue", BridgeCompatibilityAppMethods.MethodNames);
-        Assert.Contains("GetReferenceSourceSegmentDetail", BridgeCompatibilityAppMethods.MethodNames);
-        Assert.DoesNotContain("BackfillReferenceCorpusTechniqueVectorIndex", BridgeCompatibilityAppMethods.MethodNames);
-        Assert.DoesNotContain("StartReferenceCorpusFeatureAnalysis", BridgeCompatibilityAppMethods.MethodNames);
-        Assert.DoesNotContain("GetReferenceCorpusFeatureAnalysisRun", BridgeCompatibilityAppMethods.MethodNames);
-        Assert.DoesNotContain("StartReferenceCorpusTechniqueSpecimenAnalysis", BridgeCompatibilityAppMethods.MethodNames);
-        Assert.DoesNotContain("GetReferenceCorpusTechniqueSpecimenAnalysisRun", BridgeCompatibilityAppMethods.MethodNames);
-        Assert.DoesNotContain("ListReferenceCorpusFeatureObservations", BridgeCompatibilityAppMethods.MethodNames);
-        Assert.DoesNotContain("ListReferenceCorpusTechniqueSpecimens", BridgeCompatibilityAppMethods.MethodNames);
-        Assert.DoesNotContain("EnqueueReferenceCorpusAnalysisJob", BridgeCompatibilityAppMethods.MethodNames);
-        Assert.DoesNotContain("GetReferenceCorpusAnalysisJob", BridgeCompatibilityAppMethods.MethodNames);
-        Assert.DoesNotContain("ListReferenceCorpusAnalysisJobs", BridgeCompatibilityAppMethods.MethodNames);
-        Assert.DoesNotContain("PauseReferenceCorpusAnalysisJob", BridgeCompatibilityAppMethods.MethodNames);
-        Assert.DoesNotContain("ResumeReferenceCorpusAnalysisJob", BridgeCompatibilityAppMethods.MethodNames);
-        Assert.DoesNotContain("CancelReferenceCorpusAnalysisJob", BridgeCompatibilityAppMethods.MethodNames);
-        Assert.DoesNotContain("ReprioritizeReferenceCorpusAnalysisJob", BridgeCompatibilityAppMethods.MethodNames);
-        Assert.Contains("GenerateReferenceBlueprints", BridgeCompatibilityAppMethods.MethodNames);
-        Assert.Contains("GetReferenceWritingSession", BridgeCompatibilityAppMethods.MethodNames);
-        Assert.Contains("SelectReferenceBlueprint", BridgeCompatibilityAppMethods.MethodNames);
-        Assert.Contains("GenerateReferenceDraftCandidates", BridgeCompatibilityAppMethods.MethodNames);
-        Assert.DoesNotContain("GenerateReferenceCorpusBlueprintCandidates", BridgeCompatibilityAppMethods.MethodNames);
-        Assert.DoesNotContain("AdvanceReferenceCorpusBlueprintSession", BridgeCompatibilityAppMethods.MethodNames);
-        Assert.DoesNotContain("GetReferenceCorpusBlueprintSession", BridgeCompatibilityAppMethods.MethodNames);
-        Assert.DoesNotContain("GetReferenceCorpusGovernance", BridgeCompatibilityAppMethods.MethodNames);
-        Assert.DoesNotContain("GenerateReferenceCorpusInsertionDraft", BridgeCompatibilityAppMethods.MethodNames);
-        Assert.DoesNotContain("GenerateReferenceCorpusInsertionDraftCandidates", BridgeCompatibilityAppMethods.MethodNames);
-        Assert.DoesNotContain("SetReferenceCorpusSessionLibraryBinding", BridgeCompatibilityAppMethods.MethodNames);
-        Assert.DoesNotContain("UpdateReferenceCorpusLibraryMember", BridgeCompatibilityAppMethods.MethodNames);
-        Assert.DoesNotContain("UpdateReferenceCorpusLicense", BridgeCompatibilityAppMethods.MethodNames);
-        Assert.DoesNotContain("RebuildReferenceCorpusDedupGroups", BridgeCompatibilityAppMethods.MethodNames);
-        Assert.DoesNotContain("RecordReferenceCorpusInsertionAudit", BridgeCompatibilityAppMethods.MethodNames);
-        Assert.DoesNotContain("BuildReferenceCorpusAggregates", BridgeCompatibilityAppMethods.MethodNames);
-        Assert.DoesNotContain("ListReferenceCorpusAggregates", BridgeCompatibilityAppMethods.MethodNames);
-        Assert.DoesNotContain("RefreshReferenceCorpusReviewQueue", BridgeCompatibilityAppMethods.MethodNames);
-        Assert.DoesNotContain("ListReferenceCorpusReviewQueue", BridgeCompatibilityAppMethods.MethodNames);
-        Assert.DoesNotContain("ReviewReferenceCorpusItems", BridgeCompatibilityAppMethods.MethodNames);
-        Assert.DoesNotContain("ReconcileReferenceCorpusRun", BridgeCompatibilityAppMethods.MethodNames);
-        Assert.Contains("DeleteReferenceMaterials", BridgeCompatibilityAppMethods.MethodNames);
-        Assert.Contains("RestoreReferenceMaterials", BridgeCompatibilityAppMethods.MethodNames);
-        Assert.Contains("GenerateReferenceChapterBlueprint", BridgeCompatibilityAppMethods.MethodNames);
-        Assert.Contains("ReviseReferenceChapterBlueprint", BridgeCompatibilityAppMethods.MethodNames);
-        Assert.Contains("GenerateReferenceAnchoredDraft", BridgeCompatibilityAppMethods.MethodNames);
-        Assert.Contains("GetReferenceAnchoredDraftAudits", BridgeCompatibilityAppMethods.MethodNames);
-        Assert.Contains("GetReferenceDraftCandidates", BridgeCompatibilityAppMethods.MethodNames);
-        Assert.Contains("GetReferenceStyleAuditFindings", BridgeCompatibilityAppMethods.MethodNames);
-        Assert.Contains("BuildReferenceStyleProfile", BridgeCompatibilityAppMethods.MethodNames);
-        Assert.Contains("GetReferenceStyleProfileBuildStatus", BridgeCompatibilityAppMethods.MethodNames);
-        Assert.Contains("CancelReferenceStyleProfileBuild", BridgeCompatibilityAppMethods.MethodNames);
-        Assert.Contains("GetReferenceStyleProfiles", BridgeCompatibilityAppMethods.MethodNames);
-        Assert.Contains("GetReferenceStyleProfile", BridgeCompatibilityAppMethods.MethodNames);
-        Assert.Contains("ArchiveReferenceStyleProfile", BridgeCompatibilityAppMethods.MethodNames);
-        Assert.Contains("RestoreReferenceStyleProfile", BridgeCompatibilityAppMethods.MethodNames);
-        Assert.Contains("CompareReferenceStyleProfiles", BridgeCompatibilityAppMethods.MethodNames);
-        Assert.Contains("StartReferenceOrchestrationRun", BridgeCompatibilityAppMethods.MethodNames);
-        Assert.Contains("GetReferenceOrchestrationRunEvents", BridgeCompatibilityAppMethods.MethodNames);
-        Assert.Contains("ResumeReferenceOrchestrationRun", BridgeCompatibilityAppMethods.MethodNames);
         Assert.Contains("PickReferenceSourceFile", BridgeCompatibilityAppMethods.MethodNames);
         Assert.Contains("SearchAll", BridgeCompatibilityAppMethods.MethodNames);
         Assert.Contains("DiscoverModels", BridgeCompatibilityAppMethods.MethodNames);
         Assert.Contains("UpdateTimelineEntry", BridgeCompatibilityAppMethods.MethodNames);
+    }
+
+    [Fact]
+    public void CompatibilityAppMethodListExposesOnlyActiveReferenceActions()
+    {
+        var activeMethods = new[]
+        {
+            "RegisterReferenceMaterializationSource",
+            "GetReferenceAnchors",
+            "DeleteReferenceAnchor",
+            "DeleteReferenceAnchors",
+            "UpdateReferenceAnchorMetadata",
+            "AnalyzeReferenceChapterSplit",
+            "PreviewReferenceChapterSplit",
+            "ConfirmReferenceChapterSplit",
+            "EnqueueReferenceMaterialization",
+            "GetReferenceMaterializationStatus",
+            "RetryReferenceMaterialization",
+            "ListReferenceMaterializationChapterProgress",
+            "ListReferenceMaterials",
+            "SearchReferenceMaterials",
+            "GenerateReferenceMaterializationBlueprintPreview",
+            "GenerateReferenceBlueprints",
+            "GetReferenceWritingSession",
+            "SelectReferenceBlueprint",
+            "GenerateReferenceDraftCandidates"
+        };
+        var retiredMethods = new[]
+        {
+            "CreateReferenceAnchor",
+            "CreateReferenceAnchors",
+            "CreateReferenceAnchorsWithResult",
+            "BuildReferenceStyleProfile",
+            "GenerateReferenceAnchoredDraft",
+            "GetReferenceAnchoredDraftAudits",
+            "GetReferenceStyleProfile",
+            "StartReferenceOrchestrationRun",
+            "GetReferenceMaterialCoverage",
+            "GetReferenceSourceSegmentDetail",
+            "DeleteReferenceMaterials",
+            "RestoreReferenceMaterials"
+        };
+
+        Assert.All(activeMethods, method => Assert.Contains(method, BridgeCompatibilityAppMethods.MethodNames));
+        Assert.All(retiredMethods, method => Assert.DoesNotContain(method, BridgeCompatibilityAppMethods.MethodNames));
     }
 
     [Fact]

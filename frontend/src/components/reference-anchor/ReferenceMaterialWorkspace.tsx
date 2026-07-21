@@ -65,7 +65,7 @@ function chapterSplitErrorMessage(error: unknown): string {
   return '自动章节分析失败。请检查当前大模型配置和来源文件后重试。'
 }
 
-export default function ReferenceCorpusWorkspace({
+export default function ReferenceMaterialWorkspace({
   novelId,
   refreshKey,
   anchors,

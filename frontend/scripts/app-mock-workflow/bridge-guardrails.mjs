@@ -34,7 +34,6 @@ export async function verifyBridgeCalls(page) {
     'DeleteStyleSample',
     'ExtractStyleSkillFromSamples',
     'CancelStyleSkillExtraction',
-    'BuildReferenceStyleProfile',
     'StartNarrativePatternExtraction',
     'CancelNarrativePatternExtraction',
     'GetNarrativePatternTrace',
@@ -111,19 +110,6 @@ export async function verifyWritingBridgeCalls(page) {
   assert(!methods.includes('runtime.shell.openExternal'), 'writing workflow must not open external URLs')
 }
 
-export async function verifyReferenceBridgeCalls(page) {
-  const calls = await page.evaluate(() => window.__appMockState.calls)
-  const methods = calls.map((call) => call.method)
-  const requiredMethods = ['IsInitialized', 'GetSettings', 'GetNovels', 'GetChapters', 'GetReferenceAnchors']
-
-  for (const method of requiredMethods) {
-    assert(methods.includes(method), `Expected reference bridge method ${method} to be called.`)
-  }
-
-  assert(!methods.includes('SaveContent'), 'reference entry workflow must not save chapter content implicitly')
-  assert(!methods.includes('runtime.shell.openExternal'), 'reference entry workflow must not open external URLs')
-}
-
 export async function verifyReferenceWorkspaceBridgeCalls(page) {
   const calls = await page.evaluate(() => window.__appMockState.calls)
   const methods = calls.map((call) => call.method)
@@ -154,71 +140,6 @@ export async function verifyReferenceWorkspaceBridgeCalls(page) {
   assert(!methods.includes('runtime.shell.openExternal'), 'reference workspace must not open external URLs')
 }
 
-export async function verifyCorpusLibraryBridgeCalls(page) {
-  const calls = await page.evaluate(() => window.__appMockState.calls)
-  const methods = calls.map((call) => call.method)
-  const requiredMethods = [
-    'IsInitialized',
-    'GetSettings',
-    'GetNovels',
-    'GetChapters',
-    'GetReferenceAnchors',
-    'GetReferenceMaterialDetail',
-    'GetReferenceMaterialTagReviewQueue',
-    'GetReferenceSourceSegmentDetail',
-    'GetReferenceSourceProcessingDetail',
-    'RebuildReferenceAnchor',
-  ]
-
-  for (const method of requiredMethods) {
-    assert(methods.includes(method), `Expected corpus library bridge method ${method} to be called.`)
-  }
-  assertReferenceAnchorResultsArePathFree(calls)
-
-  const forbiddenMethods = [
-    'SaveContent',
-    'StartReferenceOrchestrationRun',
-    'GenerateReferenceChapterBlueprint',
-    'ReviewReferenceChapterBlueprint',
-    'ApproveReferenceChapterBlueprint',
-    'BindReferenceBlueprintMaterials',
-    'GetReferenceChapterBlueprint',
-    'GetReferenceChapterBlueprints',
-    'GetReferenceOrchestrationRuns',
-    'GetReferenceOrchestrationRunEvents',
-    'AdaptReferenceMaterial',
-    'GenerateReferenceAnchoredDraft',
-    'GetReferenceDraftCandidates',
-    'AuditReferenceAnchoredDraft',
-    'GetReferenceAnchoredDraftAudits',
-  ]
-  const unexpected = methods.filter((method) => forbiddenMethods.includes(method))
-  assert.deepEqual(unexpected, [], `corpus library workflow must not trigger chapter-writing bridge calls: ${unexpected.join(', ')}`)
-  assert(!methods.includes('runtime.shell.openExternal'), 'corpus library workflow must not open external URLs')
-}
-
-function assertReferenceAnchorResultsArePathFree(calls) {
-  const anchorResults = calls
-    .filter((call) => call.method === 'GetReferenceAnchors')
-    .flatMap((call) => Array.isArray(call.result) ? call.result : [])
-  const createResultAnchors = calls
-    .filter((call) => call.method === 'CreateReferenceAnchorsWithResult')
-    .flatMap((call) => Array.isArray(call.result?.succeeded) ? call.result.succeeded : [])
-  const createResultFailures = calls
-    .filter((call) => call.method === 'CreateReferenceAnchorsWithResult')
-    .flatMap((call) => Array.isArray(call.result?.failed) ? call.result.failed : [])
-
-  assert(anchorResults.length + createResultAnchors.length > 0, 'reference anchor calls must return at least one anchor fixture')
-  for (const anchor of [...anchorResults, ...createResultAnchors]) {
-    assert.equal(anchor.source_path ?? '', '', 'reference anchor bridge results must not expose local source_path values')
-    assert(!JSON.stringify(anchor).includes('D:\\books'), 'reference anchor bridge results must not include local filesystem paths')
-  }
-  for (const failure of createResultFailures) {
-    assert(!('source_path' in failure), 'reference anchor partial failure results must not expose source_path')
-    assert(!JSON.stringify(failure).includes('D:\\books'), 'reference anchor partial failure results must not include local filesystem paths')
-  }
-}
-
 export async function verifyChapterReferenceBridgeCalls(page) {
   const calls = await page.evaluate(() => window.__appMockState.calls)
   const methods = calls.map((call) => call.method)
@@ -236,25 +157,6 @@ export async function verifyChapterReferenceBridgeCalls(page) {
 
   for (const method of requiredMethods) {
     assert(methods.includes(method), 'Expected chapter reference bridge method ' + method + ' to be called.')
-  }
-
-  for (const retiredMethod of [
-    'SearchReferenceMaterials',
-    'GetReferenceMaterialDetail',
-    'GetReferenceCorpusBlueprintSession',
-    'AdvanceReferenceCorpusBlueprintSession',
-    'GenerateReferenceCorpusBlueprintCandidates',
-    'GenerateReferenceCorpusInsertionDraft',
-    'GenerateReferenceCorpusInsertionDraftCandidates',
-    'RecordReferenceCorpusInsertionAudit',
-    'GetReferenceOrchestrationRuns',
-    'StartReferenceOrchestrationRun',
-    'ResumeReferenceOrchestrationRun',
-    'CancelReferenceOrchestrationRun',
-    'GetReferenceDraftCandidates',
-    'GetReferenceAnchoredDraftAudits',
-  ]) {
-    assert(!methods.includes(retiredMethod), 'chapter writing must not call retired bridge method ' + retiredMethod)
   }
 
   const sessionReads = calls.filter((call) => call.method === 'GetReferenceWritingSession')
@@ -474,7 +376,6 @@ export async function verifyPhase15SurfaceBridgeCalls(page) {
     'DeleteStyleSample',
     'ExtractStyleSkillFromSamples',
     'CancelStyleSkillExtraction',
-    'BuildReferenceStyleProfile',
     'SaveContent',
   ]
 
@@ -523,42 +424,9 @@ export async function verifyStressGuardrails(page) {
   const methods = calls.map((call) => call.method)
   assert(methods.includes('GetContent'), 'stress workflow must load the large chapter through the bridge')
   assert(methods.includes('GetReferenceAnchors'), 'stress workflow must load reference anchors')
-  assert(methods.includes('RebuildReferenceAnchor'), 'stress workflow must exercise reference import/segmentation status')
-  assert(methods.includes('SearchReferenceMaterials'), 'stress workflow must search generated reference materials')
-  assert(methods.includes('GenerateReferenceChapterBlueprint'), 'stress workflow must generate a reference blueprint')
-  assert(methods.includes('BindReferenceBlueprintMaterials'), 'stress workflow must bind generated materials into the blueprint')
   assert(!methods.includes('SaveContent'), 'stress workflow must not save large chapter content implicitly')
   assert(!methods.includes('runtime.shell.openExternal'), 'stress workflow must not open external URLs')
 
-  const rebuildCall = calls.find((call) => call.method === 'RebuildReferenceAnchor')
-  assert(rebuildCall?.result?.source_segment_count > 0, 'stress rebuild must report source segments')
-  assert(rebuildCall?.result?.material_count > 0, 'stress rebuild must report generated materials')
-
-  const defaultLibrarySearch = calls.find((call) =>
-    call.method === 'SearchReferenceMaterials' &&
-    Array.isArray(call.args[0]?.anchor_ids) &&
-    call.args[0].anchor_ids.length === 0 &&
-    call.args[0].page === 1)
-  assert(defaultLibrarySearch, 'stress material library search must not require manually selected anchors')
-  assert(defaultLibrarySearch.result?.total >= 1_200, 'stress material library search must expose a large paged material set')
-
-  const blueprintCall = calls.find((call) => call.method === 'GenerateReferenceChapterBlueprint')
-  assert(blueprintCall, 'stress workflow must generate a blueprint')
-  assert.deepEqual(blueprintCall.args[0].anchor_ids, [], 'stress blueprint generation must work without manual per-novel corpus binding')
-
-  const bindCall = calls.find((call) => call.method === 'BindReferenceBlueprintMaterials')
-  assert(bindCall, 'stress workflow must bind blueprint materials')
-  assert(bindCall.result?.links?.some((link) => String(link.material_id).startsWith('stress-mat-')), 'stress binding must use generated stress materials')
-  assertBridgeCallOrder(calls, 'ReviewReferenceChapterBlueprint', 'ApproveReferenceChapterBlueprint')
-  assertBridgeCallOrder(calls, 'ApproveReferenceChapterBlueprint', 'BindReferenceBlueprintMaterials')
-}
-
-function assertBridgeCallOrder(calls, beforeMethod, afterMethod) {
-  const beforeIndex = calls.findIndex((call) => call.method === beforeMethod)
-  const afterIndex = calls.findIndex((call) => call.method === afterMethod)
-  assert(beforeIndex >= 0, `Missing bridge call ${beforeMethod}`)
-  assert(afterIndex >= 0, `Missing bridge call ${afterMethod}`)
-  assert(beforeIndex < afterIndex, `${beforeMethod} must happen before ${afterMethod}`)
 }
 
 function assertNoForbiddenProperties(value, forbiddenNames, path) {

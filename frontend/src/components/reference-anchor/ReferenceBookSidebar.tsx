@@ -49,15 +49,21 @@ function titleFromPath(path: string): string {
 
 function anchorState(anchor: reference.Anchor): { label: string; className: string; usable: boolean } {
   if (anchor.status === 'ready' || anchor.status === 'completed') {
-    return { label: '已导入', className: 'text-emerald-700 dark:text-emerald-400', usable: true }
+    return { label: '可用', className: 'text-emerald-700 dark:text-emerald-400', usable: true }
+  }
+  if (anchor.status === 'pending_split') {
+    return { label: '待切分', className: 'text-amber-700 dark:text-amber-300', usable: true }
+  }
+  if (anchor.status === 'pending_materialization') {
+    return { label: '待处理', className: 'text-amber-700 dark:text-amber-300', usable: true }
   }
   if (anchor.status.startsWith('failed_') || anchor.status === 'cancelled') {
-    return { label: '处理失败', className: 'text-destructive', usable: false }
+    return { label: '失败', className: 'text-destructive', usable: true }
   }
   if (anchor.status === 'queued' || anchor.status === 'running' || anchor.status === 'processing') {
-    return { label: '处理中', className: 'text-sky-700 dark:text-sky-300', usable: false }
+    return { label: '处理中', className: 'text-sky-700 dark:text-sky-300', usable: true }
   }
-  return { label: '待处理', className: 'text-amber-700 dark:text-amber-300', usable: false }
+  return { label: '待处理', className: 'text-amber-700 dark:text-amber-300', usable: true }
 }
 
 function isWorkspaceCorpus(anchor: reference.Anchor): boolean {
