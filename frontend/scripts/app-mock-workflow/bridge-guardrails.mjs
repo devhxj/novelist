@@ -65,6 +65,28 @@ export async function verifyBridgeCalls(page) {
   await assertGitHistoryReadOnlyCalls(page)
 }
 
+export async function verifySettingsBridgeCalls(page) {
+  const calls = await page.evaluate(() => window.__appMockState.calls)
+  const methods = calls.map((call) => call.method)
+  const requiredMethods = [
+    'IsInitialized',
+    'GetSettings',
+    'GetLLMConfig',
+    'GetEmbeddingConfig',
+    'GetSqliteVecStatus',
+  ]
+
+  for (const method of requiredMethods) {
+    assert(methods.includes(method), `Expected settings bridge method ${method} to be called.`)
+  }
+
+  const chapterSaves = calls.filter((call) =>
+    call.method === 'SaveContent' &&
+    String(call.args?.[0]?.path ?? '').startsWith('chapters/'))
+  assert.deepEqual(chapterSaves, [], 'settings workflow must not save chapter content implicitly')
+  assert(!methods.includes('runtime.shell.openExternal'), 'settings workflow must not open external URLs')
+}
+
 function isAllowedSurfaceMutation(call) {
   if (call.method === 'UpdateStyleSample' || call.method === 'DeleteStyleSample') {
     return true
@@ -122,6 +144,7 @@ export async function verifyReferenceWorkspaceBridgeCalls(page) {
     'AnalyzeReferenceChapterSplit',
     'ConfirmReferenceChapterSplit',
     'EnqueueReferenceMaterialization',
+    'RunReferenceMaterializationChapter',
     'ListReferenceMaterializationChapterProgress',
     'ListReferenceMaterials',
     'RegisterReferenceMaterializationSource',

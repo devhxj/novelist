@@ -120,9 +120,10 @@ export interface NovelistAppApi {
   GenerateReferenceDraftCandidates: AppMethod<[reference.GenerateWritingDraftCandidatesInput], reference.WritingDraftCandidates>
   GetReferenceWritingSession: AppMethod<[reference.GetWritingSessionInput], reference.WritingSession | null>
  EnqueueReferenceMaterialization: AppMethod<[reference.EnqueueMaterializationInput], reference.MaterializationStatus>
- RetryReferenceMaterialization: AppMethod<[reference.RetryMaterializationInput], reference.MaterializationStatus>
- ListReferenceMaterializationChapterProgress: AppMethod<[reference.ListMaterializationChapterProgressInput], storage.PageResult_reference_MaterializationChapterProgress_>
- ListReferenceMaterials: AppMethod<[reference.ListReferenceMaterialsInput], storage.PageResult_reference_ReferenceMaterialListItem_>
+  RunReferenceMaterializationChapter: AppMethod<[reference.RunMaterializationChapterInput], reference.MaterializationStatus>
+  ListReferenceMaterializationChapterProgress: AppMethod<[reference.ListMaterializationChapterProgressInput], storage.PageResult_reference_MaterializationChapterProgress_>
+  ListReferenceMaterializationChapterMaterials: AppMethod<[reference.ListMaterializationChapterMaterialsInput], storage.PageResult_reference_ReferenceMaterialListItem_>
+  ListReferenceMaterials: AppMethod<[reference.ListReferenceMaterialsInput], storage.PageResult_reference_ReferenceMaterialListItem_>
  GenerateReferenceMaterializationBlueprintPreview: AppMethod<[reference.GenerateMaterializationBlueprintPreviewInput], reference.MaterializationBlueprintPreview>
   GetAppConfig: AppMethod<[], config.AppConfig>
   GetArcNodes: AppMethod<[number, number, number], storyarc.ArcNode[]>
@@ -285,9 +286,10 @@ export const appApi: NovelistAppApi = {
   GenerateReferenceDraftCandidates: ((...args) => invokeAppArgs('GenerateReferenceDraftCandidates', args, { timeoutMs: null })) as NovelistAppApi['GenerateReferenceDraftCandidates'],
   GetReferenceWritingSession: appMethod<NovelistAppApi['GetReferenceWritingSession']>('GetReferenceWritingSession'),
  EnqueueReferenceMaterialization: appMethod<NovelistAppApi['EnqueueReferenceMaterialization']>('EnqueueReferenceMaterialization'),
- RetryReferenceMaterialization: appMethod<NovelistAppApi['RetryReferenceMaterialization']>('RetryReferenceMaterialization'),
- ListReferenceMaterializationChapterProgress: appMethod<NovelistAppApi['ListReferenceMaterializationChapterProgress']>('ListReferenceMaterializationChapterProgress'),
- ListReferenceMaterials: appMethod<NovelistAppApi['ListReferenceMaterials']>('ListReferenceMaterials'),
+  RunReferenceMaterializationChapter: appMethod<NovelistAppApi['RunReferenceMaterializationChapter']>('RunReferenceMaterializationChapter'),
+  ListReferenceMaterializationChapterProgress: appMethod<NovelistAppApi['ListReferenceMaterializationChapterProgress']>('ListReferenceMaterializationChapterProgress'),
+  ListReferenceMaterializationChapterMaterials: appMethod<NovelistAppApi['ListReferenceMaterializationChapterMaterials']>('ListReferenceMaterializationChapterMaterials'),
+  ListReferenceMaterials: appMethod<NovelistAppApi['ListReferenceMaterials']>('ListReferenceMaterials'),
   GenerateReferenceMaterializationBlueprintPreview: ((...args) => invokeAppArgs('GenerateReferenceMaterializationBlueprintPreview', args, { timeoutMs: null })) as NovelistAppApi['GenerateReferenceMaterializationBlueprintPreview'],
   GetAppConfig: appMethod<NovelistAppApi['GetAppConfig']>('GetAppConfig'),
   GetArcNodes: appMethod<NovelistAppApi['GetArcNodes']>('GetArcNodes'),

@@ -928,7 +928,14 @@ export namespace reference {
     novel_id: number
     anchor_id: number
     split_profile_id: string
-    chapter_batch_size?: 5 | 10
+    run_id?: string | null
+  }
+
+  export interface RunMaterializationChapterInput {
+    novel_id: number
+    anchor_id: number
+    run_id: string
+    chapter_index: number
   }
 
   export interface GetMaterializationStatusInput {
@@ -937,13 +944,14 @@ export namespace reference {
     run_id?: string | null
   }
 
-  export interface RetryMaterializationInput {
-    novel_id: number
-    anchor_id: number
-    run_id: string
+  export interface ListMaterializationChapterProgressInput extends GetMaterializationStatusInput {
+    page: number
+    size: number
   }
 
-  export interface ListMaterializationChapterProgressInput extends GetMaterializationStatusInput {
+  export interface ListMaterializationChapterMaterialsInput extends GetMaterializationStatusInput {
+    run_id: string
+    chapter_index: number
     page: number
     size: number
   }
@@ -963,7 +971,6 @@ export namespace reference {
 
   export interface MaterializationChapterProgress {
     chapter_index: number
-    batch_index: number
     status: string
     material_count: number
     vector_count: number
@@ -972,7 +979,6 @@ export namespace reference {
     completed_at?: Timestamp | null
     last_error_code?: string | null
     last_error_message?: string | null
-    row_version: number
   }
 
   export interface MaterializationStatus {
@@ -981,14 +987,9 @@ export namespace reference {
     split_profile_id: string
     generation_id: string
     status: string
-    chapter_batch_size: 5 | 10
     total_chapters: number
     processed_chapters: number
-    total_chapter_batches: number
-    completed_chapter_batches: number
-    current_batch_index?: number | null
-    current_batch_start_chapter?: number | null
-    current_batch_end_chapter?: number | null
+    current_chapter_index?: number | null
     material_count: number
     vector_count: number
     model_call_count: number
@@ -999,7 +1000,6 @@ export namespace reference {
     started_at: Timestamp
     completed_at?: Timestamp | null
     vector_index_healthy: boolean
-    next_action: string
   }
 
   export interface ReferenceMaterialListItem {
@@ -1008,11 +1008,87 @@ export namespace reference {
     anchor_id: number
     chapter_index: number
     ordinal: number
-    material_type: string
     text: string
-    description: string
-    tags: string[]
+    metadata: ReferenceMaterialMetadata
     text_hash: string
+  }
+
+  export interface ReferenceMaterialEntity {
+    name: string
+    kind: string
+  }
+
+  export interface ReferenceMaterialSetting {
+    location?: string | null
+    time?: string | null
+    environment?: string | null
+  }
+
+  export interface ReferenceMaterialSourceSpan {
+    start_line: number
+    end_line: number
+  }
+
+  export interface ReferenceMaterialPerspective {
+    mode: string
+    focus_entity?: string | null
+  }
+
+  export interface ReferenceMaterialFact {
+    content: string
+    subject?: string | null
+  }
+
+  export interface ReferenceMaterialCausality {
+    cause?: string | null
+    consequence?: string | null
+  }
+
+  export interface ReferenceMaterialStateChange {
+    subject: string
+    before: string
+    after: string
+  }
+
+  export interface ReferenceMaterialConflict {
+    pressure?: string | null
+    cost?: string | null
+  }
+
+  export interface ReferenceMaterialInformation {
+    role?: string | null
+    content?: string | null
+  }
+
+  export interface ReferenceMaterialEmotion {
+    tone?: string | null
+    subtext?: string | null
+  }
+
+  export interface ReferenceMaterialForeshadowing {
+    phase: string
+    target: string
+  }
+
+  export interface ReferenceMaterialMetadata {
+    source_span: ReferenceMaterialSourceSpan
+    source_kind: string
+    entities: ReferenceMaterialEntity[]
+    setting?: ReferenceMaterialSetting | null
+    perspective?: ReferenceMaterialPerspective | null
+    event?: string | null
+    facts: ReferenceMaterialFact[]
+    causality?: ReferenceMaterialCausality | null
+    state_changes: ReferenceMaterialStateChange[]
+    character_dynamics?: string | null
+    conflict?: ReferenceMaterialConflict | null
+    information?: ReferenceMaterialInformation | null
+    emotion?: ReferenceMaterialEmotion | null
+    narrative_functions: string[]
+    foreshadowing: ReferenceMaterialForeshadowing[]
+    motifs: string[]
+    expression_techniques: string[]
+    reuse_hint: string
   }
 
   export interface SearchReferenceMaterialsInput {
@@ -1045,10 +1121,8 @@ export namespace reference {
     material_id: string
     anchor_id: number
     generation_id: string
-    material_type: string
     text: string
-    description: string
-    tags: string[]
+    metadata: ReferenceMaterialMetadata
     vector_distance: number
     fit_explanation: string
   }

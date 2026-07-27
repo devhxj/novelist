@@ -793,15 +793,32 @@ export async function verifyReferenceWorkspaceWorkflow(page) {
   const confirmCount = await bridgeCallCount(page, 'ConfirmReferenceChapterSplit')
   await corpusWorkspace.getByRole('button', { name: '确认章节边界' }).click()
   await waitForBridgeCallCountAfter(page, 'ConfirmReferenceChapterSplit', confirmCount)
-  await corpusWorkspace.getByRole('button', { name: '10' }).click()
   const enqueueCount = await bridgeCallCount(page, 'EnqueueReferenceMaterialization')
-  await corpusWorkspace.getByRole('button', { name: '启动材料化' }).click()
+  await corpusWorkspace.getByRole('button', { name: '运行全部' }).click()
   await waitForBridgeCallCountAfter(page, 'EnqueueReferenceMaterialization', enqueueCount)
   await expectVisible(corpusWorkspace.getByText('向量索引完整'), 'completed materialization index state')
   await expectVisible(
     corpusWorkspace.getByText('她把杯底半圈水痕压进记忆里。\n\n她没有回答，目光越过他落在雨幕里。', { exact: true }),
     'complete multiline active material',
   )
+  const completedRunId = await page.evaluate(() => window.__appMockState.materializationRuns.at(-1)?.run_id)
+  const chapterMaterialsCallCount = await bridgeCallCount(page, 'ListReferenceMaterializationChapterMaterials')
+  await corpusWorkspace.getByRole('button', { name: '查看第 1 章材料' }).click()
+  await waitForBridgeCallCountAfter(page, 'ListReferenceMaterializationChapterMaterials', chapterMaterialsCallCount)
+  await assertLastBridgeCallInput(page, 'ListReferenceMaterializationChapterMaterials', {
+    run_id: completedRunId,
+    chapter_index: 1,
+  })
+  await expectVisible(page.getByRole('dialog', { name: '第 1 章材料' }), 'selected chapter material dialog')
+  await page.screenshot({ path: path.join(outputDir, 'chapter-materials-dialog.png'), fullPage: true })
+  await page.getByRole('button', { name: '关闭章节材料' }).click()
+  const runChapterCount = await bridgeCallCount(page, 'RunReferenceMaterializationChapter')
+  await corpusWorkspace.getByRole('button', { name: '运行第 1 章' }).click()
+  await waitForBridgeCallCountAfter(page, 'RunReferenceMaterializationChapter', runChapterCount)
+  await assertLastBridgeCallInput(page, 'RunReferenceMaterializationChapter', {
+    run_id: completedRunId,
+    chapter_index: 1,
+  })
 
   await blueprintPreview.getByLabel('预演目标').fill('让林岚确认门口线索，并在结尾留下新的悬念。')
   await expectVisible(blueprintPreview.getByText('可预演 1 本'), 'active material source count')
@@ -810,6 +827,95 @@ export async function verifyReferenceWorkspaceWorkflow(page) {
   await waitForBridgeCallCountAfter(page, 'GenerateReferenceMaterializationBlueprintPreview', previewCallCount)
   await expectVisible(blueprintPreview.getByTestId('blueprint-preview-candidate').first(), 'generated blueprint candidate')
   await page.screenshot({ path: path.join(outputDir, 'materialized-reference-workspace.png'), fullPage: true })
+
+  const failedRun = await page.evaluate(() => {
+    const run = window.__appMockState.materializationRuns.at(-1)
+    if (!run) throw new Error('Expected a materialization run before testing restart.')
+    Object.assign(run, {
+      status: 'failed',
+      processed_chapters: 2,
+      current_chapter_index: 3,
+      material_count: 0,
+      vector_count: 0,
+      vector_index_healthy: false,
+      last_error_code: 'materialization_llm_output_invalid',
+      last_error_message: 'Chapter material extraction returned invalid structured output at JSON path $.materials[0].start_line.',
+    })
+    return {
+      splitProfileId: run.split_profile_id,
+      runId: run.run_id,
+    }
+  })
+  await corpusWorkspace.getByRole('button', { name: '刷新材料化状态' }).click()
+  await expectVisible(corpusWorkspace.getByText('状态：失败 · 2 / 3 章节'), 'failed materialization progress')
+  await expectVisible(corpusWorkspace.getByText('当前第 3 章'), 'failed materialization current chapter')
+  const failedChapterProgress = await page.evaluate(() => window.__appMockState.calls
+    .filter((call) => call.method === 'ListReferenceMaterializationChapterProgress')
+    .at(-1)?.result?.items
+    .map(({ chapter_index, status, material_count, vector_count }) => ({ chapter_index, status, material_count, vector_count })))
+  assert.deepEqual(failedChapterProgress, [
+    { chapter_index: 1, status: 'completed', material_count: 2, vector_count: 2 },
+    { chapter_index: 2, status: 'completed', material_count: 2, vector_count: 2 },
+    { chapter_index: 3, status: 'failed', material_count: 0, vector_count: 0 },
+  ])
+  const failedChapterMaterialsCallCount = await bridgeCallCount(page, 'ListReferenceMaterializationChapterMaterials')
+  await corpusWorkspace.getByRole('button', { name: '查看第 2 章材料' }).click()
+  await waitForBridgeCallCountAfter(page, 'ListReferenceMaterializationChapterMaterials', failedChapterMaterialsCallCount)
+  await page.getByRole('button', { name: '关闭章节材料' }).click()
+  const firstChapterAfterFailureCallCount = await bridgeCallCount(page, 'ListReferenceMaterializationChapterMaterials')
+  await corpusWorkspace.getByRole('button', { name: '查看第 1 章材料' }).click()
+  await waitForBridgeCallCountAfter(page, 'ListReferenceMaterializationChapterMaterials', firstChapterAfterFailureCallCount)
+  await assertLastBridgeCallInput(page, 'ListReferenceMaterializationChapterMaterials', {
+    run_id: failedRun.runId,
+    chapter_index: 1,
+  })
+  await expectVisible(page.getByText('用克制反应承接跨段对话并保留线索压力。', { exact: true }), 'completed chapter materials remain visible after run failure')
+  await page.getByRole('button', { name: '关闭章节材料' }).click()
+  await expectVisible(corpusWorkspace.getByRole('button', { name: '运行全部' }), 'failed materialization resume action')
+  await page.screenshot({ path: path.join(outputDir, 'failed-reference-materialization.png'), fullPage: true })
+  const originalViewport = page.viewportSize()
+  await page.setViewportSize({ width: 900, height: 720 })
+  const materializationOverflow = await corpusWorkspace.evaluate((element) => element.scrollWidth > element.clientWidth + 1)
+  assert.equal(materializationOverflow, false, 'Failed materialization workspace must not overflow at 900x720.')
+  await expectVisible(corpusWorkspace.getByRole('button', { name: '运行第 3 章' }), 'compact failed chapter action')
+  await page.screenshot({ path: path.join(outputDir, 'failed-reference-materialization-900x720.png'), fullPage: true })
+  if (originalViewport) await page.setViewportSize(originalViewport)
+
+  await page.evaluate(() => {
+    const run = window.__appMockState.materializationRuns.at(-1)
+    Object.assign(run, {
+      status: 'failed',
+      total_chapters: 31,
+      processed_chapters: 30,
+      current_chapter_index: 31,
+    })
+  })
+  await corpusWorkspace.getByRole('button', { name: '刷新材料化状态' }).click()
+  const chapterProgressNavigation = corpusWorkspace.getByRole('navigation', { name: '章节进度分页' })
+  await expectVisible(chapterProgressNavigation, 'chapter progress pagination')
+  await chapterProgressNavigation.getByRole('button', { name: '下一页' }).click()
+  await expectVisible(corpusWorkspace.getByRole('button', { name: '运行第 31 章' }), 'chapter action beyond the first progress page')
+  await page.screenshot({ path: path.join(outputDir, 'chapter-progress-page-2.png'), fullPage: true })
+  await chapterProgressNavigation.getByRole('button', { name: '上一页' }).click()
+  await page.evaluate(() => {
+    const run = window.__appMockState.materializationRuns.at(-1)
+    Object.assign(run, {
+      status: 'failed',
+      total_chapters: 3,
+      processed_chapters: 2,
+      current_chapter_index: 3,
+    })
+  })
+  await corpusWorkspace.getByRole('button', { name: '刷新材料化状态' }).click()
+
+  const restartEnqueueCount = await bridgeCallCount(page, 'EnqueueReferenceMaterialization')
+  await corpusWorkspace.getByRole('button', { name: '运行全部' }).click()
+  await waitForBridgeCallCountAfter(page, 'EnqueueReferenceMaterialization', restartEnqueueCount)
+  await assertLastBridgeCallInput(page, 'EnqueueReferenceMaterialization', {
+    split_profile_id: failedRun.splitProfileId,
+    run_id: failedRun.runId,
+  })
+  await expectVisible(corpusWorkspace.getByText('向量索引完整'), 'restarted materialization completion state')
 
   await referenceBooks.getByRole('button', { name: '归档《全局雨夜参考》为受限语料' }).click()
   await expectVisible(referenceBooks.getByText('确认将工作区语料归档为受限？'), 'workspace corpus archive confirmation')

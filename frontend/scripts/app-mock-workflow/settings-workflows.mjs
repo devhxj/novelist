@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict'
-import { newAppPage } from './app-harness.mjs'
+import path from 'node:path'
+import { newAppPage, outputDir } from './app-harness.mjs'
 import {
   assertCopyableDiagnostic,
   assertNoSensitiveDiagnosticsVisible,
@@ -129,7 +130,8 @@ export async function verifySettingsPersistenceWorkflow(browser, url, consoleErr
 
   await dialog.getByRole('button', { name: 'Embeddings' }).click()
   await expectVisible(dialog.getByText('sqlite-vec 已就绪'), 'sqlite vec ready')
-  await expectVisible(dialog.getByText('bge-small-zh-v1.5'), 'builtin onnx embedding model')
+  await expectVisible(dialog.getByText('BGE Small · CPU'), 'default onnx embedding profile')
+  await expectVisible(dialog.getByText('512 维 · 512 tokens · INT8'), 'default onnx embedding profile summary')
   await dialog.getByRole('button', { name: '测试' }).click()
   await expectVisible(dialog.getByText('✓ 连通成功'), 'embedding test success')
   await dialog.getByRole('button', { name: '保存配置' }).click()
@@ -146,17 +148,22 @@ export async function verifySettingsPersistenceWorkflow(browser, url, consoleErr
   })
 
   const onnxSaveCount = await bridgeCallCount(page, 'SaveEmbeddingConfig')
-  await dialog.getByText('高级路径').click()
-  await dialog.locator('#embedding-onnx-model').fill('D:\\mock\\models\\bge-small.onnx')
-  await dialog.locator('#embedding-onnx-vocab').fill('D:\\mock\\models\\vocab.txt')
+  const enhancedProfileButton = dialog.getByRole('button', { name: /提高/ })
+  await enhancedProfileButton.click()
+  assert.equal(await enhancedProfileButton.getAttribute('aria-pressed'), 'true')
+  await expectVisible(dialog.getByText('Qwen3 0.6B · DirectML'), 'enhanced embedding DirectML provider')
+  await expectVisible(dialog.getByText('1024 维 · 4096 tokens · FP16'), 'enhanced embedding profile')
+  await page.waitForTimeout(200)
+  await page.screenshot({ path: path.join(outputDir, 'app-05-embedding-directml.png'), fullPage: true })
   await dialog.getByRole('button', { name: '保存配置' }).click()
   await waitForBridgeCallCountAfter(page, 'SaveEmbeddingConfig', onnxSaveCount)
-  await expectVisible(dialog.getByText('配置已保存'), 'onnx embedding paths saved')
+  await expectVisible(dialog.getByText('配置已保存'), 'enhanced embedding profile saved')
   await assertSavedEmbeddingConfig(page, {
     provider_type: 'onnx',
     provider_key: 'onnx',
-    onnx_model_path: 'D:\\mock\\models\\bge-small.onnx',
-    onnx_vocab_path: 'D:\\mock\\models\\vocab.txt',
+    model_id: 'Qwen/Qwen3-Embedding-0.6B',
+    dimensions: 1024,
+    max_sequence_length: 4096,
   })
 
   await dialog.getByRole('button', { name: 'API' }).click()

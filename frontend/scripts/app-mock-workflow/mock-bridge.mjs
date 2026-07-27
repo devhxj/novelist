@@ -915,9 +915,10 @@ export function installConfigurableAppMockBridge(options = {}) {
       case 'PreviewReferenceChapterSplit': return previewReferenceChapterSplit(args[0])
       case 'ConfirmReferenceChapterSplit': return confirmReferenceChapterSplit(args[0])
       case 'EnqueueReferenceMaterialization': return enqueueReferenceMaterialization(args[0])
+      case 'RunReferenceMaterializationChapter': return runReferenceMaterializationChapter(args[0])
       case 'GetReferenceMaterializationStatus': return getReferenceMaterializationStatus(args[0])
-      case 'RetryReferenceMaterialization': return retryReferenceMaterialization(args[0])
       case 'ListReferenceMaterializationChapterProgress': return listReferenceMaterializationChapterProgress(args[0])
+      case 'ListReferenceMaterializationChapterMaterials': return listReferenceMaterializationChapterMaterials(args[0])
       case 'ListReferenceMaterials': return listReferenceMaterials(args[0])
       case 'GenerateReferenceMaterializationBlueprintPreview': return generateReferenceMaterializationBlueprintPreview(args[0])
       case 'GenerateReferenceBlueprints': return generateReferenceBlueprints(args[0])
@@ -3132,7 +3133,7 @@ export function installConfigurableAppMockBridge(options = {}) {
  return { ...profile }
  }
 
- function materializationStatus(anchorId, profile, batchSize = 5) {
+ function materializationStatus(anchorId, profile) {
  const materialCount = profile.chapter_count * 2
  return {
  run_id: `mock-materialization-${anchorId}`,
@@ -3140,14 +3141,9 @@ export function installConfigurableAppMockBridge(options = {}) {
  split_profile_id: profile.split_profile_id,
  generation_id: `mock-generation-${anchorId}`,
  status: 'completed',
- chapter_batch_size: batchSize,
  total_chapters: profile.chapter_count,
  processed_chapters: profile.chapter_count,
- total_chapter_batches: Math.ceil(profile.chapter_count / batchSize),
- completed_chapter_batches: Math.ceil(profile.chapter_count / batchSize),
- current_batch_index: null,
- current_batch_start_chapter: null,
- current_batch_end_chapter: null,
+ current_chapter_index: null,
  material_count: materialCount,
  vector_count: materialCount,
  model_call_count: profile.chapter_count,
@@ -3158,7 +3154,6 @@ export function installConfigurableAppMockBridge(options = {}) {
  started_at: now,
  completed_at: now,
  vector_index_healthy: true,
- next_action: 'none',
  }
  }
 
@@ -3168,11 +3163,35 @@ export function installConfigurableAppMockBridge(options = {}) {
  if (!profile || profile.status !== 'confirmed' || profile.split_profile_id !== input.split_profile_id) {
  throw new Error('A confirmed chapter split profile is required.')
  }
- const batchSize = Number(input.chapter_batch_size ?? 5)
- if (batchSize !== 5 && batchSize !== 10) throw new Error('Chapter batch size must be 5 or 10.')
- const run = materializationStatus(anchorId, profile, batchSize)
+ const requestedRunId = String(input.run_id ?? '')
+ if (requestedRunId) {
+ const existing = state.materializationRuns.find((item) => item.run_id === requestedRunId && item.anchor_id === anchorId)
+ if (!existing) throw new Error('Materialization run was not found.')
+ Object.assign(existing, materializationStatus(anchorId, profile), {
+ run_id: existing.run_id,
+ generation_id: existing.generation_id,
+ })
+ return { ...existing }
+ }
+ const run = materializationStatus(anchorId, profile)
  state.materializationRuns = state.materializationRuns.filter((item) => item.anchor_id !== anchorId)
  state.materializationRuns.push(run)
+ return { ...run }
+ }
+
+ function runReferenceMaterializationChapter(input) {
+ const anchorId = Number(input.anchor_id ?? 0)
+ const runId = String(input.run_id ?? '')
+ const chapterIndex = Number(input.chapter_index ?? 0)
+ const run = state.materializationRuns.find((item) => item.run_id === runId && item.anchor_id === anchorId)
+ if (!run || chapterIndex <= 0 || chapterIndex > run.total_chapters) {
+ throw new Error('Materialization chapter was not found.')
+ }
+ const profile = state.materializationProfiles[String(anchorId)]
+ Object.assign(run, materializationStatus(anchorId, profile), {
+ run_id: run.run_id,
+ generation_id: run.generation_id,
+ })
  return { ...run }
  }
 
@@ -3184,52 +3203,85 @@ export function installConfigurableAppMockBridge(options = {}) {
  return run ? { ...run } : null
  }
 
- function retryReferenceMaterialization(input = {}) {
- const run = getReferenceMaterializationStatus(input)
- if (!run) throw new Error('Materialization run was not found.')
- return run
- }
-
  function listReferenceMaterializationChapterProgress(input = {}) {
  const run = getReferenceMaterializationStatus(input)
  const page = Math.max(1, Number(input.page ?? 1))
  const size = Math.max(1, Number(input.size ?? 20))
  if (!run) return pagedResult([], page, size, 0)
- const items = Array.from({ length: run.total_chapters }, (_, index) => ({
- chapter_index: index + 1,
- batch_index: Math.floor(index / run.chapter_batch_size),
- status: 'completed',
- material_count: 2,
- vector_count: 2,
- model_call_count: 1,
- started_at: now,
- completed_at: now,
- last_error_code: null,
- last_error_message: null,
- row_version: 1,
- }))
- return pagedResult(items, page, size, items.length)
+ const items = Array.from({ length: run.total_chapters }, (_, index) => {
+ const chapterIndex = index + 1
+ const failed = run.status === 'failed' && run.current_chapter_index === chapterIndex
+ const pending = run.status !== 'completed' && chapterIndex > (run.current_chapter_index ?? run.total_chapters)
+ const status = failed ? 'failed' : pending ? 'pending' : 'completed'
+ const completed = status === 'completed'
+ return {
+ chapter_index: chapterIndex,
+ status,
+ material_count: completed ? 2 : 0,
+ vector_count: completed ? 2 : 0,
+ model_call_count: status === 'pending' ? 0 : 1,
+ started_at: status === 'pending' ? null : now,
+ completed_at: completed ? now : null,
+ last_error_code: failed ? run.last_error_code : null,
+ last_error_message: failed ? run.last_error_message : null,
+ }
+ })
+ return pagedResult(items.slice((page - 1) * size, page * size), page, size, items.length)
+ }
+
+ function materializationRunMaterials(run) {
+ const snippets = [
+  ['动作', '她把杯底半圈水痕压进记忆里。\n\n她没有回答，目光越过他落在雨幕里。', '用克制反应承接跨段对话并保留线索压力。', ['信息揭示', '压力积累']],
+  ['对话', '“你认得留下它的人。”\n\n对面的人停了两息，答非所问地提起旧门的锁。', '让对话中的回避成为下一步推断的依据。', ['悬念', '人物塑造']],
+  ]
+     return Array.from({ length: run.total_chapters }, (_, chapterOffset) => snippets.map(([sourceKind, text, reuseHint, narrativeFunctions], ordinal) => ({
+ material_id: `mock-active-material-${run.anchor_id}-${chapterOffset + 1}-${ordinal + 1}`,
+ generation_id: run.generation_id,
+ anchor_id: run.anchor_id,
+ chapter_index: chapterOffset + 1,
+ ordinal,
+  metadata: {
+  source_span: { start_line: ordinal + 1, end_line: ordinal + 3 },
+  source_kind: sourceKind,
+  entities: ordinal === 0 ? [{ name: '林岚', kind: '人物' }] : [{ name: '旧门', kind: '物件' }],
+  setting: { location: '雨夜的旧宅门前', time: '深夜', environment: '雨声压住窗沿' },
+  perspective: ordinal === 0 ? { mode: '限知', focus_entity: '林岚' } : { mode: '客观', focus_entity: null },
+  event: ordinal === 0 ? '她注意到杯底水痕，却没有回应追问。' : '对话者回避问题，提起旧门的锁。',
+  facts: ordinal === 0 ? [{ subject: '林岚', content: '她注意到杯底水痕。' }] : [{ subject: '对话者', content: '他回避了身份问题。' }],
+  causality: ordinal === 0 ? { cause: '杯底水痕触发警觉', consequence: '林岚保持沉默' } : { cause: '身份问题被提出', consequence: '对话者转而谈及旧门锁' },
+  state_changes: ordinal === 0 ? [{ subject: '林岚', before: '平静观察', after: '保持戒备' }] : [{ subject: '双方关系', before: '试探', after: '猜疑加深' }],
+  character_dynamics: ordinal === 0 ? '林岚以沉默保持戒备。' : '双方试探加深，信任尚未建立。',
+  conflict: ordinal === 0 ? { pressure: '线索暴露与回避反应形成压力。', cost: '林岚不能贸然追问。' } : { pressure: '关键身份被回避。', cost: '真相仍受阻。' },
+  information: ordinal === 0 ? { role: '揭示', content: '水痕提示有人刚刚来过。' } : { role: '隐藏', content: '对话者知晓留下物件的人。' },
+  emotion: ordinal === 0 ? { tone: '克制', subtext: '她已察觉异常但不愿暴露。' } : { tone: '神秘', subtext: '回避本身暴露了秘密。' },
+  narrative_functions: narrativeFunctions,
+  foreshadowing: ordinal === 0 ? [{ phase: '埋设', target: '水痕来源将被追查' }] : [{ phase: '强化', target: '旧门锁关联旧案' }],
+  motifs: ordinal === 0 ? ['雨幕', '水痕'] : ['旧门', '锁'],
+  expression_techniques: ordinal === 0 ? ['动作替代解释', '环境烘托'] : ['对白留白', '信息延迟'],
+  reuse_hint: reuseHint,
+  },
+       text: chapterOffset === 0 ? text : `${text}\n\n第${chapterOffset + 1}章的线索仍未揭示。`,
+ text_hash: `mock-text-hash-${run.anchor_id}-${chapterOffset + 1}-${ordinal + 1}`,
+ }))).flat()
  }
 
  function activeMaterials(anchorId) {
  const run = getReferenceMaterializationStatus({ anchor_id: anchorId })
  if (run?.status !== 'completed' || !run.vector_index_healthy) return []
- const snippets = [
- ['action_reaction', '她把杯底半圈水痕压进记忆里。\n\n她没有回答，目光越过他落在雨幕里。', '用克制反应承接跨段对话并保留线索压力。', ['reveal', 'restraint']],
- ['dialogue_subtext', '“你认得留下它的人。”\n\n对面的人停了两息，答非所问地提起旧门的锁。', '让对话中的回避成为下一步推断的依据。', ['dialogue', 'subtext']],
- ]
-    return Array.from({ length: run.total_chapters }, (_, chapterOffset) => snippets.map(([materialType, text, description, tags], ordinal) => ({
- material_id: `mock-active-material-${anchorId}-${chapterOffset + 1}-${ordinal + 1}`,
- generation_id: run.generation_id,
- anchor_id: anchorId,
- chapter_index: chapterOffset + 1,
- ordinal,
- material_type: materialType,
-      text: chapterOffset === 0 ? text : `${text}\n\n第${chapterOffset + 1}章的线索仍未揭示。`,
- description,
- tags,
- text_hash: `mock-text-hash-${anchorId}-${chapterOffset + 1}-${ordinal + 1}`,
- }))).flat()
+ return materializationRunMaterials(run)
+ }
+
+ function listReferenceMaterializationChapterMaterials(input = {}) {
+ const run = getReferenceMaterializationStatus(input)
+ const chapterIndex = Number(input.chapter_index ?? 0)
+ const page = Math.max(1, Number(input.page ?? 1))
+ const size = Math.max(1, Number(input.size ?? 20))
+ if (!run || !Number.isInteger(chapterIndex) || chapterIndex <= 0 || chapterIndex > run.total_chapters) {
+ throw new Error('Materialization chapter was not found.')
+ }
+ const materials = materializationRunMaterials(run)
+ .filter((material) => material.chapter_index === chapterIndex)
+ return pagedResult(materials.slice((page - 1) * size, page * size), page, size, materials.length)
  }
 
  function listReferenceMaterials(input = {}) {
@@ -3245,7 +3297,7 @@ export function installConfigurableAppMockBridge(options = {}) {
  ? requestedIds
  : state.materializationRuns.map((run) => run.anchor_id)
  const query = String(input.query ?? '').trim().toLowerCase()
- const matches = anchorIds.flatMap(activeMaterials).filter((material) => !query || [material.text, material.description, ...material.tags]
+  const matches = anchorIds.flatMap(activeMaterials).filter((material) => !query || [material.text, material.metadata.source_kind, material.metadata.reuse_hint, material.metadata.event, material.metadata.character_dynamics, material.metadata.conflict?.pressure, material.metadata.conflict?.cost, material.metadata.information?.role, material.metadata.information?.content, material.metadata.emotion?.tone, material.metadata.emotion?.subtext, ...material.metadata.narrative_functions, ...material.metadata.motifs, ...material.metadata.expression_techniques, ...material.metadata.facts.map((fact) => fact.content), ...material.metadata.entities.map((entity) => entity.name)]
  .join(' ').toLowerCase().includes(query))
  const maxResults = Math.max(1, Number(input.max_results ?? 12))
  return matches.slice(0, maxResults).map((material, index) => ({ ...material, vector_distance: 0.08 + index / 100 }))
@@ -3270,8 +3322,8 @@ export function installConfigurableAppMockBridge(options = {}) {
  blueprint_id: `mock-materialization-blueprint-${index + 1}`,
  strategy: index === 0 ? '先确认水痕线索，再延迟揭示人物的真实动机。' : '将线索压力前置，用反应差异制造下一章冲突。',
  beats: [
- { beat_id: `mock-beat-${index}-1`, beat_index: 1, intent: '让主角发现线索与旧案的关联。', narrative_function: 'information_reveal', materials: [materialLink(materials[0], '用克制反应保留判断空间。')] },
- { beat_id: `mock-beat-${index}-2`, beat_index: 2, intent: '在结尾抛出新的不确定性。', narrative_function: 'hook', materials: [materialLink(materials[1], '以延迟动作建立未解压力。')] },
+  { beat_id: `mock-beat-${index}-1`, beat_index: 1, intent: '让主角发现线索与旧案的关联。', narrative_function: '信息揭示', materials: [materialLink(materials[0], '用克制反应保留判断空间。')] },
+  { beat_id: `mock-beat-${index}-2`, beat_index: 2, intent: '在结尾抛出新的不确定性。', narrative_function: '钩子', materials: [materialLink(materials[1], '以延迟动作建立未解压力。')] },
  ],
  })),
  }

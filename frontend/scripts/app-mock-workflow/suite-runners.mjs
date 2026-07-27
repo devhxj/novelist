@@ -12,6 +12,7 @@ import {
   verifyPatternBridgeCalls,
   verifyReferenceWorkspaceBridgeCalls,
   verifyRelativeTimeBridgeCalls,
+  verifySettingsBridgeCalls,
   verifySmokeBridgeCalls,
   verifyStartupBridgeCalls,
   verifyStressGuardrails,
@@ -611,18 +612,18 @@ export async function runFullSuite(browser, url) {
     await page.screenshot({ path: path.join(outputDir, 'app-04-chat.png'), fullPage: true })
   }
 
-  if (shouldRun('@surface') || isPhase15Surface) {
+  if (shouldRun('@surface') || isPhase15Surface || shouldRun('@settings')) {
     logStep('checking settings path')
     await verifySettingsWorkflow(page)
     await page.screenshot({ path: path.join(outputDir, 'app-05-settings.png'), fullPage: true })
   }
 
-  if (shouldRun('@surface')) {
+  if (shouldRun('@surface') || shouldRun('@settings')) {
     logStep('checking settings persistence path')
     await verifySettingsPersistenceWorkflow(browser, url, consoleErrors, pageErrors)
   }
 
-  if (shouldRun('@surface')) {
+  if (shouldRun('@surface') || shouldRun('@settings')) {
     logStep('checking settings failure path')
     await verifySettingsFailureWorkflow(browser, url, consoleErrors, pageErrors)
   }
@@ -720,6 +721,8 @@ export async function runFullSuite(browser, url) {
     await verifyPhase15SurfaceBridgeCalls(page)
   } else if (runConfig.grep === '@error') {
     await verifyErrorBridgeCalls(page)
+  } else if (runConfig.grep === '@settings') {
+    await verifySettingsBridgeCalls(page)
   } else {
     await verifyBridgeCalls(page)
   }

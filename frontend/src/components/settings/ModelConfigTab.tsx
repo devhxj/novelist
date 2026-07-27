@@ -40,16 +40,16 @@ type EmbeddingTestResult = {
 }
 
 const emptyEmbeddingConfig = (): EmbeddingConfigView => ({
-  provider_type: '',
-  provider_key: '',
+  provider_type: 'onnx',
+  provider_key: 'onnx',
   endpoint_url: '',
   api_key: '',
-  model_id: '',
-  dimensions: null,
+  model_id: 'bge-small-zh-v1.5',
+  dimensions: 512,
   user: '',
   onnx_model_path: '',
   onnx_vocab_path: '',
-  max_sequence_length: null,
+  max_sequence_length: 512,
   normalize_embeddings: true,
 })
 

@@ -4,6 +4,7 @@ import {
   CheckCircle2,
   CircleAlert,
   ClipboardCheck,
+  Eye,
   FileStack,
   Loader2,
   Play,
@@ -11,6 +12,7 @@ import {
   ScanSearch,
   Sparkles,
   Workflow,
+  X,
   XCircle,
 } from 'lucide-react'
 import { useApp } from '@/hooks/useApp'
@@ -25,7 +27,7 @@ type Props = {
   onMaterializationChange: () => void
 }
 
-type Action = 'analyze' | 'manual-preview' | 'confirm' | 'enqueue' | 'retry' | null
+type Action = 'analyze' | 'manual-preview' | 'confirm' | 'enqueue' | 'run-all' | `chapter-${number}` | null
 
 const numberFormatter = new Intl.NumberFormat('zh-CN')
 
@@ -52,6 +54,7 @@ function stageLabel(stage: string): string {
     extracting: '提取材料',
     embedding: '生成向量',
     indexing: '建立索引',
+    paused: '等待运行',
     completed: '完成',
     failed: '失败',
   }
@@ -65,6 +68,61 @@ function chapterSplitErrorMessage(error: unknown): string {
   return '自动章节分析失败。请检查当前大模型配置和来源文件后重试。'
 }
 
+function materializationActionErrorMessage(error: unknown, fallback: string): string {
+  return error instanceof BridgeError ? `${error.code}：${error.message}` : fallback
+}
+
+function MaterialMetadataRows({ metadata }: { metadata: reference.ReferenceMaterialMetadata }) {
+  const setting = metadata.setting
+    ? [metadata.setting.location && `地点：${metadata.setting.location}`, metadata.setting.time && `时间：${metadata.setting.time}`, metadata.setting.environment && `环境：${metadata.setting.environment}`].filter(Boolean).join('；')
+    : null
+  const perspective = metadata.perspective
+    ? metadata.perspective.focus_entity ? `${metadata.perspective.mode}：${metadata.perspective.focus_entity}` : metadata.perspective.mode
+    : null
+  const causality = metadata.causality
+    ? [metadata.causality.cause && `原因：${metadata.causality.cause}`, metadata.causality.consequence && `结果：${metadata.causality.consequence}`].filter(Boolean).join('；')
+    : null
+  const conflict = metadata.conflict
+    ? [metadata.conflict.pressure && `压力：${metadata.conflict.pressure}`, metadata.conflict.cost && `代价：${metadata.conflict.cost}`].filter(Boolean).join('；')
+    : null
+  const information = metadata.information
+    ? [metadata.information.role && `角色：${metadata.information.role}`, metadata.information.content && `内容：${metadata.information.content}`].filter(Boolean).join('；')
+    : null
+  const emotion = metadata.emotion
+    ? [metadata.emotion.tone && `情绪：${metadata.emotion.tone}`, metadata.emotion.subtext && `潜台词：${metadata.emotion.subtext}`].filter(Boolean).join('；')
+    : null
+  const rows: Array<[string, string | null | undefined]> = [
+    ['来源类型', metadata.source_kind],
+    ['原文行', `${metadata.source_span.start_line}–${metadata.source_span.end_line}`],
+    ['实体', metadata.entities.length > 0 ? metadata.entities.map((entity) => `${entity.name}（${entity.kind}）`).join('、') : null],
+    ['场景', setting],
+    ['叙述视角', perspective],
+    ['事件', metadata.event],
+    ['事实要点', metadata.facts.length > 0 ? metadata.facts.map((fact) => fact.subject ? `${fact.subject}：${fact.content}` : fact.content).join('；') : null],
+    ['因果', causality],
+    ['状态变化', metadata.state_changes.length > 0 ? metadata.state_changes.map((change) => `${change.subject}：${change.before}→${change.after}`).join('；') : null],
+    ['人物动态', metadata.character_dynamics],
+    ['冲突/代价', conflict],
+    ['信息', information],
+    ['情绪/潜台词', emotion],
+    ['叙事作用', metadata.narrative_functions.length > 0 ? metadata.narrative_functions.join('、') : null],
+    ['伏笔线', metadata.foreshadowing.length > 0 ? metadata.foreshadowing.map((item) => `${item.phase}：${item.target}`).join('；') : null],
+    ['意象/母题', metadata.motifs.length > 0 ? metadata.motifs.join('、') : null],
+    ['表达技法', metadata.expression_techniques.length > 0 ? metadata.expression_techniques.join('、') : null],
+    ['复用提示', metadata.reuse_hint],
+  ]
+  return (
+    <dl className="mt-2 grid gap-x-3 gap-y-1 text-[11px] leading-4 sm:grid-cols-[4.75rem_minmax(0,1fr)]">
+      {rows.filter(([, value]) => Boolean(value)).map(([label, value]) => (
+        <div key={label} className="contents">
+          <dt className="text-muted-foreground">{label}</dt>
+          <dd className="min-w-0 break-words text-foreground/80">{value}</dd>
+        </div>
+      ))}
+    </dl>
+  )
+}
+
 export default function ReferenceMaterialWorkspace({
   novelId,
   refreshKey,
@@ -76,16 +134,23 @@ export default function ReferenceMaterialWorkspace({
   const [profile, setProfile] = useState<reference.ChapterSplitProfile | null>(null)
   const [run, setRun] = useState<reference.MaterializationStatus | null>(null)
   const [progress, setProgress] = useState<reference.MaterializationChapterProgress[]>([])
+  const [progressPage, setProgressPage] = useState(1)
+  const [progressTotalPages, setProgressTotalPages] = useState(0)
   const [materials, setMaterials] = useState<reference.ReferenceMaterialListItem[]>([])
   const [materialPage, setMaterialPage] = useState(1)
   const [materialTotal, setMaterialTotal] = useState(0)
   const [materialTotalPages, setMaterialTotalPages] = useState(0)
-  const [batchSize, setBatchSize] = useState<5 | 10>(5)
+  const [selectedChapterIndex, setSelectedChapterIndex] = useState<number | null>(null)
+  const [selectedChapterMaterials, setSelectedChapterMaterials] = useState<reference.ReferenceMaterialListItem[]>([])
+  const [selectedChapterMaterialPage, setSelectedChapterMaterialPage] = useState(1)
+  const [selectedChapterMaterialTotal, setSelectedChapterMaterialTotal] = useState(0)
+  const [selectedChapterMaterialTotalPages, setSelectedChapterMaterialTotalPages] = useState(0)
   const [manualTemplate, setManualTemplate] = useState('')
   const [action, setAction] = useState<Action>(null)
   const [error, setError] = useState<string | null>(null)
   const requestIdRef = useRef(0)
   const notifiedCompletedRunRef = useRef<string | null>(null)
+  const chapterMaterialsCloseRef = useRef<HTMLButtonElement>(null)
 
   const selectedAnchor = useMemo(() => {
     const selected = new Set(selectedAnchorIds)
@@ -98,9 +163,15 @@ export default function ReferenceMaterialWorkspace({
     if (!anchor || !novelId) {
       setRun(null)
       setProgress([])
+      setProgressTotalPages(0)
       setMaterials([])
       setMaterialTotal(0)
       setMaterialTotalPages(0)
+      setSelectedChapterIndex(null)
+      setSelectedChapterMaterials([])
+      setSelectedChapterMaterialPage(1)
+      setSelectedChapterMaterialTotal(0)
+      setSelectedChapterMaterialTotalPages(0)
       return
     }
 
@@ -118,9 +189,43 @@ export default function ReferenceMaterialWorkspace({
     }
   }, [app, novelId])
 
-  const loadRunDetail = useCallback(async (status: reference.MaterializationStatus | null, page: number) => {
+  const loadSelectedChapterMaterials = useCallback(async (
+    status: reference.MaterializationStatus | null,
+    chapterIndex: number | null,
+    page: number,
+  ) => {
+    if (!status || chapterIndex == null || !novelId) {
+      setSelectedChapterMaterials([])
+      setSelectedChapterMaterialTotal(0)
+      setSelectedChapterMaterialTotalPages(0)
+      return
+    }
+
+    try {
+      const result = await app.ListReferenceMaterializationChapterMaterials({
+        novel_id: novelId,
+        anchor_id: status.anchor_id,
+        run_id: status.run_id,
+        chapter_index: chapterIndex,
+        page,
+        size: 10,
+      })
+      setSelectedChapterMaterials(result.items ?? [])
+      setSelectedChapterMaterialTotal(result.total ?? 0)
+      setSelectedChapterMaterialTotalPages(result.total_pages ?? 0)
+    } catch {
+      setError(`第 ${formatCount(chapterIndex)} 章材料加载失败。请刷新后重试。`)
+    }
+  }, [app, novelId])
+
+  const loadRunDetail = useCallback(async (
+    status: reference.MaterializationStatus | null,
+    chapterPage: number,
+    page: number,
+  ) => {
     if (!status || !novelId) {
       setProgress([])
+      setProgressTotalPages(0)
       setMaterials([])
       setMaterialTotal(0)
       setMaterialTotalPages(0)
@@ -133,7 +238,7 @@ export default function ReferenceMaterialWorkspace({
           novel_id: novelId,
           anchor_id: status.anchor_id,
           run_id: status.run_id,
-          page: 1,
+          page: chapterPage,
           size: 30,
         }),
         status.status === 'completed'
@@ -146,6 +251,7 @@ export default function ReferenceMaterialWorkspace({
           : Promise.resolve(null),
       ])
       setProgress(nextProgress.items ?? [])
+      setProgressTotalPages(nextProgress.total_pages ?? 0)
       setMaterials(nextMaterials?.items ?? [])
       setMaterialTotal(nextMaterials?.total ?? 0)
       setMaterialTotalPages(nextMaterials?.total_pages ?? 0)
@@ -159,16 +265,39 @@ export default function ReferenceMaterialWorkspace({
       setError(null)
       setProfile(null)
       setManualTemplate('')
+      setProgressPage(1)
       setMaterialPage(1)
+      setSelectedChapterIndex(null)
+      setSelectedChapterMaterialPage(1)
       void loadRun(selectedAnchor)
     }, 0)
     return () => window.clearTimeout(timer)
   }, [loadRun, refreshKey, selectedAnchor])
 
   useEffect(() => {
-    const timer = window.setTimeout(() => { void loadRunDetail(run, materialPage) }, 0)
+    const timer = window.setTimeout(() => { void loadRunDetail(run, progressPage, materialPage) }, 0)
     return () => window.clearTimeout(timer)
-  }, [loadRunDetail, materialPage, run])
+  }, [loadRunDetail, materialPage, progressPage, run])
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      void loadSelectedChapterMaterials(run, selectedChapterIndex, selectedChapterMaterialPage)
+    }, 0)
+    return () => window.clearTimeout(timer)
+  }, [loadSelectedChapterMaterials, run, selectedChapterIndex, selectedChapterMaterialPage])
+
+  useEffect(() => {
+    if (selectedChapterIndex == null) return
+    const focusTimer = window.setTimeout(() => chapterMaterialsCloseRef.current?.focus(), 0)
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setSelectedChapterIndex(null)
+    }
+    window.addEventListener('keydown', handleKeyDown)
+    return () => {
+      window.clearTimeout(focusTimer)
+      window.removeEventListener('keydown', handleKeyDown)
+    }
+  }, [selectedChapterIndex])
 
   useEffect(() => {
     if (!run || !['queued', 'extracting', 'embedding', 'indexing'].includes(run.status)) return
@@ -179,7 +308,11 @@ export default function ReferenceMaterialWorkspace({
   }, [loadRun, run, selectedAnchor])
 
   useEffect(() => {
-    if (run?.status !== 'completed' || notifiedCompletedRunRef.current === run.run_id) return
+    if (run?.status !== 'completed') {
+      notifiedCompletedRunRef.current = null
+      return
+    }
+    if (notifiedCompletedRunRef.current === run.run_id) return
     notifiedCompletedRunRef.current = run.run_id
     onMaterializationChange()
   }, [onMaterializationChange, run])
@@ -246,29 +379,48 @@ export default function ReferenceMaterialWorkspace({
         novel_id: novelId,
         anchor_id: selectedAnchor.anchor_id,
         split_profile_id: profile.split_profile_id,
-        chapter_batch_size: batchSize,
       })
       setRun(status)
-    } catch {
-      setError('材料化未能启动。大模型、向量模型和索引均必须可用；修复后请显式重试。')
+    } catch (error) {
+      setError(materializationActionErrorMessage(error, '材料化未能启动。'))
     } finally {
       setAction(null)
     }
   }
 
-  const retry = async () => {
+  const runAll = async () => {
     if (!run || !selectedAnchor) return
-    setAction('retry')
+    setAction('run-all')
     setError(null)
     try {
-      const status = await app.RetryReferenceMaterialization({
+      const status = await app.EnqueueReferenceMaterialization({
         novel_id: novelId,
         anchor_id: selectedAnchor.anchor_id,
+        split_profile_id: run.split_profile_id,
         run_id: run.run_id,
       })
       setRun(status)
-    } catch {
-      setError('材料化重试未能启动。请先修复显示的模型或索引问题。')
+    } catch (error) {
+      setError(materializationActionErrorMessage(error, '材料化未能继续。'))
+    } finally {
+      setAction(null)
+    }
+  }
+
+  const runChapter = async (chapterIndex: number) => {
+    if (!run || !selectedAnchor) return
+    setAction(`chapter-${chapterIndex}`)
+    setError(null)
+    try {
+      const status = await app.RunReferenceMaterializationChapter({
+        novel_id: novelId,
+        anchor_id: selectedAnchor.anchor_id,
+        run_id: run.run_id,
+        chapter_index: chapterIndex,
+      })
+      setRun(status)
+    } catch (error) {
+      setError(materializationActionErrorMessage(error, `第 ${formatCount(chapterIndex)} 章未能启动。`))
     } finally {
       setAction(null)
     }
@@ -303,6 +455,7 @@ export default function ReferenceMaterialWorkspace({
 
   const isBusy = action !== null
   const canStart = activeProfile?.status === 'confirmed' && !run
+  const canRunChapter = run != null && ['failed', 'paused', 'completed'].includes(run.status)
 
   return (
     <main data-testid="reference-corpus-workspace" className="reference-materialization-surface min-w-0 flex-1 overflow-y-auto bg-background" aria-busy={isBusy}>
@@ -428,7 +581,7 @@ export default function ReferenceMaterialWorkspace({
                 <p className="mt-1 text-xs leading-5 text-muted-foreground">
                   {run
                     ? `状态：${stageLabel(run.status)} · ${formatCount(run.processed_chapters)} / ${formatCount(run.total_chapters)} 章节`
-                    : '确认章节边界后，按固定批次依次处理；批内可以并行，批次之间保持顺序。'}
+                    : '确认章节边界后，将按章节顺序逐章提取、向量化并提交。'}
                 </p>
               </div>
             </div>
@@ -440,28 +593,16 @@ export default function ReferenceMaterialWorkspace({
                 className="inline-flex h-8 items-center gap-1.5 rounded-md bg-primary px-3 text-xs font-medium text-primary-foreground hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-50"
               >
                 {action === 'enqueue' ? <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden="true" /> : <Play className="h-3.5 w-3.5" aria-hidden="true" />}
-                启动材料化
+                运行全部
               </button>
             )}
-            {run?.status === 'failed' && (
-              <button type="button" onClick={() => { void retry() }} disabled={isBusy} className="inline-flex h-8 items-center gap-1.5 rounded-md border border-destructive/35 px-3 text-xs font-medium text-destructive hover:bg-destructive/5 disabled:cursor-not-allowed disabled:opacity-50">
-                {action === 'retry' ? <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden="true" /> : <RefreshCcw className="h-3.5 w-3.5" aria-hidden="true" />}
-                修复后重试
+            {run && ['failed', 'paused'].includes(run.status) && (
+              <button type="button" onClick={() => { void runAll() }} disabled={isBusy} className="inline-flex h-8 items-center gap-1.5 rounded-md border border-border px-3 text-xs font-medium text-foreground hover:bg-secondary disabled:cursor-not-allowed disabled:opacity-50">
+                {action === 'run-all' ? <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden="true" /> : <Play className="h-3.5 w-3.5" aria-hidden="true" />}
+                运行全部
               </button>
             )}
           </div>
-
-          {!run && activeProfile?.status === 'confirmed' && (
-            <div className="mt-3 flex flex-wrap items-center gap-2" role="group" aria-label="章节批次大小">
-              <span className="text-xs text-muted-foreground">每批并行章节</span>
-              {([5, 10] as const).map((size) => (
-                <button key={size} type="button" onClick={() => setBatchSize(size)} disabled={isBusy} aria-pressed={batchSize === size} className={`h-8 min-w-10 rounded-md border px-2.5 text-xs font-medium transition-colors ${batchSize === size ? 'border-primary bg-primary text-primary-foreground' : 'border-border text-foreground hover:bg-secondary'}`}>
-                  {size}
-                </button>
-              ))}
-              <span className="text-[11px] text-muted-foreground">默认 5；选择 10 会以 10 章为一个并行批次。</span>
-            </div>
-          )}
 
           {run && (
             <>
@@ -480,7 +621,7 @@ export default function ReferenceMaterialWorkspace({
               </dl>
               <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-1 text-[11px] text-muted-foreground">
                 <span className={runTone(run.status)}>运行 {run.status}</span>
-                <span>批次 {formatCount(run.completed_chapter_batches)} / {formatCount(run.total_chapter_batches)} · 每批 {run.chapter_batch_size} 章</span>
+                <span>{run.current_chapter_index == null ? '全部章节已提交' : `当前第 ${formatCount(run.current_chapter_index)} 章`}</span>
                 <span>{run.vector_index_healthy ? '向量索引完整' : '向量索引未就绪'}</span>
                 <span>LLM {run.llm.provider}/{run.llm.model_id}</span>
                 <span>向量 {run.embedding.provider}/{run.embedding.model_id}</span>
@@ -501,20 +642,106 @@ export default function ReferenceMaterialWorkspace({
             {progress.length === 0 ? (
               <p className="mt-3 text-xs text-muted-foreground">尚未取得章节进度。</p>
             ) : (
-              <ol className="mt-3 divide-y divide-border border-y border-border" aria-label="材料化章节进度">
-                {progress.map((item) => (
-                  <li key={item.chapter_index} className="grid grid-cols-[2.5rem_minmax(0,1fr)_auto] items-center gap-3 px-2 py-2 text-xs sm:px-3">
-                    <span className="text-muted-foreground">{item.chapter_index}</span>
-                    <span className="min-w-0">
-                      <span className="block truncate text-foreground">{stageLabel(item.status)}</span>
-                      <span className="mt-0.5 block text-[11px] text-muted-foreground">材料 {formatCount(item.material_count)} · 向量 {formatCount(item.vector_count)}</span>
-                    </span>
-                    <span className={runTone(item.status)}>{item.status}</span>
-                  </li>
-                ))}
-              </ol>
+              <>
+                <ol className="mt-3 divide-y divide-border border-y border-border" aria-label="材料化章节进度">
+                  {progress.map((item) => (
+                    <li key={item.chapter_index} className={`grid grid-cols-[2.5rem_minmax(0,1fr)_2rem_2rem_auto] items-center gap-2 px-2 py-2 text-xs sm:px-3 ${selectedChapterIndex === item.chapter_index ? 'bg-secondary/60' : ''}`}>
+                      <span className="text-muted-foreground">{item.chapter_index}</span>
+                      <span className="min-w-0">
+                        <span className="block truncate text-foreground">{stageLabel(item.status)}</span>
+                        <span className="mt-0.5 block text-[11px] text-muted-foreground">材料 {formatCount(item.material_count)} · 向量 {formatCount(item.vector_count)}</span>
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setSelectedChapterIndex(item.chapter_index)
+                          setSelectedChapterMaterialPage(1)
+                        }}
+                        disabled={isBusy}
+                        className="inline-flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground hover:bg-secondary hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50"
+                        aria-label={`查看第 ${item.chapter_index} 章材料`}
+                        title={`查看第 ${item.chapter_index} 章材料`}
+                        aria-pressed={selectedChapterIndex === item.chapter_index}
+                      >
+                        <Eye className="h-3.5 w-3.5" aria-hidden="true" />
+                      </button>
+                      {canRunChapter ? (
+                        <button
+                          type="button"
+                          onClick={() => { void runChapter(item.chapter_index) }}
+                          disabled={isBusy}
+                          className="inline-flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground hover:bg-secondary hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50"
+                          aria-label={`运行第 ${item.chapter_index} 章`}
+                          title={`运行第 ${item.chapter_index} 章`}
+                        >
+                          {action === `chapter-${item.chapter_index}` ? <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden="true" /> : <Play className="h-3.5 w-3.5" aria-hidden="true" />}
+                        </button>
+                      ) : <span aria-hidden="true" />}
+                      <span className={runTone(item.status)}>{item.status}</span>
+                    </li>
+                  ))}
+                </ol>
+                {progressTotalPages > 1 && (
+                  <nav className="mt-3 flex items-center justify-end gap-2" aria-label="章节进度分页">
+                    <button type="button" onClick={() => setProgressPage((page) => Math.max(1, page - 1))} disabled={progressPage <= 1 || isBusy} className="h-8 rounded-md border border-border px-2.5 text-xs text-foreground hover:bg-secondary disabled:cursor-not-allowed disabled:opacity-50">上一页</button>
+                    <span className="text-[11px] text-muted-foreground">{progressPage} / {progressTotalPages}</span>
+                    <button type="button" onClick={() => setProgressPage((page) => Math.min(progressTotalPages, page + 1))} disabled={progressPage >= progressTotalPages || isBusy} className="h-8 rounded-md border border-border px-2.5 text-xs text-foreground hover:bg-secondary disabled:cursor-not-allowed disabled:opacity-50">下一页</button>
+                  </nav>
+                )}
+              </>
             )}
           </section>
+        )}
+
+        {run && selectedChapterIndex != null && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-background/70 px-4 py-6 backdrop-blur-sm" onClick={() => setSelectedChapterIndex(null)}>
+            <section
+              role="dialog"
+              aria-modal="true"
+              aria-labelledby="chapter-materials-dialog-title"
+              className="flex max-h-[min(760px,92vh)] w-full max-w-3xl flex-col overflow-hidden rounded-lg border border-border bg-card shadow-xl"
+              onClick={(event) => event.stopPropagation()}
+            >
+              <header className="flex shrink-0 items-start justify-between gap-3 border-b border-border px-5 py-4">
+                <div className="min-w-0">
+                  <h2 id="chapter-materials-dialog-title" className="text-sm font-semibold text-foreground">第 {formatCount(selectedChapterIndex)} 章材料</h2>
+                  <p className="mt-1 text-xs text-muted-foreground">共 {formatCount(selectedChapterMaterialTotal)} 条，按提取顺序浏览。</p>
+                </div>
+                <button
+                  ref={chapterMaterialsCloseRef}
+                  type="button"
+                  onClick={() => setSelectedChapterIndex(null)}
+                  className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-secondary hover:text-foreground"
+                  aria-label="关闭章节材料"
+                  title="关闭"
+                >
+                  <X className="h-4 w-4" aria-hidden="true" />
+                </button>
+              </header>
+              <div className="min-h-0 overflow-y-auto px-5 py-4">
+                {selectedChapterMaterials.length === 0 ? (
+                  <p className="text-xs text-muted-foreground">本章尚无已提交材料。</p>
+                ) : (
+                  <ol className="divide-y divide-border border-y border-border" aria-label={`第 ${selectedChapterIndex} 章材料`}>
+                    {selectedChapterMaterials.map((material) => (
+                      <li key={material.material_id} className="px-3 py-3">
+                        <p className="text-[11px] text-muted-foreground">{material.metadata.source_kind}</p>
+                        <p className="mt-2 whitespace-pre-wrap break-words text-xs leading-5 text-foreground">{material.text}</p>
+                        <MaterialMetadataRows metadata={material.metadata} />
+                      </li>
+                    ))}
+                  </ol>
+                )}
+              </div>
+              {selectedChapterMaterialTotalPages > 1 && (
+                <nav className="flex shrink-0 items-center justify-end gap-2 border-t border-border px-5 py-3" aria-label="章节材料分页">
+                  <button type="button" onClick={() => setSelectedChapterMaterialPage((page) => Math.max(1, page - 1))} disabled={selectedChapterMaterialPage <= 1 || isBusy} className="h-8 rounded-md border border-border px-2.5 text-xs text-foreground hover:bg-secondary disabled:cursor-not-allowed disabled:opacity-50">上一页</button>
+                  <span className="text-[11px] text-muted-foreground">{selectedChapterMaterialPage} / {selectedChapterMaterialTotalPages}</span>
+                  <button type="button" onClick={() => setSelectedChapterMaterialPage((page) => Math.min(selectedChapterMaterialTotalPages, page + 1))} disabled={selectedChapterMaterialPage >= selectedChapterMaterialTotalPages || isBusy} className="h-8 rounded-md border border-border px-2.5 text-xs text-foreground hover:bg-secondary disabled:cursor-not-allowed disabled:opacity-50">下一页</button>
+                </nav>
+              )}
+            </section>
+          </div>
         )}
 
         {run?.status === 'completed' && (
@@ -529,14 +756,9 @@ export default function ReferenceMaterialWorkspace({
             <ol className="mt-3 divide-y divide-border border-y border-border" aria-label="当前材料">
               {materials.map((material) => (
                 <li key={material.material_id} className="px-3 py-3">
-                  <p className="text-[11px] text-muted-foreground">第 {material.chapter_index} 章 · {material.material_type.replaceAll('_', ' ')}</p>
+                  <p className="text-[11px] text-muted-foreground">第 {material.chapter_index} 章 · {material.metadata.source_kind}</p>
                   <p className="mt-2 whitespace-pre-wrap break-words text-xs leading-5 text-foreground">{material.text}</p>
-                  {material.description && <p className="mt-2 text-[11px] leading-4 text-muted-foreground">{material.description}</p>}
-                  {material.tags.length > 0 && (
-                    <div className="mt-2 flex flex-wrap gap-1">
-                      {material.tags.slice(0, 5).map((tag) => <span key={tag} className="border border-border bg-muted/35 px-1.5 py-0.5 text-[11px] text-muted-foreground">{tag.replaceAll('_', ' ')}</span>)}
-                    </div>
-                  )}
+                  <MaterialMetadataRows metadata={material.metadata} />
                 </li>
               ))}
             </ol>
