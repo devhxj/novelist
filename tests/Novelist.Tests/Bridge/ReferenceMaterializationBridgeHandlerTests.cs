@@ -17,20 +17,22 @@ public sealed class ReferenceMaterializationBridgeHandlerTests
         await AssertOkAsync(dispatcher, "AnalyzeReferenceChapterSplit", new AnalyzeReferenceChapterSplitPayload(42, 99));
         await AssertOkAsync(dispatcher, "PreviewReferenceChapterSplit", new PreviewReferenceChapterSplitPayload(42, 99, "第{number}章 {title}"));
         await AssertOkAsync(dispatcher, "ConfirmReferenceChapterSplit", new ConfirmReferenceChapterSplitPayload(42, 99, "profile-1"));
-        await AssertOkAsync(dispatcher, "EnqueueReferenceMaterialization", new EnqueueReferenceMaterializationPayload(42, 99, "profile-1", 10));
+        await AssertOkAsync(dispatcher, "EnqueueReferenceMaterialization", new EnqueueReferenceMaterializationPayload(42, 99, "profile-1"));
+        await AssertOkAsync(dispatcher, "RunReferenceMaterializationChapter", new RunReferenceMaterializationChapterPayload(42, 99, "run-1", 2));
         await AssertOkAsync(dispatcher, "GetReferenceMaterializationStatus", new GetReferenceMaterializationStatusPayload(42, 99, "run-1"));
-        await AssertOkAsync(dispatcher, "RetryReferenceMaterialization", new RetryReferenceMaterializationPayload(42, 99, "run-1"));
         await AssertOkAsync(dispatcher, "ListReferenceMaterializationChapterProgress", new ListReferenceMaterializationChapterProgressPayload(42, 99, "run-1", 1, 20));
+        await AssertOkAsync(dispatcher, "ListReferenceMaterializationChapterMaterials", new ListReferenceMaterializationChapterMaterialsPayload(42, 99, "run-1", 2, 1, 20));
 
         Assert.Equal(
             [
                 "analyze:42:99",
                 "preview:42:99:第{number}章 {title}",
                 "confirm:42:99:profile-1",
-                "enqueue:42:99:profile-1:10",
+                "enqueue:42:99:profile-1",
+                "chapter:42:99:run-1:2",
                 "status:42:99:run-1",
-                "retry:42:99:run-1",
-                "progress:42:99:run-1:1:20"
+                "progress:42:99:run-1:1:20",
+                "materials:42:99:run-1:2:1:20"
             ],
             service.Calls);
     }
@@ -163,6 +165,14 @@ public sealed class ReferenceMaterializationBridgeHandlerTests
         }, BridgeJson.SerializerOptions);
     }
 
+    private static ReferenceMaterialMetadataPayload ArchiveMetadata(
+        string sourceKind,
+        string reuseHint,
+        IReadOnlyList<string>? narrativeFunctions = null) =>
+        new(
+            new ReferenceMaterialSourceSpanPayload(1, 1), sourceKind, [], null, null, null, [], null, [], null,
+            null, null, null, narrativeFunctions ?? [], [], [], [], reuseHint);
+
     private sealed class RecordingMaterializationService : IReferenceMaterializationService
     {
         public List<string> Calls { get; } = [];
@@ -199,11 +209,19 @@ public sealed class ReferenceMaterializationBridgeHandlerTests
             EnqueueReferenceMaterializationPayload input,
             CancellationToken cancellationToken)
         {
-            Calls.Add($"enqueue:{input.NovelId}:{input.AnchorId}:{input.SplitProfileId}:{input.ChapterBatchSize}");
+            Calls.Add($"enqueue:{input.NovelId}:{input.AnchorId}:{input.SplitProfileId}");
             if (EnqueueException is not null)
             {
                 throw EnqueueException;
             }
+            return ValueTask.FromResult(CreateStatus(input.AnchorId));
+        }
+
+        public ValueTask<ReferenceMaterializationStatusPayload> RunMaterializationChapterAsync(
+            RunReferenceMaterializationChapterPayload input,
+            CancellationToken cancellationToken)
+        {
+            Calls.Add($"chapter:{input.NovelId}:{input.AnchorId}:{input.RunId}:{input.ChapterIndex}");
             return ValueTask.FromResult(CreateStatus(input.AnchorId));
         }
 
@@ -215,17 +233,6 @@ public sealed class ReferenceMaterializationBridgeHandlerTests
             return ValueTask.FromResult<ReferenceMaterializationStatusPayload?>(CreateStatus(input.AnchorId));
         }
 
-        public ValueTask<ReferenceMaterializationStatusPayload> RetryMaterializationAsync(
-            RetryReferenceMaterializationPayload input,
-            CancellationToken cancellationToken)
-        {
-            Calls.Add($"retry:{input.NovelId}:{input.AnchorId}:{input.RunId}");
-            return ValueTask.FromResult(CreateStatus(input.AnchorId) with
-            {
-                Status = ReferenceMaterializationRunStates.Extracting
-            });
-        }
-
         public ValueTask<PageResultPayload<ReferenceMaterializationChapterProgressPayload>> ListMaterializationChapterProgressAsync(
             ListReferenceMaterializationChapterProgressPayload input,
             CancellationToken cancellationToken)
@@ -234,7 +241,6 @@ public sealed class ReferenceMaterializationBridgeHandlerTests
             return ValueTask.FromResult(new PageResultPayload<ReferenceMaterializationChapterProgressPayload>(
                 [new ReferenceMaterializationChapterProgressPayload(
                     1,
-                    0,
                     ReferenceMaterializationChapterStates.Pending,
                     0,
                     0,
@@ -242,8 +248,28 @@ public sealed class ReferenceMaterializationBridgeHandlerTests
                     null,
                     null,
                     null,
-                    null,
-                    0)],
+                    null)],
+                1,
+                input.Page,
+                input.Size,
+                1));
+        }
+
+        public ValueTask<PageResultPayload<ReferenceMaterialListItemPayload>> ListMaterializationChapterMaterialsAsync(
+            ListReferenceMaterializationChapterMaterialsPayload input,
+            CancellationToken cancellationToken)
+        {
+            Calls.Add($"materials:{input.NovelId}:{input.AnchorId}:{input.RunId}:{input.ChapterIndex}:{input.Page}:{input.Size}");
+            return ValueTask.FromResult(new PageResultPayload<ReferenceMaterialListItemPayload>(
+                [new ReferenceMaterialListItemPayload(
+                    "material-1",
+                    "generation-1",
+                    input.AnchorId,
+                    input.ChapterIndex,
+                    0,
+                    "完整材料。\n\n第二段。",
+                    ArchiveMetadata("对话", "完整说明。"),
+                    "hash-1")],
                 1,
                 input.Page,
                 input.Size,
@@ -276,14 +302,9 @@ public sealed class ReferenceMaterializationBridgeHandlerTests
                 "profile-1",
                 "generation-1",
                 ReferenceMaterializationRunStates.Queued,
-                5,
                 2,
                 0,
                 1,
-                0,
-                0,
-                1,
-                2,
                 0,
                 0,
                 0,
@@ -293,8 +314,7 @@ public sealed class ReferenceMaterializationBridgeHandlerTests
                 null,
                 DateTimeOffset.UtcNow,
                 null,
-                false,
-                "start_processing");
+                false);
         }
     }
 
@@ -334,10 +354,8 @@ public sealed class ReferenceMaterializationBridgeHandlerTests
                         "material-1",
                         99,
                         "generation-1",
-                        "passage",
                         MaterialText,
-                        "Reusable pressure.",
-                        ["conflict"],
+                        ArchiveMetadata("叙述", "Reusable pressure.", ["冲突升级"]),
                         0.2,
                         "Semantic match.")])])]);
     }

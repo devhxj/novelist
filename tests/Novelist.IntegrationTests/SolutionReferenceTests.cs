@@ -15,15 +15,20 @@ public sealed class SolutionReferenceTests
     }
 
     [Fact]
-    public void AppProjectUsesWindowedDesktopExecutable()
+    public void AppProjectUsesConsoleForDebugAndWindowedExecutableForRelease()
     {
         var project = XDocument.Load(Path.Combine(FindRepositoryRoot(), "src", "Novelist.App", "Novelist.App.csproj"));
-        var outputType = project
+        var outputTypes = project
             .Descendants("OutputType")
-            .Select(element => element.Value)
-            .FirstOrDefault();
+            .Select(element => new
+            {
+                Value = element.Value,
+                Condition = element.Attribute("Condition")?.Value
+            })
+            .ToArray();
 
-        Assert.Equal("WinExe", outputType);
+        Assert.Contains(outputTypes, item => item.Value == "WinExe" && item.Condition is null);
+        Assert.Contains(outputTypes, item => item.Value == "Exe" && item.Condition == "'$(Configuration)' == 'Debug'");
     }
 
     [Fact]

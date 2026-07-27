@@ -39,12 +39,11 @@ internal sealed partial class SqliteReferenceMaterializationRunStore
             throw new InvalidOperationException("Reference source already has an active materialization run.");
         }
 
-        var totalBatches = (boundaries.Count + seed.ChapterBatchSize - 1) / seed.ChapterBatchSize;
-        await InsertRunAsync(connection, transaction, seed, boundaries.Count, totalBatches, cancellationToken);
-        await UpsertAnchorStateAsync(connection, transaction, seed.AnchorId, seed.StartedAt, cancellationToken);
-        await InsertChapterProgressAsync(connection, transaction, seed.RunId, boundaries, seed.ChapterBatchSize, cancellationToken);
+        await InsertRunAsync(connection, transaction, seed, boundaries.Count, cancellationToken);
+        await UpsertAnchorStateAsync(connection, transaction, seed.AnchorId, cancellationToken);
+        await InsertChapterProgressAsync(connection, transaction, seed.RunId, boundaries, cancellationToken);
         await transaction.CommitAsync(cancellationToken);
-        return CreateQueuedStatus(seed, boundaries.Count, totalBatches);
+        return CreateQueuedStatus(seed, boundaries.Count);
     }
 
     public async ValueTask<ReferenceMaterializationStatusPayload?> GetAsync(
@@ -55,9 +54,8 @@ internal sealed partial class SqliteReferenceMaterializationRunStore
         await using var connection = await OpenConnectionAsync(databasePath, cancellationToken);
         await using var command = connection.CreateCommand();
         command.CommandText = """
-            SELECT run_id, anchor_id, split_profile_id, generation_id, status, chapter_batch_size,
-                   total_chapters, processed_chapters, total_chapter_batches, completed_chapter_batches,
-                   current_batch_index, current_batch_start_chapter, current_batch_end_chapter,
+            SELECT run_id, anchor_id, split_profile_id, generation_id, status,
+                   total_chapters, processed_chapters, current_chapter_index,
                    material_count, vector_count,
                    (SELECT COALESCE(SUM(progress.model_call_count), 0)
                     FROM reference_materialization_chapter_progress progress
@@ -67,6 +65,9 @@ internal sealed partial class SqliteReferenceMaterializationRunStore
                    EXISTS(
                      SELECT 1
                      FROM reference_materialization_vector_indexes vector_index
+                     JOIN reference_anchor_materialization_state active_state
+                       ON active_state.anchor_id = reference_materialization_runs.anchor_id
+                      AND active_state.active_generation_id = reference_materialization_runs.generation_id
                      WHERE vector_index.run_id = reference_materialization_runs.run_id
                        AND vector_index.status = 'ready'
                        AND vector_index.vector_count = reference_materialization_runs.vector_count
@@ -92,9 +93,8 @@ internal sealed partial class SqliteReferenceMaterializationRunStore
         await using var connection = await OpenConnectionAsync(databasePath, cancellationToken);
         await using var command = connection.CreateCommand();
         command.CommandText = """
-            SELECT run_id, anchor_id, split_profile_id, generation_id, status, chapter_batch_size,
-                   total_chapters, processed_chapters, total_chapter_batches, completed_chapter_batches,
-                   current_batch_index, current_batch_start_chapter, current_batch_end_chapter,
+            SELECT run_id, anchor_id, split_profile_id, generation_id, status,
+                   total_chapters, processed_chapters, current_chapter_index,
                    material_count, vector_count,
                    (SELECT COALESCE(SUM(progress.model_call_count), 0)
                     FROM reference_materialization_chapter_progress progress
@@ -104,6 +104,9 @@ internal sealed partial class SqliteReferenceMaterializationRunStore
                    EXISTS(
                      SELECT 1
                      FROM reference_materialization_vector_indexes vector_index
+                     JOIN reference_anchor_materialization_state active_state
+                       ON active_state.anchor_id = reference_materialization_runs.anchor_id
+                      AND active_state.active_generation_id = reference_materialization_runs.generation_id
                      WHERE vector_index.run_id = reference_materialization_runs.run_id
                        AND vector_index.status = 'ready'
                        AND vector_index.vector_count = reference_materialization_runs.vector_count
@@ -141,8 +144,8 @@ internal sealed partial class SqliteReferenceMaterializationRunStore
         var offset = checked((page - 1) * size);
         await using var command = connection.CreateCommand();
         command.CommandText = """
-            SELECT chapter_index, batch_index, status, material_count, vector_count,
-                   model_call_count, started_at, completed_at, last_error_code, last_error_message, row_version
+            SELECT chapter_index, status, material_count, vector_count,
+                   model_call_count, started_at, completed_at, last_error_code, last_error_message
             FROM reference_materialization_chapter_progress
             WHERE run_id = $run_id
             ORDER BY chapter_index ASC
@@ -157,16 +160,14 @@ internal sealed partial class SqliteReferenceMaterializationRunStore
         {
             items.Add(new ReferenceMaterializationChapterProgressPayload(
                 reader.GetInt32(0),
-                reader.GetInt32(1),
-                reader.GetString(2),
+                reader.GetString(1),
+                reader.GetInt32(2),
                 reader.GetInt32(3),
                 reader.GetInt32(4),
-                reader.GetInt32(5),
+                reader.IsDBNull(5) ? null : ParseTimestamp(reader.GetString(5)),
                 reader.IsDBNull(6) ? null : ParseTimestamp(reader.GetString(6)),
-                reader.IsDBNull(7) ? null : ParseTimestamp(reader.GetString(7)),
-                reader.IsDBNull(8) ? null : reader.GetString(8),
-                reader.IsDBNull(9) ? null : reader.GetString(9),
-                reader.GetInt64(10)));
+                reader.IsDBNull(7) ? null : reader.GetString(7),
+                reader.IsDBNull(8) ? null : reader.GetString(8)));
         }
 
         var totalPages = total == 0 ? 0 : (int)Math.Ceiling(total / (double)size);
@@ -235,23 +236,6 @@ internal sealed partial class SqliteReferenceMaterializationRunStore
             : null;
     }
 
-    public async ValueTask<string?> GetExtractorSchemaVersionAsync(
-        string runId,
-        CancellationToken cancellationToken)
-    {
-        var normalizedRunId = NormalizeRunId(runId);
-        var databasePath = await EnsureSchemaAsync(cancellationToken);
-        await using var connection = await OpenConnectionAsync(databasePath, cancellationToken);
-        await using var command = connection.CreateCommand();
-        command.CommandText = """
-            SELECT extractor_schema_version
-            FROM reference_materialization_runs
-            WHERE run_id = $run_id;
-            """;
-        command.Parameters.AddWithValue("$run_id", normalizedRunId);
-        return (string?)await command.ExecuteScalarAsync(cancellationToken);
-    }
-
     private static async ValueTask<IReadOnlyList<ChapterBoundary>> ReadBoundariesAsync(
         SqliteConnection connection,
         SqliteTransaction transaction,
@@ -306,7 +290,6 @@ internal sealed partial class SqliteReferenceMaterializationRunStore
         SqliteTransaction transaction,
         ReferenceMaterializationRunSeed seed,
         int totalChapters,
-        int totalBatches,
         CancellationToken cancellationToken)
     {
         await using var command = connection.CreateCommand();
@@ -315,13 +298,11 @@ internal sealed partial class SqliteReferenceMaterializationRunStore
             INSERT INTO reference_materialization_runs (
               run_id, anchor_id, split_profile_id, generation_id, policy_version, extractor_schema_version,
               model_provider, model_id, embedding_provider, embedding_model_id, embedding_dimensions,
-              status, chapter_batch_size, total_chapters, total_chapter_batches,
-              current_batch_index, current_batch_start_chapter, current_batch_end_chapter, started_at)
+              status, total_chapters, current_chapter_index, started_at)
             VALUES (
               $run_id, $anchor_id, $split_profile_id, $generation_id, $policy_version, $extractor_schema_version,
               $model_provider, $model_id, $embedding_provider, $embedding_model_id, $embedding_dimensions,
-              $status, $chapter_batch_size, $total_chapters, $total_chapter_batches,
-              0, 1, $current_batch_end_chapter, $started_at);
+              $status, $total_chapters, 1, $started_at);
             """;
         command.Parameters.AddWithValue("$run_id", seed.RunId);
         command.Parameters.AddWithValue("$anchor_id", seed.AnchorId);
@@ -335,10 +316,7 @@ internal sealed partial class SqliteReferenceMaterializationRunStore
         command.Parameters.AddWithValue("$embedding_model_id", seed.Embedding.ModelId);
         command.Parameters.AddWithValue("$embedding_dimensions", seed.Embedding.Dimensions!.Value);
         command.Parameters.AddWithValue("$status", ReferenceMaterializationRunStates.Queued);
-        command.Parameters.AddWithValue("$chapter_batch_size", seed.ChapterBatchSize);
         command.Parameters.AddWithValue("$total_chapters", totalChapters);
-        command.Parameters.AddWithValue("$total_chapter_batches", totalBatches);
-        command.Parameters.AddWithValue("$current_batch_end_chapter", Math.Min(seed.ChapterBatchSize, totalChapters));
         command.Parameters.AddWithValue("$started_at", FormatTimestamp(seed.StartedAt));
         await command.ExecuteNonQueryAsync(cancellationToken);
     }
@@ -347,18 +325,16 @@ internal sealed partial class SqliteReferenceMaterializationRunStore
         SqliteConnection connection,
         SqliteTransaction transaction,
         long anchorId,
-        DateTimeOffset now,
         CancellationToken cancellationToken)
     {
         await using var command = connection.CreateCommand();
         command.Transaction = transaction;
         command.CommandText = """
-            INSERT INTO reference_anchor_materialization_state (anchor_id, active_generation_id, row_version, updated_at)
-            VALUES ($anchor_id, NULL, 0, $updated_at)
+            INSERT INTO reference_anchor_materialization_state (anchor_id, active_generation_id)
+            VALUES ($anchor_id, NULL)
             ON CONFLICT(anchor_id) DO NOTHING;
             """;
         command.Parameters.AddWithValue("$anchor_id", anchorId);
-        command.Parameters.AddWithValue("$updated_at", FormatTimestamp(now));
         await command.ExecuteNonQueryAsync(cancellationToken);
     }
 
@@ -367,7 +343,6 @@ internal sealed partial class SqliteReferenceMaterializationRunStore
         SqliteTransaction transaction,
         string runId,
         IReadOnlyList<ChapterBoundary> boundaries,
-        int chapterBatchSize,
         CancellationToken cancellationToken)
     {
         foreach (var boundary in boundaries)
@@ -376,15 +351,13 @@ internal sealed partial class SqliteReferenceMaterializationRunStore
             command.Transaction = transaction;
             command.CommandText = """
                 INSERT INTO reference_materialization_chapter_progress (
-                  run_id, chapter_index, batch_index, status, current_stage)
+                  run_id, chapter_index, status)
                 VALUES (
-                  $run_id, $chapter_index, $batch_index, $status, $current_stage);
+                  $run_id, $chapter_index, $status);
                 """;
             command.Parameters.AddWithValue("$run_id", runId);
             command.Parameters.AddWithValue("$chapter_index", boundary.ChapterIndex);
-            command.Parameters.AddWithValue("$batch_index", (boundary.ChapterIndex - 1) / chapterBatchSize);
             command.Parameters.AddWithValue("$status", ReferenceMaterializationChapterStates.Pending);
-            command.Parameters.AddWithValue("$current_stage", ReferenceMaterializationChapterStates.Pending);
             await command.ExecuteNonQueryAsync(cancellationToken);
         }
     }
@@ -402,8 +375,7 @@ internal sealed partial class SqliteReferenceMaterializationRunStore
 
     private static ReferenceMaterializationStatusPayload CreateQueuedStatus(
         ReferenceMaterializationRunSeed seed,
-        int totalChapters,
-        int totalBatches)
+        int totalChapters)
     {
         return new ReferenceMaterializationStatusPayload(
             seed.RunId,
@@ -411,14 +383,9 @@ internal sealed partial class SqliteReferenceMaterializationRunStore
             seed.SplitProfileId,
             seed.GenerationId,
             ReferenceMaterializationRunStates.Queued,
-            seed.ChapterBatchSize,
             totalChapters,
             0,
-            totalBatches,
-            0,
-            0,
             1,
-            Math.Min(seed.ChapterBatchSize, totalChapters),
             0,
             0,
             0,
@@ -428,8 +395,7 @@ internal sealed partial class SqliteReferenceMaterializationRunStore
             null,
             seed.StartedAt,
             null,
-            false,
-            "start_processing");
+            false);
     }
 
     private static ReferenceMaterializationStatusPayload ReadStatus(SqliteDataReader reader)
@@ -443,23 +409,17 @@ internal sealed partial class SqliteReferenceMaterializationRunStore
             status,
             reader.GetInt32(5),
             reader.GetInt32(6),
-            reader.GetInt32(7),
+            reader.IsDBNull(7) ? null : reader.GetInt32(7),
             reader.GetInt32(8),
             reader.GetInt32(9),
-            reader.IsDBNull(10) ? null : reader.GetInt32(10),
-            reader.IsDBNull(11) ? null : reader.GetInt32(11),
-            reader.IsDBNull(12) ? null : reader.GetInt32(12),
-            reader.GetInt32(13),
-            reader.GetInt32(14),
-            reader.GetInt32(15),
-            new ReferenceMaterializationModelIdentityPayload(reader.GetString(16), reader.GetString(17)),
-            new ReferenceMaterializationModelIdentityPayload(reader.GetString(18), reader.GetString(19), reader.GetInt32(20)),
-            reader.IsDBNull(21) ? null : reader.GetString(21),
-            reader.IsDBNull(22) ? null : reader.GetString(22),
-            ParseTimestamp(reader.GetString(23)),
-            reader.IsDBNull(24) ? null : ParseTimestamp(reader.GetString(24)),
-            reader.GetInt64(25) != 0,
-            NextActionFor(status));
+            reader.GetInt32(10),
+            new ReferenceMaterializationModelIdentityPayload(reader.GetString(11), reader.GetString(12)),
+            new ReferenceMaterializationModelIdentityPayload(reader.GetString(13), reader.GetString(14), reader.GetInt32(15)),
+            reader.IsDBNull(16) ? null : reader.GetString(16),
+            reader.IsDBNull(17) ? null : reader.GetString(17),
+            ParseTimestamp(reader.GetString(18)),
+            reader.IsDBNull(19) ? null : ParseTimestamp(reader.GetString(19)),
+            reader.GetInt64(20) != 0);
     }
 
     private static void ValidateSeed(ReferenceMaterializationRunSeed seed)
@@ -469,7 +429,6 @@ internal sealed partial class SqliteReferenceMaterializationRunStore
             throw new ArgumentOutOfRangeException(nameof(seed), "Anchor id must be positive.");
         }
 
-        ReferenceMaterializationBatchSizes.Validate(seed.ChapterBatchSize);
         Require(seed.RunId, nameof(seed.RunId));
         Require(seed.SplitProfileId, nameof(seed.SplitProfileId));
         Require(seed.GenerationId, nameof(seed.GenerationId));
@@ -504,20 +463,6 @@ internal sealed partial class SqliteReferenceMaterializationRunStore
         return runId;
     }
 
-    private static string NextActionFor(string status)
-    {
-        return status switch
-        {
-            ReferenceMaterializationRunStates.Queued => "start_processing",
-            ReferenceMaterializationRunStates.Extracting or
-            ReferenceMaterializationRunStates.Embedding or
-            ReferenceMaterializationRunStates.Indexing => "view_progress",
-            ReferenceMaterializationRunStates.Failed => "retry",
-            ReferenceMaterializationRunStates.Completed => "activate_generation",
-            _ => "view_error"
-        };
-    }
-
     private static async ValueTask<SqliteConnection> OpenConnectionAsync(string databasePath, CancellationToken cancellationToken)
     {
         var connection = new SqliteConnection(new SqliteConnectionStringBuilder
@@ -548,5 +493,4 @@ internal sealed record ReferenceMaterializationRunSeed(
     string ExtractorSchemaVersion,
     ReferenceMaterializationModelIdentityPayload Llm,
     ReferenceMaterializationModelIdentityPayload Embedding,
-    int ChapterBatchSize,
     DateTimeOffset StartedAt);

@@ -13,15 +13,12 @@ internal sealed partial class SqliteReferenceMaterializationRunStore
     private const long MaxMaterializationSourceBytes = 20L * 1024L * 1024L;
 
     public async ValueTask<ReferenceChapterMaterializationWorkItem> ReadChapterWorkItemAsync(
-        string runId,
-        int chapterIndex,
+        ReferenceMaterializationChapterClaim claim,
         CancellationToken cancellationToken)
     {
-        var normalizedRunId = NormalizeRunId(runId);
-        if (chapterIndex <= 0)
-        {
-            throw new ArgumentOutOfRangeException(nameof(chapterIndex));
-        }
+        ArgumentNullException.ThrowIfNull(claim);
+        var normalizedRunId = NormalizeRunId(claim.RunId);
+        var chapterIndex = claim.ChapterIndex;
 
         var databasePath = await EnsureSchemaAsync(cancellationToken);
         await using var connection = await OpenConnectionAsync(databasePath, cancellationToken);
@@ -41,15 +38,19 @@ internal sealed partial class SqliteReferenceMaterializationRunStore
         var source = await ReadFrozenSourceAsync(snapshot.SourcePath, snapshot.SourceHash, cancellationToken);
         var chapterText = ReadAndValidateChapterText(source, snapshot);
         await using var transaction = (SqliteTransaction)await connection.BeginTransactionAsync(cancellationToken);
+        if (!await IsClaimLeaseOwnedAsync(connection, transaction, claim, cancellationToken))
+        {
+            await transaction.RollbackAsync(cancellationToken);
+            throw new InvalidOperationException("Materialization worker lost the current chapter lease.");
+        }
+
         await using var update = connection.CreateCommand();
         update.Transaction = transaction;
         update.CommandText = """
             UPDATE reference_materialization_chapter_progress
             SET status = $extracting,
-                current_stage = $extracting,
                 model_call_count = model_call_count + 1,
-                started_at = COALESCE(started_at, $started_at),
-                row_version = row_version + 1
+                started_at = COALESCE(started_at, $started_at)
             WHERE run_id = $run_id
               AND chapter_index = $chapter_index
               AND status = $pending;
@@ -80,58 +81,57 @@ internal sealed partial class SqliteReferenceMaterializationRunStore
             snapshot.ChapterTextHash);
     }
 
-    public async ValueTask MarkBatchEmbeddingAsync(
-        string runId,
-        IReadOnlyList<ReferenceChapterMaterializationWorkItem> workItems,
+    public async ValueTask MarkChapterEmbeddingAsync(
+        ReferenceMaterializationChapterClaim claim,
+        ReferenceChapterMaterializationWorkItem workItem,
         CancellationToken cancellationToken)
     {
-        if (string.IsNullOrWhiteSpace(runId) || workItems is null || workItems.Count == 0 ||
-            workItems.Any(workItem => !string.Equals(workItem.RunId, runId, StringComparison.Ordinal)) ||
-            workItems.Select(workItem => workItem.ChapterIndex).Distinct().Count() != workItems.Count)
-        {
-            throw new ArgumentException("Materialization batch work items are invalid.", nameof(workItems));
-        }
+        ArgumentNullException.ThrowIfNull(claim);
+        ArgumentNullException.ThrowIfNull(workItem);
+        EnsureClaimMatchesWorkItem(claim, workItem);
 
         var databasePath = await EnsureSchemaAsync(cancellationToken);
         await using var connection = await OpenConnectionAsync(databasePath, cancellationToken);
         await using var transaction = (SqliteTransaction)await connection.BeginTransactionAsync(cancellationToken);
-        await using var command = connection.CreateCommand();
-        command.Transaction = transaction;
-        var chapterParameters = workItems.Select((_, index) => "$chapter_" + index).ToArray();
-        command.CommandText = $"""
-            UPDATE reference_materialization_chapter_progress
-            SET status = $embedding,
-                current_stage = $embedding,
-                row_version = row_version + 1
-            WHERE run_id = $run_id
-              AND status = $extracting
-              AND chapter_index IN ({string.Join(", ", chapterParameters)});
-            """;
-        command.Parameters.AddWithValue("$embedding", ReferenceMaterializationChapterStates.Embedding);
-        command.Parameters.AddWithValue("$run_id", runId);
-        command.Parameters.AddWithValue("$extracting", ReferenceMaterializationChapterStates.Extracting);
-        for (var index = 0; index < workItems.Count; index++)
+        if (!await IsClaimLeaseOwnedAsync(connection, transaction, claim, cancellationToken))
         {
-            command.Parameters.AddWithValue(chapterParameters[index], workItems[index].ChapterIndex);
+            await transaction.RollbackAsync(cancellationToken);
+            throw new InvalidOperationException("Materialization worker lost the current chapter lease.");
         }
 
-        if (await command.ExecuteNonQueryAsync(cancellationToken) != workItems.Count)
+        await using var command = connection.CreateCommand();
+        command.Transaction = transaction;
+        command.CommandText = """
+            UPDATE reference_materialization_chapter_progress
+            SET status = $embedding
+            WHERE run_id = $run_id
+              AND status = $extracting
+              AND chapter_index = $chapter_index;
+            """;
+        command.Parameters.AddWithValue("$embedding", ReferenceMaterializationChapterStates.Embedding);
+        command.Parameters.AddWithValue("$run_id", workItem.RunId);
+        command.Parameters.AddWithValue("$chapter_index", workItem.ChapterIndex);
+        command.Parameters.AddWithValue("$extracting", ReferenceMaterializationChapterStates.Extracting);
+        if (await command.ExecuteNonQueryAsync(cancellationToken) != 1)
         {
-            throw new InvalidOperationException("Materialization batch changed before embedding started.");
+            throw new InvalidOperationException("Materialization chapter changed before embedding started.");
         }
 
         await transaction.CommitAsync(cancellationToken);
     }
 
     public async ValueTask PersistChapterAsync(
+        ReferenceMaterializationChapterClaim claim,
         ReferenceChapterMaterializationWorkItem workItem,
         IReadOnlyList<PreparedReferenceMaterial> materials,
         ReferenceMaterializationEmbeddingResult embeddingResult,
         CancellationToken cancellationToken)
     {
+        ArgumentNullException.ThrowIfNull(claim);
         ArgumentNullException.ThrowIfNull(workItem);
         ArgumentNullException.ThrowIfNull(materials);
         ArgumentNullException.ThrowIfNull(embeddingResult);
+        EnsureClaimMatchesWorkItem(claim, workItem);
         ValidatePreparedMaterials(workItem, materials);
         var embeddings = ValidateEmbeddings(workItem, materials, embeddingResult);
 
@@ -153,6 +153,12 @@ internal sealed partial class SqliteReferenceMaterializationRunStore
         }
 
         await using var transaction = (SqliteTransaction)await connection.BeginTransactionAsync(cancellationToken);
+        if (!await IsClaimLeaseOwnedAsync(connection, transaction, claim, cancellationToken))
+        {
+            await transaction.RollbackAsync(cancellationToken);
+            throw new InvalidOperationException("Materialization worker lost the current chapter lease.");
+        }
+
         var current = await ReadChapterSnapshotAsync(
             connection,
             transaction,
@@ -192,20 +198,14 @@ internal sealed partial class SqliteReferenceMaterializationRunStore
             progress.Transaction = transaction;
             progress.CommandText = """
                 UPDATE reference_materialization_chapter_progress
-                SET status = $completed,
-                    current_stage = $completed,
-                    material_count = $material_count,
-                    vector_count = $vector_count,
-                    completed_at = $completed_at,
-                    row_version = row_version + 1
+                SET material_count = $material_count,
+                    vector_count = $vector_count
                 WHERE run_id = $run_id
                   AND chapter_index = $chapter_index
                   AND status = $embedding;
                 """;
-            progress.Parameters.AddWithValue("$completed", ReferenceMaterializationChapterStates.Completed);
             progress.Parameters.AddWithValue("$material_count", materials.Count);
             progress.Parameters.AddWithValue("$vector_count", embeddings.Count);
-            progress.Parameters.AddWithValue("$completed_at", FormatTimestamp(now));
             progress.Parameters.AddWithValue("$run_id", workItem.RunId);
             progress.Parameters.AddWithValue("$chapter_index", workItem.ChapterIndex);
             progress.Parameters.AddWithValue("$embedding", ReferenceMaterializationChapterStates.Embedding);
@@ -217,6 +217,17 @@ internal sealed partial class SqliteReferenceMaterializationRunStore
 
         await RefreshRunCountsAsync(connection, transaction, workItem.RunId, cancellationToken);
         await transaction.CommitAsync(cancellationToken);
+    }
+
+    private static void EnsureClaimMatchesWorkItem(
+        ReferenceMaterializationChapterClaim claim,
+        ReferenceChapterMaterializationWorkItem workItem)
+    {
+        if (!string.Equals(claim.RunId, workItem.RunId, StringComparison.Ordinal) ||
+            claim.ChapterIndex != workItem.ChapterIndex)
+        {
+            throw new ArgumentException("Materialization chapter claim does not match its work item.", nameof(claim));
+        }
     }
 
     public static IReadOnlyList<PreparedReferenceMaterial> PrepareMaterials(
@@ -238,22 +249,21 @@ internal sealed partial class SqliteReferenceMaterializationRunStore
         {
             var source = result.Materials[ordinal];
             if (source is null ||
-                !IsIdentifier(source.MaterialType) ||
                 !IsRequiredText(source.Text) ||
-                !IsRequiredText(source.Description, 1_000) ||
-                source.Tags is null ||
-                source.Tags.Count > 16 ||
-                source.Tags.Any(tag => !IsIdentifier(tag)) ||
-                source.Tags.Distinct(StringComparer.Ordinal).Count() != source.Tags.Count)
+                !ReferenceMaterialMetadataValidator.TryValidate(source.Metadata, out _))
             {
                 throw InvalidModelOutput("Chapter material extraction returned invalid material fields.");
             }
 
-            if (!workItem.ChapterText.Contains(source.Text, StringComparison.Ordinal))
+            if (!ReferenceMaterialSourceText.TryResolve(
+                    workItem.ChapterText,
+                    source.Metadata.SourceSpan,
+                    out var sourceText) ||
+                !string.Equals(source.Text, sourceText, StringComparison.Ordinal))
             {
                 throw new ReferenceMaterializationException(
                     ReferenceMaterializationErrorCodes.SourceTextMismatch,
-                    "Chapter material text does not match the frozen chapter source.");
+                    "Chapter material text does not match its declared frozen chapter source range.");
             }
 
             if (!seenText.Add(source.Text))
@@ -265,10 +275,8 @@ internal sealed partial class SqliteReferenceMaterializationRunStore
             prepared.Add(new PreparedReferenceMaterial(
                 CreateMaterialId(workItem.GenerationId, workItem.ChapterIndex, ordinal, textHash),
                 ordinal,
-                source.MaterialType,
                 source.Text,
-                source.Description,
-                source.Tags.ToArray(),
+                source.Metadata,
                 textHash));
         }
 
@@ -473,10 +481,10 @@ internal sealed partial class SqliteReferenceMaterializationRunStore
         command.CommandText = """
             INSERT INTO reference_materials (
               material_id, generation_id, run_id, anchor_id, chapter_index, ordinal,
-              material_type, text, description, tags_json, text_hash, created_at)
+              text, metadata_schema_version, metadata_json, text_hash, created_at)
             VALUES (
               $material_id, $generation_id, $run_id, $anchor_id, $chapter_index, $ordinal,
-              $material_type, $text, $description, $tags_json, $text_hash, $created_at);
+              $text, $metadata_schema_version, $metadata_json, $text_hash, $created_at);
             """;
         command.Parameters.AddWithValue("$material_id", material.MaterialId);
         command.Parameters.AddWithValue("$generation_id", workItem.GenerationId);
@@ -484,10 +492,9 @@ internal sealed partial class SqliteReferenceMaterializationRunStore
         command.Parameters.AddWithValue("$anchor_id", workItem.AnchorId);
         command.Parameters.AddWithValue("$chapter_index", workItem.ChapterIndex);
         command.Parameters.AddWithValue("$ordinal", material.Ordinal);
-        command.Parameters.AddWithValue("$material_type", material.MaterialType);
         command.Parameters.AddWithValue("$text", material.Text);
-        command.Parameters.AddWithValue("$description", material.Description);
-        command.Parameters.AddWithValue("$tags_json", JsonSerializer.Serialize(material.Tags));
+        command.Parameters.AddWithValue("$metadata_schema_version", "reference-material-archive-v1");
+        command.Parameters.AddWithValue("$metadata_json", JsonSerializer.Serialize(material.Metadata));
         command.Parameters.AddWithValue("$text_hash", material.TextHash);
         command.Parameters.AddWithValue("$created_at", FormatTimestamp(now));
         await command.ExecuteNonQueryAsync(cancellationToken);
@@ -572,16 +579,6 @@ internal sealed partial class SqliteReferenceMaterializationRunStore
         string.Equals(value, value.Trim(), StringComparison.Ordinal) &&
         !value.Contains('\0');
 
-    private static bool IsIdentifier(string? value)
-    {
-        if (value is null || value.Length is 0 or > 64 || value[0] is < 'a' or > 'z')
-        {
-            return false;
-        }
-
-        return value.All(character => character is >= 'a' and <= 'z' or >= '0' and <= '9' or '_');
-    }
-
     private static ReferenceMaterializationException SourceChanged() =>
         new(
             ReferenceMaterializationErrorCodes.SourceChanged,
@@ -627,8 +624,6 @@ internal sealed record ReferenceChapterMaterializationWorkItem(
 internal sealed record PreparedReferenceMaterial(
     string MaterialId,
     int Ordinal,
-    string MaterialType,
     string Text,
-    string Description,
-    IReadOnlyList<string> Tags,
+    ReferenceMaterialMetadata Metadata,
     string TextHash);

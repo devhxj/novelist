@@ -12,7 +12,6 @@ public sealed partial class SqliteReferenceMaterializationService
     {
         ArgumentNullException.ThrowIfNull(input);
         ValidateReferenceInput(input.NovelId, input.AnchorId);
-        ReferenceMaterializationBatchSizes.Validate(input.ChapterBatchSize);
         var splitProfileId = NormalizeProfileId(input.SplitProfileId);
         await EnsureConfirmedProfileMatchesCurrentSourceAsync(
             input.NovelId,
@@ -21,6 +20,21 @@ public sealed partial class SqliteReferenceMaterializationService
             cancellationToken);
 
         var models = await _modelPreflight.VerifyAsync(cancellationToken);
+        if (input.RunId is not null)
+        {
+            if (string.IsNullOrWhiteSpace(input.RunId))
+            {
+                throw new ArgumentException("Materialization run id must not be empty.", nameof(input));
+            }
+
+            return await _runStore.ResumeAllAsync(
+                input.RunId,
+                input.AnchorId,
+                splitProfileId,
+                models,
+                cancellationToken);
+        }
+
         var now = DateTimeOffset.UtcNow;
         return await _runStore.CreateAsync(
             new ReferenceMaterializationRunSeed(
@@ -32,7 +46,6 @@ public sealed partial class SqliteReferenceMaterializationService
                 ReferenceChapterMaterialChatCompletionExtractor.SchemaVersion,
                 models.Llm,
                 models.Embedding,
-                input.ChapterBatchSize,
                 now),
             cancellationToken);
     }
@@ -50,43 +63,36 @@ public sealed partial class SqliteReferenceMaterializationService
         return status is null || status.AnchorId != input.AnchorId ? null : status;
     }
 
-    public async ValueTask<ReferenceMaterializationStatusPayload> RetryMaterializationAsync(
-        RetryReferenceMaterializationPayload input,
+    public async ValueTask<ReferenceMaterializationStatusPayload> RunMaterializationChapterAsync(
+        RunReferenceMaterializationChapterPayload input,
         CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(input);
         ValidateReferenceInput(input.NovelId, input.AnchorId);
-        var current = await GetMaterializationStatusAsync(
-            new GetReferenceMaterializationStatusPayload(input.NovelId, input.AnchorId, input.RunId),
-            cancellationToken)
-            ?? throw new ArgumentException("Materialization run does not exist.", nameof(input));
-        if (current.Status != ReferenceMaterializationRunStates.Failed)
+        if (string.IsNullOrWhiteSpace(input.RunId) || input.ChapterIndex <= 0)
         {
-            throw new InvalidOperationException("Only failed materialization runs can be retried.");
+            throw new ArgumentException("Materialization chapter request is invalid.", nameof(input));
+        }
+
+        await EnsureAnchorAccessibleAsync(input.NovelId, input.AnchorId, cancellationToken);
+        var status = await _runStore.GetAsync(input.RunId, cancellationToken);
+        if (status is null || status.AnchorId != input.AnchorId)
+        {
+            throw new ArgumentException("Materialization run does not exist.", nameof(input));
         }
 
         await EnsureConfirmedProfileMatchesCurrentSourceAsync(
             input.NovelId,
             input.AnchorId,
-            current.SplitProfileId,
+            status.SplitProfileId,
             cancellationToken);
         var models = await _modelPreflight.VerifyAsync(cancellationToken);
-        if (!SameModel(current.Llm, models.Llm) || !SameModel(current.Embedding, models.Embedding))
-        {
-            throw new ReferenceMaterializationException(
-                ReferenceMaterializationErrorCodes.RetryRequiresNewRun,
-                "The configured models changed after this materialization run started. Create a new run instead of retrying this generation.");
-        }
-
-        var extractorSchemaVersion = await _runStore.GetExtractorSchemaVersionAsync(current.RunId, cancellationToken);
-        if (!string.Equals(extractorSchemaVersion, ReferenceChapterMaterialChatCompletionExtractor.SchemaVersion, StringComparison.Ordinal))
-        {
-            throw new ReferenceMaterializationException(
-                ReferenceMaterializationErrorCodes.RetryRequiresNewRun,
-                "The chapter material extraction schema changed after this run started. Create a new run instead of retrying this generation.");
-        }
-
-        return await _runStore.RetryCurrentBatchAsync(current.RunId, cancellationToken);
+        return await _runStore.RunChapterAsync(
+            input.RunId,
+            input.AnchorId,
+            input.ChapterIndex,
+            models,
+            cancellationToken);
     }
 
     public async ValueTask<PageResultPayload<ReferenceMaterializationChapterProgressPayload>> ListMaterializationChapterProgressAsync(
@@ -103,6 +109,27 @@ public sealed partial class SqliteReferenceMaterializationService
         }
 
         return await _runStore.ListChapterProgressAsync(input.RunId, input.Page, input.Size, cancellationToken);
+    }
+
+    public async ValueTask<PageResultPayload<ReferenceMaterialListItemPayload>> ListMaterializationChapterMaterialsAsync(
+        ListReferenceMaterializationChapterMaterialsPayload input,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(input);
+        ValidateReferenceInput(input.NovelId, input.AnchorId);
+        await EnsureAnchorAccessibleAsync(input.NovelId, input.AnchorId, cancellationToken);
+        var status = await _runStore.GetAsync(input.RunId, cancellationToken);
+        if (status is null || status.AnchorId != input.AnchorId)
+        {
+            throw new ArgumentException("Materialization run does not exist.", nameof(input));
+        }
+
+        return await _runStore.ListChapterMaterialsAsync(
+            input.RunId,
+            input.ChapterIndex,
+            input.Page,
+            input.Size,
+            cancellationToken);
     }
 
     private async ValueTask EnsureConfirmedProfileMatchesCurrentSourceAsync(
@@ -179,10 +206,4 @@ public sealed partial class SqliteReferenceMaterializationService
         return (string?)await command.ExecuteScalarAsync(cancellationToken);
     }
 
-    private static bool SameModel(
-        ReferenceMaterializationModelIdentityPayload left,
-        ReferenceMaterializationModelIdentityPayload right) =>
-        string.Equals(left.Provider, right.Provider, StringComparison.Ordinal) &&
-        string.Equals(left.ModelId, right.ModelId, StringComparison.Ordinal) &&
-        left.Dimensions == right.Dimensions;
 }

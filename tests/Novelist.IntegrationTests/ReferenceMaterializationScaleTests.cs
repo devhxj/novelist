@@ -16,7 +16,7 @@ public sealed class ReferenceMaterializationScaleTests : IDisposable
     private readonly string _root = Path.Combine(Path.GetTempPath(), "novelist-tests", Guid.NewGuid().ToString("N"));
 
     [Fact]
-    public async Task FakeModelsProcessFiftyKAcrossTwoSourcesWithFrozenFiveAndTenChapterBatches()
+    public async Task FakeModelsProcessFiftyKAcrossTwoSourcesOneChapterAtATime()
     {
         var options = CreateOptions();
         var scaleCharacters = ResolveScaleCharacters();
@@ -30,40 +30,31 @@ public sealed class ReferenceMaterializationScaleTests : IDisposable
             resolver,
             new ScaleExtractor(),
             new ScaleEmbedder(),
-            new ReferenceMaterializationVectorIndexer(resolver, vec),
-            workerId: "materialization-50k-worker");
+            new ReferenceMaterializationVectorIndexer(resolver, vec));
         var runs = new List<ReferenceMaterializationStatusPayload>();
-        var batchDurations = new List<TimeSpan>();
+        var chapterDurations = new List<TimeSpan>();
 
         // Exclude one-time JIT and index initialization from the steady-state fake-provider throughput gate.
         var warmup = await store.CreateAsync(
-            CreateSeed(sources[0].Anchor.AnchorId, sources[0].Profile.SplitProfileId, batchSize: 5),
+            CreateSeed(sources[0].Anchor.AnchorId, sources[0].Profile.SplitProfileId),
             CancellationToken.None);
-        await DrainRunAsync(worker, store, warmup.RunId, batchDurations);
-        batchDurations.Clear();
+        await DrainRunAsync(worker, store, warmup.RunId, chapterDurations);
+        chapterDurations.Clear();
         var stopwatch = Stopwatch.StartNew();
 
-        var schedule = new[]
-        {
-            (Source: sources[0], BatchSize: 5),
-            (Source: sources[1], BatchSize: 5),
-            (Source: sources[0], BatchSize: 5),
-            (Source: sources[1], BatchSize: 10)
-        };
-        foreach (var work in schedule)
+        var schedule = new[] { sources[0], sources[1], sources[0], sources[1] };
+        foreach (var source in schedule)
         {
             var run = await store.CreateAsync(
-                CreateSeed(work.Source.Anchor.AnchorId, work.Source.Profile.SplitProfileId, work.BatchSize),
+                CreateSeed(source.Anchor.AnchorId, source.Profile.SplitProfileId),
                 CancellationToken.None);
-            runs.Add(await DrainRunAsync(worker, store, run.RunId, batchDurations));
+            runs.Add(await DrainRunAsync(worker, store, run.RunId, chapterDurations));
         }
 
         stopwatch.Stop();
         var processedMaterials = runs.Sum(run => run.MaterialCount);
         var throughput = processedMaterials / Math.Max(stopwatch.Elapsed.TotalSeconds, 0.001);
         Assert.Equal(4, runs.Count);
-        Assert.Equal(3, runs.Count(run => run.ChapterBatchSize == 5));
-        Assert.Equal(1, runs.Count(run => run.ChapterBatchSize == 10));
         Assert.All(runs, run =>
         {
             Assert.Equal(ReferenceMaterializationRunStates.Completed, run.Status);
@@ -77,7 +68,7 @@ public sealed class ReferenceMaterializationScaleTests : IDisposable
             Assert.True(
                 throughput >= 20,
                 $"Fake materialization throughput was {throughput:F2} materials/s. " +
-                $"Batch durations: {string.Join(", ", batchDurations.Select(duration => $"{duration.TotalMilliseconds:F0}ms"))}.");
+                $"Chapter durations: {string.Join(", ", chapterDurations.Select(duration => $"{duration.TotalMilliseconds:F0}ms"))}.");
         }
         Assert.Equal(0, await CountActiveLeasesAsync(options));
         Assert.Equal(0, await CountDuplicateEmbeddingsAsync(options));
@@ -163,7 +154,7 @@ public sealed class ReferenceMaterializationScaleTests : IDisposable
         return builder.ToString();
     }
 
-    private static ReferenceMaterializationRunSeed CreateSeed(long anchorId, string profileId, int batchSize) =>
+    private static ReferenceMaterializationRunSeed CreateSeed(long anchorId, string profileId) =>
         new(
             Guid.NewGuid().ToString("N"),
             anchorId,
@@ -173,14 +164,13 @@ public sealed class ReferenceMaterializationScaleTests : IDisposable
             ReferenceChapterMaterialChatCompletionExtractor.SchemaVersion,
             new ReferenceMaterializationModelIdentityPayload("scale-llm", "scale-llm-model"),
             new ReferenceMaterializationModelIdentityPayload("scale-embedding", "scale-embedding-model", 8),
-            batchSize,
             DateTimeOffset.UtcNow);
 
     private static async ValueTask<ReferenceMaterializationStatusPayload> DrainRunAsync(
         ReferenceMaterializationWorker worker,
         SqliteReferenceMaterializationRunStore store,
         string runId,
-        ICollection<TimeSpan>? batchDurations = null)
+        ICollection<TimeSpan>? chapterDurations = null)
     {
         for (var attempt = 0; attempt < 1_000; attempt++)
         {
@@ -194,7 +184,7 @@ public sealed class ReferenceMaterializationScaleTests : IDisposable
             var stopwatch = Stopwatch.StartNew();
             Assert.True(await worker.ProcessRunOnceAsync(runId, CancellationToken.None));
             stopwatch.Stop();
-            batchDurations?.Add(stopwatch.Elapsed);
+            chapterDurations?.Add(stopwatch.Elapsed);
         }
 
         throw new TimeoutException("Materialization scale run did not settle.");
@@ -288,10 +278,10 @@ public sealed class ReferenceMaterializationScaleTests : IDisposable
             return ValueTask.FromResult(new ReferenceChapterMaterialExtractionResult(
             [
                 new ExtractedReferenceMaterial(
-                    "passage",
                     input.ChapterText,
-                    "Reusable scale material.",
-                    ["scale"])
+                    new ReferenceMaterialMetadata(
+                        new ReferenceMaterialSourceSpan(1, input.ChapterText.Count(character => character == '\n') + 1), "叙述", [], null, null, null, [], null, [], null,
+                        null, null, null, [], [], [], [], "Reusable scale material."))
             ]));
         }
     }

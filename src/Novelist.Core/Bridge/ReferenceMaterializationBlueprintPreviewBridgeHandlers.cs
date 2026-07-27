@@ -71,12 +71,8 @@ public static class ReferenceMaterializationBlueprintPreviewBridgeHandlers
                             {
                                 MaterialId = ReferencePayloadSanitizer.RedactAndBoundText(link.MaterialId, 128),
                                 GenerationId = ReferencePayloadSanitizer.RedactAndBoundText(link.GenerationId, 128),
-                                MaterialType = ReferencePayloadSanitizer.RedactAndBoundText(link.MaterialType, 64),
                                 Text = link.Text,
-                                Description = ReferencePayloadSanitizer.RedactAndBoundText(link.Description, 1_000),
-                                Tags = (link.Tags ?? []).Take(16)
-                                    .Select(tag => ReferencePayloadSanitizer.RedactAndBoundText(tag, 64))
-                                    .ToArray(),
+                                Metadata = SanitizeMetadata(link.Metadata),
                                 FitExplanation = ReferencePayloadSanitizer.RedactAndBoundText(link.FitExplanation, 360)
                             })
                             .ToArray()
@@ -85,6 +81,77 @@ public static class ReferenceMaterializationBlueprintPreviewBridgeHandlers
             })
             .ToArray()
     };
+
+    private static ReferenceMaterialMetadataPayload SanitizeMetadata(ReferenceMaterialMetadataPayload metadata) =>
+        metadata with
+        {
+            SourceKind = ReferencePayloadSanitizer.RedactAndBoundText(metadata.SourceKind, 64),
+            Entities = (metadata.Entities ?? [])
+                .Select(entity => entity with
+                {
+                    Name = ReferencePayloadSanitizer.RedactAndBoundText(entity.Name, 120),
+                    Kind = ReferencePayloadSanitizer.RedactAndBoundText(entity.Kind, 64)
+                })
+                .ToArray(),
+            Setting = metadata.Setting is null ? null : metadata.Setting with
+            {
+                Location = SanitizeOptional(metadata.Setting.Location, 240),
+                Time = SanitizeOptional(metadata.Setting.Time, 240),
+                Environment = SanitizeOptional(metadata.Setting.Environment, 240)
+            },
+            Perspective = metadata.Perspective is null ? null : metadata.Perspective with
+            {
+                Mode = ReferencePayloadSanitizer.RedactAndBoundText(metadata.Perspective.Mode, 64),
+                FocusEntity = SanitizeOptional(metadata.Perspective.FocusEntity, 240)
+            },
+            Event = SanitizeOptional(metadata.Event, 600),
+            Facts = (metadata.Facts ?? []).Select(fact => fact with
+            {
+                Content = ReferencePayloadSanitizer.RedactAndBoundText(fact.Content, 600),
+                Subject = SanitizeOptional(fact.Subject, 240)
+            }).ToArray(),
+            Causality = metadata.Causality is null ? null : metadata.Causality with
+            {
+                Cause = SanitizeOptional(metadata.Causality.Cause, 600),
+                Consequence = SanitizeOptional(metadata.Causality.Consequence, 600)
+            },
+            StateChanges = (metadata.StateChanges ?? []).Select(change => change with
+            {
+                Subject = ReferencePayloadSanitizer.RedactAndBoundText(change.Subject, 240),
+                Before = ReferencePayloadSanitizer.RedactAndBoundText(change.Before, 600),
+                After = ReferencePayloadSanitizer.RedactAndBoundText(change.After, 600)
+            }).ToArray(),
+            CharacterDynamics = SanitizeOptional(metadata.CharacterDynamics, 600),
+            Conflict = metadata.Conflict is null ? null : metadata.Conflict with
+            {
+                Pressure = SanitizeOptional(metadata.Conflict.Pressure, 600),
+                Cost = SanitizeOptional(metadata.Conflict.Cost, 600)
+            },
+            Information = metadata.Information is null ? null : metadata.Information with
+            {
+                Role = SanitizeOptional(metadata.Information.Role, 64),
+                Content = SanitizeOptional(metadata.Information.Content, 600)
+            },
+            Emotion = metadata.Emotion is null ? null : metadata.Emotion with
+            {
+                Tone = SanitizeOptional(metadata.Emotion.Tone, 64),
+                Subtext = SanitizeOptional(metadata.Emotion.Subtext, 600)
+            },
+            NarrativeFunctions = (metadata.NarrativeFunctions ?? [])
+                .Select(value => ReferencePayloadSanitizer.RedactAndBoundText(value, 64))
+                .ToArray(),
+            Foreshadowing = (metadata.Foreshadowing ?? []).Select(item => item with
+            {
+                Phase = ReferencePayloadSanitizer.RedactAndBoundText(item.Phase, 64),
+                Target = ReferencePayloadSanitizer.RedactAndBoundText(item.Target, 600)
+            }).ToArray(),
+            Motifs = (metadata.Motifs ?? []).Select(value => ReferencePayloadSanitizer.RedactAndBoundText(value, 240)).ToArray(),
+            ExpressionTechniques = (metadata.ExpressionTechniques ?? []).Select(value => ReferencePayloadSanitizer.RedactAndBoundText(value, 64)).ToArray(),
+            ReuseHint = ReferencePayloadSanitizer.RedactAndBoundText(metadata.ReuseHint, 600)
+        };
+
+    private static string? SanitizeOptional(string? value, int maximumLength) =>
+        value is null ? null : ReferencePayloadSanitizer.RedactAndBoundText(value, maximumLength);
 
     private static T ReadObjectArg<T>(JsonElement? payload, int index, string argumentName)
     {

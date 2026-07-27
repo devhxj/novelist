@@ -98,19 +98,56 @@ public sealed class ReferenceMaterializationBlueprintPreviewService : IReference
         return new ReferenceMaterializationBlueprintPreviewBeatPayload(
             "beat-" + Hash(blueprintId + "|" + beatIndex)[..20],
             beatIndex,
-            first.Description,
-            first.MaterialType,
+            first.Metadata.ReuseHint,
+            first.Metadata.NarrativeFunctions.FirstOrDefault() ?? first.Metadata.SourceKind,
             hits.Select(hit => new ReferenceMaterializationBlueprintPreviewMaterialLinkPayload(
                 hit.MaterialId,
                 hit.AnchorId,
                 hit.GenerationId,
-                hit.MaterialType,
                 hit.Text,
-                hit.Description,
-                hit.Tags,
+                ToPayload(hit.Metadata),
                 hit.VectorDistance,
-                hit.Description)).ToArray());
+                hit.Metadata.ReuseHint)).ToArray());
     }
+
+    private static ReferenceMaterialMetadataPayload ToPayload(ReferenceMaterialMetadata metadata) =>
+        new(
+            new ReferenceMaterialSourceSpanPayload(metadata.SourceSpan.StartLine, metadata.SourceSpan.EndLine),
+            metadata.SourceKind,
+            metadata.Entities.Select(entity => new ReferenceMaterialEntityPayload(entity.Name, entity.Kind)).ToArray(),
+            metadata.Setting is null ? null : new ReferenceMaterialSettingPayload(
+                metadata.Setting.Location,
+                metadata.Setting.Time,
+                metadata.Setting.Environment),
+            metadata.Perspective is null ? null : new ReferenceMaterialPerspectivePayload(
+                metadata.Perspective.Mode,
+                metadata.Perspective.FocusEntity),
+            metadata.Event,
+            metadata.Facts.Select(fact => new ReferenceMaterialFactPayload(fact.Content, fact.Subject)).ToArray(),
+            metadata.Causality is null ? null : new ReferenceMaterialCausalityPayload(
+                metadata.Causality.Cause,
+                metadata.Causality.Consequence),
+            metadata.StateChanges.Select(change => new ReferenceMaterialStateChangePayload(
+                change.Subject,
+                change.Before,
+                change.After)).ToArray(),
+            metadata.CharacterDynamics,
+            metadata.Conflict is null ? null : new ReferenceMaterialConflictPayload(
+                metadata.Conflict.Pressure,
+                metadata.Conflict.Cost),
+            metadata.Information is null ? null : new ReferenceMaterialInformationPayload(
+                metadata.Information.Role,
+                metadata.Information.Content),
+            metadata.Emotion is null ? null : new ReferenceMaterialEmotionPayload(
+                metadata.Emotion.Tone,
+                metadata.Emotion.Subtext),
+            metadata.NarrativeFunctions,
+            metadata.Foreshadowing.Select(item => new ReferenceMaterialForeshadowingPayload(
+                item.Phase,
+                item.Target)).ToArray(),
+            metadata.Motifs,
+            metadata.ExpressionTechniques,
+            metadata.ReuseHint);
 
     private static IEnumerable<ReferenceMaterialSearchHit> Rotate(
         IReadOnlyList<ReferenceMaterialSearchHit> hits,

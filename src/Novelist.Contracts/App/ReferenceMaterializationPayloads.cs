@@ -20,30 +20,17 @@ public static class ReferenceChapterSplitProfileStates
     public static IReadOnlyList<string> All { get; } = [Draft, Validated, Confirmed, Stale];
 }
 
-public static class ReferenceMaterializationBatchSizes
-{
-    public const int Default = 5;
-    public static IReadOnlyList<int> All { get; } = [5, 10];
-
-    public static void Validate(int value)
-    {
-        if (!All.Contains(value))
-        {
-            throw new ArgumentOutOfRangeException(nameof(value), value, "Chapter batch size must be 5 or 10.");
-        }
-    }
-}
-
 public static class ReferenceMaterializationRunStates
 {
     public const string Queued = "queued";
     public const string Extracting = "extracting";
     public const string Embedding = "embedding";
     public const string Indexing = "indexing";
+    public const string Paused = "paused";
     public const string Failed = "failed";
     public const string Completed = "completed";
 
-    public static IReadOnlyList<string> All { get; } = [Queued, Extracting, Embedding, Indexing, Failed, Completed];
+    public static IReadOnlyList<string> All { get; } = [Queued, Extracting, Embedding, Indexing, Paused, Failed, Completed];
 }
 
 public static class ReferenceMaterializationChapterStates
@@ -83,7 +70,6 @@ public static class ReferenceMaterializationErrorCodes
     public const string BlueprintMaterialNotReady = "materialization_blueprint_material_not_ready";
     public const string BlueprintNoRelevantMaterial = "materialization_blueprint_no_relevant_material";
     public const string ChapterSplitProfileStale = "materialization_chapter_split_profile_stale";
-    public const string RetryRequiresNewRun = "materialization_retry_requires_new_run";
 }
 
 public sealed record AnalyzeReferenceChapterSplitPayload(
@@ -104,22 +90,33 @@ public sealed record EnqueueReferenceMaterializationPayload(
     [property: JsonPropertyName("novel_id")] long NovelId,
     [property: JsonPropertyName("anchor_id")] long AnchorId,
     [property: JsonPropertyName("split_profile_id")] string SplitProfileId,
-    [property: JsonPropertyName("chapter_batch_size")] int ChapterBatchSize = ReferenceMaterializationBatchSizes.Default);
+    [property: JsonPropertyName("run_id")]
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    string? RunId = null);
+
+public sealed record RunReferenceMaterializationChapterPayload(
+    [property: JsonPropertyName("novel_id")] long NovelId,
+    [property: JsonPropertyName("anchor_id")] long AnchorId,
+    [property: JsonPropertyName("run_id")] string RunId,
+    [property: JsonPropertyName("chapter_index")] int ChapterIndex);
 
 public sealed record GetReferenceMaterializationStatusPayload(
     [property: JsonPropertyName("novel_id")] long NovelId,
     [property: JsonPropertyName("anchor_id")] long AnchorId,
     [property: JsonPropertyName("run_id")] string? RunId = null);
 
-public sealed record RetryReferenceMaterializationPayload(
-    [property: JsonPropertyName("novel_id")] long NovelId,
-    [property: JsonPropertyName("anchor_id")] long AnchorId,
-    [property: JsonPropertyName("run_id")] string RunId);
-
 public sealed record ListReferenceMaterializationChapterProgressPayload(
     [property: JsonPropertyName("novel_id")] long NovelId,
     [property: JsonPropertyName("anchor_id")] long AnchorId,
     [property: JsonPropertyName("run_id")] string RunId,
+    [property: JsonPropertyName("page")] int Page,
+    [property: JsonPropertyName("size")] int Size);
+
+public sealed record ListReferenceMaterializationChapterMaterialsPayload(
+    [property: JsonPropertyName("novel_id")] long NovelId,
+    [property: JsonPropertyName("anchor_id")] long AnchorId,
+    [property: JsonPropertyName("run_id")] string RunId,
+    [property: JsonPropertyName("chapter_index")] int ChapterIndex,
     [property: JsonPropertyName("page")] int Page,
     [property: JsonPropertyName("size")] int Size);
 
@@ -161,7 +158,6 @@ public sealed record ReferenceMaterializationModelIdentityPayload(
 
 public sealed record ReferenceMaterializationChapterProgressPayload(
     [property: JsonPropertyName("chapter_index")] int ChapterIndex,
-    [property: JsonPropertyName("batch_index")] int BatchIndex,
     [property: JsonPropertyName("status")] string Status,
     [property: JsonPropertyName("material_count")] int MaterialCount,
     [property: JsonPropertyName("vector_count")] int VectorCount,
@@ -177,8 +173,7 @@ public sealed record ReferenceMaterializationChapterProgressPayload(
     string? LastErrorCode,
     [property: JsonPropertyName("last_error_message")]
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-    string? LastErrorMessage,
-    [property: JsonPropertyName("row_version")] long RowVersion);
+    string? LastErrorMessage);
 
 public sealed record ReferenceMaterializationStatusPayload(
     [property: JsonPropertyName("run_id")] string RunId,
@@ -186,20 +181,11 @@ public sealed record ReferenceMaterializationStatusPayload(
     [property: JsonPropertyName("split_profile_id")] string SplitProfileId,
     [property: JsonPropertyName("generation_id")] string GenerationId,
     [property: JsonPropertyName("status")] string Status,
-    [property: JsonPropertyName("chapter_batch_size")] int ChapterBatchSize,
     [property: JsonPropertyName("total_chapters")] int TotalChapters,
     [property: JsonPropertyName("processed_chapters")] int ProcessedChapters,
-    [property: JsonPropertyName("total_chapter_batches")] int TotalChapterBatches,
-    [property: JsonPropertyName("completed_chapter_batches")] int CompletedChapterBatches,
-    [property: JsonPropertyName("current_batch_index")]
+    [property: JsonPropertyName("current_chapter_index")]
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-    int? CurrentBatchIndex,
-    [property: JsonPropertyName("current_batch_start_chapter")]
-    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-    int? CurrentBatchStartChapter,
-    [property: JsonPropertyName("current_batch_end_chapter")]
-    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-    int? CurrentBatchEndChapter,
+    int? CurrentChapterIndex,
     [property: JsonPropertyName("material_count")] int MaterialCount,
     [property: JsonPropertyName("vector_count")] int VectorCount,
     [property: JsonPropertyName("model_call_count")] int ModelCallCount,
@@ -215,5 +201,4 @@ public sealed record ReferenceMaterializationStatusPayload(
     [property: JsonPropertyName("completed_at")]
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     DateTimeOffset? CompletedAt,
-    [property: JsonPropertyName("vector_index_healthy")] bool VectorIndexHealthy,
-    [property: JsonPropertyName("next_action")] string NextAction);
+    [property: JsonPropertyName("vector_index_healthy")] bool VectorIndexHealthy);

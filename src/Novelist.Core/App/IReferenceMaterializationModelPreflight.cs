@@ -19,5 +19,11 @@ public sealed class ReferenceMaterializationException : InvalidOperationExceptio
         ErrorCode = errorCode;
     }
 
+    public ReferenceMaterializationException(string errorCode, string message, Exception innerException)
+        : base(message, innerException)
+    {
+        ErrorCode = errorCode;
+    }
+
     public string ErrorCode { get; }
 }

@@ -30,10 +30,8 @@ public sealed record ReferenceMaterialListItem(
     long AnchorId,
     int ChapterIndex,
     int Ordinal,
-    string MaterialType,
     string Text,
-    string Description,
-    IReadOnlyList<string> Tags,
+    ReferenceMaterialMetadata Metadata,
     string TextHash);
 
 public sealed record ReferenceMaterialSearchRequest(
@@ -50,9 +48,7 @@ public sealed record ReferenceMaterialSearchHit(
     long AnchorId,
     int ChapterIndex,
     int Ordinal,
-    string MaterialType,
     string Text,
-    string Description,
-    IReadOnlyList<string> Tags,
+    ReferenceMaterialMetadata Metadata,
     string TextHash,
     double VectorDistance);

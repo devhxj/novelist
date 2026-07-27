@@ -26,8 +26,9 @@ public sealed class ReferenceMaterialSearchBridgeHandlerTests
         var page = json.RootElement.GetProperty("result");
         Assert.Equal(11, page.GetProperty("total").GetInt64());
         Assert.Equal(materialText, page.GetProperty("items")[0].GetProperty("text").GetString());
-        Assert.Equal("用于承接跨段对话。", page.GetProperty("items")[0].GetProperty("description").GetString());
-        Assert.Equal("dialogue", page.GetProperty("items")[0].GetProperty("tags")[0].GetString());
+        var metadata = page.GetProperty("items")[0].GetProperty("metadata");
+        Assert.Equal("对话", metadata.GetProperty("source_kind").GetString());
+        Assert.Equal("用于承接跨段对话。", metadata.GetProperty("reuse_hint").GetString());
     }
 
     [Fact]
@@ -115,10 +116,8 @@ public sealed class ReferenceMaterialSearchBridgeHandlerTests
                     input.AnchorId,
                     3,
                     2,
-                    "dialogue_exchange",
                     materialText,
-                    "用于承接跨段对话。",
-                    ["dialogue", "subtext"],
+                    ArchiveMetadata("对话", "用于承接跨段对话。"),
                     "text-hash")],
                 11,
                 input.Page,
@@ -144,13 +143,16 @@ public sealed class ReferenceMaterialSearchBridgeHandlerTests
                     99,
                     3,
                     2,
-                    "dialogue_exchange",
                     materialText,
-                    "\u7528\u4e8e\u627f\u63a5\u8de8\u6bb5\u5bf9\u8bdd\u3002",
-                    ["dialogue", "subtext"],
+                    ArchiveMetadata("对话", "用于承接跨段对话。"),
                     "text-hash",
                     0.125)
             ]);
         }
+
+        private static ReferenceMaterialMetadata ArchiveMetadata(string sourceKind, string reuseHint) =>
+            new(
+                new ReferenceMaterialSourceSpan(1, 1), sourceKind, [], null, null, null, [], null, [], null,
+                null, null, null, [], [], [], [], reuseHint);
     }
 }

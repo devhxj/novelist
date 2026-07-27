@@ -496,8 +496,8 @@ public sealed class SqliteReferenceWritingService : IReferenceWritingService
                 .Select((chunk, beatIndex) => new ReferenceWritingBlueprintBeatPayload(
                     "beat-" + Hash(blueprintId + "|" + beatIndex)[..20],
                     beatIndex,
-                    chunk[0].Description,
-                    chunk[0].MaterialType,
+                    chunk[0].Metadata.ReuseHint,
+                    chunk[0].Metadata.NarrativeFunctions.FirstOrDefault() ?? chunk[0].Metadata.SourceKind,
                     chunk.Select(hit => new ReferenceMaterialIdentityPayload(
                         hit.MaterialId,
                         hit.GenerationId)).ToArray()))
@@ -528,10 +528,9 @@ public sealed class SqliteReferenceWritingService : IReferenceWritingService
                 string.IsNullOrWhiteSpace(hit.MaterialId) ||
                 string.IsNullOrWhiteSpace(hit.GenerationId) ||
                 hit.AnchorId <= 0 ||
-                string.IsNullOrWhiteSpace(hit.MaterialType) ||
-                string.IsNullOrWhiteSpace(hit.Description) ||
                 string.IsNullOrWhiteSpace(hit.Text) ||
                 string.IsNullOrWhiteSpace(hit.TextHash) ||
+                !ReferenceMaterialMetadataValidator.TryValidate(hit.Metadata, out _) ||
                 !double.IsFinite(hit.VectorDistance)) ||
             hits.Select(hit => hit.MaterialId).Distinct(StringComparer.Ordinal).Count() != hits.Count)
         {

@@ -59,7 +59,7 @@ public sealed class SqliteReferenceMaterialSearch : IReferenceMaterialSearch
         await using var command = connection.CreateCommand();
         command.CommandText = """
             SELECT material_id, generation_id, anchor_id, chapter_index, ordinal,
-                   material_type, text, description, tags_json, text_hash
+                   text, metadata_json, text_hash
             FROM reference_materials
             WHERE anchor_id = $anchor_id
               AND generation_id = $generation_id
@@ -82,10 +82,8 @@ public sealed class SqliteReferenceMaterialSearch : IReferenceMaterialSearch
                     reader.GetInt32(3),
                     reader.GetInt32(4),
                     reader.GetString(5),
-                    reader.GetString(6),
-                    reader.GetString(7),
-                    ParseTags(reader.GetString(8)),
-                    reader.GetString(9)));
+                    ParseMetadata(reader.GetString(6)),
+                    reader.GetString(7)));
             }
         }
 
@@ -474,8 +472,8 @@ public sealed class SqliteReferenceMaterialSearch : IReferenceMaterialSearch
         command.CommandText = $"""
             SELECT embedding.rowid,
                    material.material_id, material.generation_id, material.anchor_id,
-                   material.chapter_index, material.ordinal, material.material_type,
-                   material.text, material.description, material.tags_json, material.text_hash
+                   material.chapter_index, material.ordinal, material.text, material.metadata_json,
+                   material.text_hash
             FROM reference_material_embeddings embedding
             JOIN reference_materials material
               ON material.material_id = embedding.material_id
@@ -507,10 +505,8 @@ public sealed class SqliteReferenceMaterialSearch : IReferenceMaterialSearch
                 reader.GetInt32(4),
                 reader.GetInt32(5),
                 reader.GetString(6),
-                reader.GetString(7),
+                ParseMetadata(reader.GetString(7)),
                 reader.GetString(8),
-                ParseTags(reader.GetString(9)),
-                reader.GetString(10),
                 distanceByRowId[rowId]));
         }
 
@@ -565,23 +561,21 @@ public sealed class SqliteReferenceMaterialSearch : IReferenceMaterialSearch
         }
     }
 
-    private static IReadOnlyList<string> ParseTags(string json)
+    private static ReferenceMaterialMetadata ParseMetadata(string json)
     {
         try
         {
-            var tags = JsonSerializer.Deserialize<string[]>(json);
-            if (tags is null ||
-                tags.Length > 16 ||
-                tags.Any(tag => string.IsNullOrWhiteSpace(tag)))
+            var metadata = JsonSerializer.Deserialize<ReferenceMaterialMetadata>(json);
+            if (!ReferenceMaterialMetadataValidator.TryValidate(metadata, out _))
             {
-                throw new InvalidOperationException("Stored reference material tags are invalid.");
+                throw new InvalidOperationException("Stored reference material metadata is invalid.");
             }
 
-            return tags;
+            return metadata!;
         }
         catch (JsonException exception)
         {
-            throw new InvalidOperationException("Stored reference material tags are invalid.", exception);
+            throw new InvalidOperationException("Stored reference material metadata is invalid.", exception);
         }
     }
 

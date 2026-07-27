@@ -3,6 +3,7 @@
   <PropertyGroup>
     <TargetFramework>net10.0</TargetFramework>
     <OutputType>WinExe</OutputType>
+    <OutputType Condition="'$(Configuration)' == 'Debug'">Exe</OutputType>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <NovelistUpdateCheckEndpointUrl Condition="'$(NovelistUpdateCheckEndpointUrl)' == ''"></NovelistUpdateCheckEndpointUrl>

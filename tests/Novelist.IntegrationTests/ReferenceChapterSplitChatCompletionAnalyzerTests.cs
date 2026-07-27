@@ -49,6 +49,7 @@ public sealed class ReferenceChapterSplitChatCompletionAnalyzerTests
         Assert.True(tool.Strict);
         Assert.Equal(8_192, chat.LastRequest.MaxOutputTokens);
         Assert.Equal(0, chat.LastRequest.TemperatureOverride);
+        Assert.True(chat.LastRequest.RequireToolCall);
     }
 
     [Fact]
@@ -80,6 +81,33 @@ public sealed class ReferenceChapterSplitChatCompletionAnalyzerTests
         Assert.Equal("submit_chapter_split_profile", tool.Name);
         Assert.True(tool.Strict);
         Assert.Equal(0, chat.LastRequest.TemperatureOverride);
+    }
+
+    [Fact]
+    public async Task AnalyzeAsyncIgnoresExplanatoryTextWhenTheRequiredToolCallIsPresent()
+    {
+        var chat = new RecordingChatCompletionClient(
+        [
+            new ChatCompletionStreamEvent(ChatCompletionStreamEventKind.Content, "I found the chapter headings."),
+            new ChatCompletionStreamEvent(
+                ChatCompletionStreamEventKind.ToolCall,
+                ToolCall: new ChatToolCall(
+                    "call_split",
+                    "submit_chapter_split_profile",
+                    """
+                    {"pattern_kind":"chapter_template","delimiter_template":"第{number}章 {title}","confidence":0.9,"evidence_offsets":[0]}
+                    """))
+        ]);
+        var analyzer = new ReferenceChapterSplitChatCompletionAnalyzer(
+            new FixedAppSettingsService("qwen/qwen-plus", "high"),
+            chat);
+
+        var result = await analyzer.AnalyzeAsync(
+            new ReferenceChapterSplitModelRequest(99, "source-hash", "第一章 开始\n\n正文。"),
+            CancellationToken.None);
+
+        Assert.Equal("chapter_template", result.PatternKind);
+        Assert.Equal("第{number}章 {title}", result.DelimiterTemplate);
     }
 
     [Fact]

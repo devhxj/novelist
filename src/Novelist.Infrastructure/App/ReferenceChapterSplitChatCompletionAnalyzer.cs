@@ -61,16 +61,13 @@ public sealed class ReferenceChapterSplitChatCompletionAnalyzer : IReferenceChap
                 ChapterSplitToolSchema,
                 Strict: true)],
             MaxOutputTokens: MaxOutputTokens,
-            TemperatureOverride: 0);
+            TemperatureOverride: 0,
+            RequireToolCall: true);
 
         ChatToolCall? toolCall = null;
+        // Responses-compatible providers may emit a short explanation alongside the structured call.
         await foreach (var item in _completion.StreamChatAsync(request, cancellationToken))
         {
-            if (item.Kind == ChatCompletionStreamEventKind.Content && !string.IsNullOrWhiteSpace(item.Data))
-            {
-                throw InvalidOutput();
-            }
-
             if (item.Kind != ChatCompletionStreamEventKind.ToolCall)
             {
                 continue;

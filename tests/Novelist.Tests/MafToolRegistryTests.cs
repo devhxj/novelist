@@ -707,10 +707,10 @@ public sealed class MafToolRegistryTests
                     7,
                     1,
                     0,
-                    "dialogue_exchange",
                     "她没有回答。",
-                    "用于承接对峙。",
-                    ["dialogue"],
+                    new ReferenceMaterialMetadata(
+                        new ReferenceMaterialSourceSpan(1, 1), "对话", [], null, null, null, [], null, [], null,
+                        null, null, null, [], [], [], [], "用于承接对峙。"),
                     "text-hash",
                     0.12)
             ];

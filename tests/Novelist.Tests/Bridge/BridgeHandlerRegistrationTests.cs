@@ -135,11 +135,12 @@ public sealed class BridgeHandlerRegistrationTests
     [Fact]
     public void CompatibilityAppMethodListHasExpectedCoverage()
     {
-        Assert.Equal(136, BridgeCompatibilityAppMethods.MethodNames.Count);
+        Assert.Equal(137, BridgeCompatibilityAppMethods.MethodNames.Count);
         Assert.Equal(BridgeCompatibilityAppMethods.MethodNames.Count, BridgeCompatibilityAppMethods.MethodNames.Distinct(StringComparer.Ordinal).Count());
         Assert.Contains("Chat", BridgeCompatibilityAppMethods.MethodNames);
         Assert.Contains("GetCover", BridgeCompatibilityAppMethods.MethodNames);
         Assert.Contains("RegisterReferenceMaterializationSource", BridgeCompatibilityAppMethods.MethodNames);
+        Assert.Contains("ListReferenceMaterializationChapterMaterials", BridgeCompatibilityAppMethods.MethodNames);
         Assert.Contains("PickReferenceSourceFile", BridgeCompatibilityAppMethods.MethodNames);
         Assert.Contains("SearchAll", BridgeCompatibilityAppMethods.MethodNames);
         Assert.Contains("DiscoverModels", BridgeCompatibilityAppMethods.MethodNames);
@@ -160,9 +161,10 @@ public sealed class BridgeHandlerRegistrationTests
             "PreviewReferenceChapterSplit",
             "ConfirmReferenceChapterSplit",
             "EnqueueReferenceMaterialization",
+            "RunReferenceMaterializationChapter",
             "GetReferenceMaterializationStatus",
-            "RetryReferenceMaterialization",
             "ListReferenceMaterializationChapterProgress",
+            "ListReferenceMaterializationChapterMaterials",
             "ListReferenceMaterials",
             "SearchReferenceMaterials",
             "GenerateReferenceMaterializationBlueprintPreview",
@@ -184,7 +186,8 @@ public sealed class BridgeHandlerRegistrationTests
             "GetReferenceMaterialCoverage",
             "GetReferenceSourceSegmentDetail",
             "DeleteReferenceMaterials",
-            "RestoreReferenceMaterials"
+            "RestoreReferenceMaterials",
+            "RetryReferenceMaterialization"
         };
 
         Assert.All(activeMethods, method => Assert.Contains(method, BridgeCompatibilityAppMethods.MethodNames));

@@ -34,19 +34,24 @@ public static class ReferenceMaterializationBridgeHandlers
                 ReadObjectArg<EnqueueReferenceMaterializationPayload>(context.Payload, 0, "input"),
                 cancellationToken)));
 
+        dispatcher.Register("RunReferenceMaterializationChapter", async (context, cancellationToken) =>
+            await ExecuteStatusAsync(() => service.RunMaterializationChapterAsync(
+                ReadObjectArg<RunReferenceMaterializationChapterPayload>(context.Payload, 0, "input"),
+                cancellationToken)));
+
         dispatcher.Register("GetReferenceMaterializationStatus", async (context, cancellationToken) =>
             await ExecuteOptionalStatusAsync(() => service.GetMaterializationStatusAsync(
                 ReadObjectArg<GetReferenceMaterializationStatusPayload>(context.Payload, 0, "input"),
                 cancellationToken)));
 
-        dispatcher.Register("RetryReferenceMaterialization", async (context, cancellationToken) =>
-            await ExecuteStatusAsync(() => service.RetryMaterializationAsync(
-                ReadObjectArg<RetryReferenceMaterializationPayload>(context.Payload, 0, "input"),
-                cancellationToken)));
-
         dispatcher.Register("ListReferenceMaterializationChapterProgress", async (context, cancellationToken) =>
             await ExecuteProgressAsync(() => service.ListMaterializationChapterProgressAsync(
                 ReadObjectArg<ListReferenceMaterializationChapterProgressPayload>(context.Payload, 0, "input"),
+                cancellationToken)));
+
+        dispatcher.Register("ListReferenceMaterializationChapterMaterials", async (context, cancellationToken) =>
+            await ExecuteChapterMaterialsAsync(() => service.ListMaterializationChapterMaterialsAsync(
+                ReadObjectArg<ListReferenceMaterializationChapterMaterialsPayload>(context.Payload, 0, "input"),
                 cancellationToken)));
 
         return dispatcher;
@@ -132,6 +137,23 @@ public static class ReferenceMaterializationBridgeHandlers
         }
     }
 
+    private static async ValueTask<PageResultPayload<ReferenceMaterialListItemPayload>> ExecuteChapterMaterialsAsync(
+        Func<ValueTask<PageResultPayload<ReferenceMaterialListItemPayload>>> operation)
+    {
+        try
+        {
+            return await operation();
+        }
+        catch (ReferenceMaterializationException exception)
+        {
+            throw new BridgeRequestException(
+                exception.ErrorCode,
+                exception.Message,
+                new { error_code = exception.ErrorCode },
+                retryable: true);
+        }
+    }
+
     private static ReferenceMaterializationStatusPayload SanitizeStatus(ReferenceMaterializationStatusPayload status)
     {
         return status with
@@ -143,8 +165,7 @@ public static class ReferenceMaterializationBridgeHandlers
             Llm = SanitizeModel(status.Llm),
             Embedding = SanitizeModel(status.Embedding),
             LastErrorCode = status.LastErrorCode is null ? null : ReferencePayloadSanitizer.RedactAndBoundText(status.LastErrorCode, 128),
-            LastErrorMessage = status.LastErrorMessage is null ? null : ReferencePayloadSanitizer.RedactAndBoundText(status.LastErrorMessage, 512),
-            NextAction = ReferencePayloadSanitizer.RedactAndBoundText(status.NextAction, 64)
+            LastErrorMessage = status.LastErrorMessage is null ? null : ReferencePayloadSanitizer.RedactAndBoundText(status.LastErrorMessage, 512)
         };
     }
 

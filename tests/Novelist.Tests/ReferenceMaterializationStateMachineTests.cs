@@ -24,6 +24,18 @@ public sealed class ReferenceMaterializationStateMachineTests
             ReferenceMaterializationRunStates.Indexing,
             ReferenceMaterializationRunStates.Extracting));
         Assert.True(ReferenceMaterializationRunStateMachine.CanTransition(
+            ReferenceMaterializationRunStates.Indexing,
+            ReferenceMaterializationRunStates.Paused));
+        Assert.True(ReferenceMaterializationRunStateMachine.CanTransition(
+            ReferenceMaterializationRunStates.Paused,
+            ReferenceMaterializationRunStates.Queued));
+        Assert.True(ReferenceMaterializationRunStateMachine.CanTransition(
+            ReferenceMaterializationRunStates.Failed,
+            ReferenceMaterializationRunStates.Queued));
+        Assert.True(ReferenceMaterializationRunStateMachine.CanTransition(
+            ReferenceMaterializationRunStates.Completed,
+            ReferenceMaterializationRunStates.Queued));
+        Assert.True(ReferenceMaterializationRunStateMachine.CanTransition(
             ReferenceMaterializationRunStates.Embedding,
             ReferenceMaterializationRunStates.Failed));
         Assert.False(ReferenceMaterializationRunStateMachine.CanTransition(
@@ -32,6 +44,9 @@ public sealed class ReferenceMaterializationStateMachineTests
         Assert.False(ReferenceMaterializationRunStateMachine.CanTransition(
             ReferenceMaterializationRunStates.Completed,
             ReferenceMaterializationRunStates.Failed));
+        Assert.False(ReferenceMaterializationRunStateMachine.CanTransition(
+            ReferenceMaterializationRunStates.Failed,
+            ReferenceMaterializationRunStates.Extracting));
     }
 
     [Fact]
@@ -55,14 +70,31 @@ public sealed class ReferenceMaterializationStateMachineTests
         Assert.False(ReferenceMaterializationChapterStateMachine.CanTransition(
             ReferenceMaterializationChapterStates.Completed,
             ReferenceMaterializationChapterStates.Failed));
+        Assert.True(ReferenceMaterializationChapterStateMachine.CanTransition(
+            ReferenceMaterializationChapterStates.Failed,
+            ReferenceMaterializationChapterStates.Pending));
+        Assert.True(ReferenceMaterializationChapterStateMachine.CanTransition(
+            ReferenceMaterializationChapterStates.Completed,
+            ReferenceMaterializationChapterStates.Pending));
     }
 
     [Fact]
-    public void EnqueueContractExposesOnlyTheFrozenFiveOrTenChapterBatchChoice()
+    public void MaterializationContractsDoNotExposeBatchScheduling()
     {
-        Assert.Equal([5, 10], ReferenceMaterializationBatchSizes.All);
-        Assert.Equal(5, ReferenceMaterializationBatchSizes.Default);
-        Assert.Throws<ArgumentOutOfRangeException>(() =>
-            ReferenceMaterializationBatchSizes.Validate(7));
+        Assert.DoesNotContain(
+            typeof(EnqueueReferenceMaterializationPayload).GetProperties(),
+            property => property.Name.Contains("Batch", StringComparison.Ordinal));
+        Assert.DoesNotContain(
+            typeof(ReferenceMaterializationStatusPayload).GetProperties(),
+            property => property.Name.Contains("Batch", StringComparison.Ordinal));
+        Assert.DoesNotContain(
+            typeof(ReferenceMaterializationStatusPayload).GetProperties(),
+            property => property.Name == "NextAction");
+        Assert.DoesNotContain(
+            typeof(ReferenceMaterializationChapterProgressPayload).GetProperties(),
+            property => property.Name.Contains("Batch", StringComparison.Ordinal));
+        Assert.DoesNotContain(
+            typeof(ReferenceMaterializationChapterProgressPayload).GetProperties(),
+            property => property.Name == "RowVersion");
     }
 }

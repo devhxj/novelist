@@ -17,10 +17,8 @@ public sealed record ReferenceMaterializationBlueprintPreviewMaterialLinkPayload
     [property: JsonPropertyName("material_id")] string MaterialId,
     [property: JsonPropertyName("anchor_id")] long AnchorId,
     [property: JsonPropertyName("generation_id")] string GenerationId,
-    [property: JsonPropertyName("material_type")] string MaterialType,
     [property: JsonPropertyName("text")] string Text,
-    [property: JsonPropertyName("description")] string Description,
-    [property: JsonPropertyName("tags")] IReadOnlyList<string> Tags,
+    [property: JsonPropertyName("metadata")] ReferenceMaterialMetadataPayload Metadata,
     [property: JsonPropertyName("vector_distance")] double VectorDistance,
     [property: JsonPropertyName("fit_explanation")] string FitExplanation);
 

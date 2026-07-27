@@ -21,7 +21,7 @@ internal sealed partial class SqliteReferenceMaterializationRunStore
         }
 
         if (run.Status != ReferenceMaterializationRunStates.Indexing ||
-            run.CurrentBatchIndex is not null ||
+            run.CurrentChapterIndex is not null ||
             !await IsGenerationReadyForPromotionAsync(connection, transaction, run, cancellationToken))
         {
             await transaction.CommitAsync(cancellationToken);
@@ -54,7 +54,7 @@ internal sealed partial class SqliteReferenceMaterializationRunStore
         await using var command = connection.CreateCommand();
         command.Transaction = transaction;
         command.CommandText = """
-            SELECT run_id, anchor_id, generation_id, status, current_batch_index,
+            SELECT run_id, anchor_id, generation_id, status, current_chapter_index,
                    total_chapters, processed_chapters, material_count, vector_count,
                    embedding_provider, embedding_model_id, embedding_dimensions
             FROM reference_materialization_runs
@@ -175,16 +175,13 @@ internal sealed partial class SqliteReferenceMaterializationRunStore
             state.Transaction = transaction;
             state.CommandText = """
                 INSERT INTO reference_anchor_materialization_state (
-                  anchor_id, active_generation_id, row_version, updated_at)
-                VALUES ($anchor_id, $generation_id, 0, $updated_at)
+                  anchor_id, active_generation_id)
+                VALUES ($anchor_id, $generation_id)
                 ON CONFLICT(anchor_id) DO UPDATE SET
-                  active_generation_id = excluded.active_generation_id,
-                  row_version = reference_anchor_materialization_state.row_version + 1,
-                  updated_at = excluded.updated_at;
+                  active_generation_id = excluded.active_generation_id;
                 """;
             state.Parameters.AddWithValue("$anchor_id", run.AnchorId);
             state.Parameters.AddWithValue("$generation_id", run.GenerationId);
-            state.Parameters.AddWithValue("$updated_at", FormatTimestamp(now));
             await state.ExecuteNonQueryAsync(cancellationToken);
         }
 
@@ -196,14 +193,13 @@ internal sealed partial class SqliteReferenceMaterializationRunStore
         command.CommandText = """
             UPDATE reference_materialization_runs
             SET status = $completed,
-                completed_at = $completed_at,
-                activated_at = $activated_at
+                requested_chapter_index = NULL,
+                completed_at = $completed_at
             WHERE run_id = $run_id
               AND status = $indexing;
             """;
         command.Parameters.AddWithValue("$completed", ReferenceMaterializationRunStates.Completed);
         command.Parameters.AddWithValue("$completed_at", FormatTimestamp(now));
-        command.Parameters.AddWithValue("$activated_at", FormatTimestamp(now));
         command.Parameters.AddWithValue("$run_id", run.RunId);
         command.Parameters.AddWithValue("$indexing", ReferenceMaterializationRunStates.Indexing);
         if (await command.ExecuteNonQueryAsync(cancellationToken) != 1)
@@ -255,7 +251,7 @@ internal sealed partial class SqliteReferenceMaterializationRunStore
         long AnchorId,
         string GenerationId,
         string Status,
-        int? CurrentBatchIndex,
+        int? CurrentChapterIndex,
         int TotalChapters,
         int ProcessedChapters,
         int MaterialCount,

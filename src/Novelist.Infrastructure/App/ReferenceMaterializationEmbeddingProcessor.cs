@@ -5,8 +5,6 @@ namespace Novelist.Infrastructure.App;
 
 public sealed class ReferenceMaterializationEmbeddingProcessor : IReferenceMaterializationEmbedder
 {
-    private const int MaxItemsPerRequest = 64;
-    private const int MaxTextCharsPerItem = 1_200;
     private readonly IEmbeddingConfigurationService _configuration;
     private readonly IEmbeddingClient _embeddings;
 
@@ -50,7 +48,8 @@ public sealed class ReferenceMaterializationEmbeddingProcessor : IReferenceMater
         {
             throw new ReferenceMaterializationException(
                 ReferenceMaterializationErrorCodes.EmbeddingRequestFailed,
-                "Materialization embedding request failed.");
+                "Materialization embedding request failed.",
+                exception);
         }
 
         return ValidateResponse(input, response);
@@ -62,9 +61,9 @@ public sealed class ReferenceMaterializationEmbeddingProcessor : IReferenceMater
             string.IsNullOrWhiteSpace(input.Model.Provider) ||
             string.IsNullOrWhiteSpace(input.Model.ModelId) ||
             input.Model.Dimensions <= 0 ||
-            input.Items is null || input.Items.Count is 0 or > MaxItemsPerRequest)
+            input.Items is null || input.Items.Count == 0)
         {
-            throw new ArgumentException("Materialization embedding request is invalid.", nameof(input));
+            throw InvalidRequest();
         }
 
         var materialIds = new HashSet<string>(StringComparer.Ordinal);
@@ -74,13 +73,18 @@ public sealed class ReferenceMaterializationEmbeddingProcessor : IReferenceMater
                 string.IsNullOrWhiteSpace(item.MaterialId) ||
                 item.MaterialId.Length > 256 ||
                 !materialIds.Add(item.MaterialId) ||
-                string.IsNullOrWhiteSpace(item.Text) || item.Text.Length > MaxTextCharsPerItem ||
+                string.IsNullOrWhiteSpace(item.Text) ||
                 item.Text.Contains('\0'))
             {
-                throw new ArgumentException("Materialization embedding request contains an invalid item.", nameof(input));
+                throw InvalidRequest();
             }
         }
     }
+
+    private static ReferenceMaterializationException InvalidRequest() =>
+        new(
+            ReferenceMaterializationErrorCodes.EmbeddingRequestFailed,
+            "Materialization embedding request is invalid.");
 
     private static void ValidateFrozenModel(
         ReferenceMaterializationEmbeddingModel model,

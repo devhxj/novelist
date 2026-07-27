@@ -23,7 +23,5 @@ public sealed record ReferenceChapterMaterialExtractionResult(
     IReadOnlyList<ExtractedReferenceMaterial> Materials);
 
 public sealed record ExtractedReferenceMaterial(
-    string MaterialType,
     string Text,
-    string Description,
-    IReadOnlyList<string> Tags);
+    ReferenceMaterialMetadata Metadata);

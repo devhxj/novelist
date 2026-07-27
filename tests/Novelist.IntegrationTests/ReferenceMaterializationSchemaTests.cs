@@ -36,16 +36,37 @@ public sealed class ReferenceMaterializationSchemaTests : IDisposable
         Assert.Contains("idx_reference_materialization_runs_anchor_status", runIndexes);
         var runColumns = await ReadColumnsAsync(options, "reference_materialization_runs");
         Assert.Contains("extractor_schema_version", runColumns);
+        Assert.Contains("current_chapter_index", runColumns);
+        Assert.DoesNotContain("activated_at", runColumns);
         Assert.DoesNotContain("candidate_count", runColumns);
+        Assert.DoesNotContain("chapter_batch_size", runColumns);
+        Assert.DoesNotContain("total_chapter_batches", runColumns);
+        Assert.DoesNotContain("completed_chapter_batches", runColumns);
+        Assert.DoesNotContain("current_batch_index", runColumns);
+        Assert.DoesNotContain("current_batch_start_chapter", runColumns);
+        Assert.DoesNotContain("current_batch_end_chapter", runColumns);
         var progressColumns = await ReadColumnsAsync(options, "reference_materialization_chapter_progress");
+        Assert.DoesNotContain("current_stage", progressColumns);
+        Assert.DoesNotContain("row_version", progressColumns);
         Assert.DoesNotContain("chapter_node_id", progressColumns);
+        Assert.DoesNotContain("batch_index", progressColumns);
+        var leaseColumns = await ReadColumnsAsync(options, "reference_materialization_run_leases");
+        Assert.DoesNotContain("worker_id", leaseColumns);
+        Assert.DoesNotContain("updated_at", leaseColumns);
+        var stateColumns = await ReadColumnsAsync(options, "reference_anchor_materialization_state");
+        Assert.DoesNotContain("row_version", stateColumns);
+        Assert.DoesNotContain("updated_at", stateColumns);
+        var vectorIndexColumns = await ReadColumnsAsync(options, "reference_materialization_vector_indexes");
+        Assert.DoesNotContain("created_at", vectorIndexColumns);
+        Assert.DoesNotContain("updated_at", vectorIndexColumns);
         var materialIndexes = await ReadIndexesAsync(options, "reference_materials");
         Assert.Contains("ux_reference_materials_generation_ordinal", materialIndexes);
         Assert.Contains("ux_reference_materials_generation_text", materialIndexes);
+        Assert.Contains("metadata_schema_version", await ReadColumnsAsync(options, "reference_materials"));
     }
 
     [Fact]
-    public async Task MaterializationRunSchemaRejectsUnsupportedBatchSizesAndDuplicateGenerationKeys()
+    public async Task MaterializationRunSchemaRejectsDuplicateGenerationKeys()
     {
         var options = CreateOptions();
         var anchor = await CreateAnchorAsync(options);
@@ -54,13 +75,10 @@ public sealed class ReferenceMaterializationSchemaTests : IDisposable
             new PreviewReferenceChapterSplitPayload(anchor.NovelId, anchor.AnchorId, "# {title}"),
             CancellationToken.None);
 
-        await InsertRunAsync(options, anchor.AnchorId, profile.SplitProfileId, "run-1", "generation-1", chapterBatchSize: 5);
-        var invalidBatch = await Assert.ThrowsAsync<SqliteException>(() =>
-            InsertRunAsync(options, anchor.AnchorId, profile.SplitProfileId, "run-invalid", "generation-invalid", chapterBatchSize: 7).AsTask());
-        Assert.Equal(19, invalidBatch.SqliteErrorCode);
+        await InsertRunAsync(options, anchor.AnchorId, profile.SplitProfileId, "run-1", "generation-1");
 
         var duplicateGeneration = await Assert.ThrowsAsync<SqliteException>(() =>
-            InsertRunAsync(options, anchor.AnchorId, profile.SplitProfileId, "run-duplicate", "generation-1", chapterBatchSize: 10).AsTask());
+            InsertRunAsync(options, anchor.AnchorId, profile.SplitProfileId, "run-duplicate", "generation-1").AsTask());
         Assert.Equal(19, duplicateGeneration.SqliteErrorCode);
     }
 
@@ -85,8 +103,8 @@ public sealed class ReferenceMaterializationSchemaTests : IDisposable
         Assert.Equal("wal", await ReadJournalModeAsync(options));
 
         var referenceDirectory = Path.Combine(options.DefaultDataDirectory, "reference-anchor");
-        var backupPath = Assert.Single(Directory.GetFiles(referenceDirectory, "index.sqlite.reference-schema-v2-*.bak"));
-        var manifestPath = Assert.Single(Directory.GetFiles(referenceDirectory, "reference-schema-migration-v2-*.json"));
+        var backupPath = Assert.Single(Directory.GetFiles(referenceDirectory, "index.sqlite.reference-schema-v6-*.bak"));
+        var manifestPath = Assert.Single(Directory.GetFiles(referenceDirectory, "reference-schema-migration-v6-*.json"));
         using (var manifest = JsonDocument.Parse(await File.ReadAllTextAsync(manifestPath)))
         {
             Assert.Equal("completed", manifest.RootElement.GetProperty("Status").GetString());
@@ -105,8 +123,100 @@ public sealed class ReferenceMaterializationSchemaTests : IDisposable
             await ReferenceCorpusSchemaProvisioner.EnsureCoreTablesAsync(connection, CancellationToken.None);
         }
 
-        Assert.Single(Directory.GetFiles(referenceDirectory, "index.sqlite.reference-schema-v2-*.bak"));
-        Assert.Single(Directory.GetFiles(referenceDirectory, "reference-schema-migration-v2-*.json"));
+        Assert.Single(Directory.GetFiles(referenceDirectory, "index.sqlite.reference-schema-v6-*.bak"));
+        Assert.Single(Directory.GetFiles(referenceDirectory, "reference-schema-migration-v6-*.json"));
+    }
+
+    [Fact]
+    public async Task VersionTwoUpgradePreservesAnchorsAndConfirmedChapterBoundaries()
+    {
+        var options = CreateOptions();
+        var anchor = await CreateAnchorAsync(options);
+        var service = new SqliteReferenceMaterializationService(options, new EmptyChapterSplitAnalyzer());
+        var profile = await service.PreviewChapterSplitAsync(
+            new PreviewReferenceChapterSplitPayload(anchor.NovelId, anchor.AnchorId, "# {title}"),
+            CancellationToken.None);
+        await service.ConfirmChapterSplitAsync(
+            new ConfirmReferenceChapterSplitPayload(anchor.NovelId, anchor.AnchorId, profile.SplitProfileId),
+            CancellationToken.None);
+        await SeedVersionTwoMaterializationSchemaAsync(options);
+
+        await using (var connection = await OpenConnectionAsync(options))
+        {
+            await ReferenceCorpusSchemaProvisioner.EnsureCoreTablesAsync(connection, CancellationToken.None);
+        }
+
+        Assert.Equal(1, await ReadCountAsync(options, "reference_anchors"));
+        Assert.Equal(1, await ReadCountAsync(options, "reference_chapter_split_profiles"));
+        Assert.Equal(2, await ReadCountAsync(options, "reference_chapter_split_boundaries"));
+        Assert.Equal(0, await ReadCountAsync(options, "reference_materialization_runs"));
+        var runColumns = await ReadColumnsAsync(options, "reference_materialization_runs");
+        Assert.Contains("current_chapter_index", runColumns);
+        Assert.DoesNotContain("chapter_batch_size", runColumns);
+
+        var referenceDirectory = Path.Combine(options.DefaultDataDirectory, "reference-anchor");
+        Assert.Single(Directory.GetFiles(referenceDirectory, "index.sqlite.reference-schema-v6-*.bak"));
+        Assert.Single(Directory.GetFiles(referenceDirectory, "reference-schema-migration-v6-*.json"));
+    }
+
+    [Fact]
+    public async Task VersionThreeUpgradeRemovesRedundantChapterStageWithoutLosingConfirmedBoundaries()
+    {
+        var options = CreateOptions();
+        var anchor = await CreateAnchorAsync(options);
+        var service = new SqliteReferenceMaterializationService(options, new EmptyChapterSplitAnalyzer());
+        var profile = await service.PreviewChapterSplitAsync(
+            new PreviewReferenceChapterSplitPayload(anchor.NovelId, anchor.AnchorId, "# {title}"),
+            CancellationToken.None);
+        await service.ConfirmChapterSplitAsync(
+            new ConfirmReferenceChapterSplitPayload(anchor.NovelId, anchor.AnchorId, profile.SplitProfileId),
+            CancellationToken.None);
+        await SeedVersionThreeMaterializationSchemaAsync(options);
+
+        await using (var connection = await OpenConnectionAsync(options))
+        {
+            await ReferenceCorpusSchemaProvisioner.EnsureCoreTablesAsync(connection, CancellationToken.None);
+        }
+
+        Assert.Equal(1, await ReadCountAsync(options, "reference_anchors"));
+        Assert.Equal(1, await ReadCountAsync(options, "reference_chapter_split_profiles"));
+        Assert.Equal(2, await ReadCountAsync(options, "reference_chapter_split_boundaries"));
+        var progressColumns = await ReadColumnsAsync(options, "reference_materialization_chapter_progress");
+        Assert.DoesNotContain("current_stage", progressColumns);
+    }
+
+    [Fact]
+    public async Task VersionFourUpgradeResetsDerivedMaterializationData()
+    {
+        var options = CreateOptions();
+        var anchor = await CreateAnchorAsync(options);
+        var service = new SqliteReferenceMaterializationService(options, new EmptyChapterSplitAnalyzer());
+        var profile = await service.PreviewChapterSplitAsync(
+            new PreviewReferenceChapterSplitPayload(anchor.NovelId, anchor.AnchorId, "# {title}"),
+            CancellationToken.None);
+        await InsertRunAsync(options, anchor.AnchorId, profile.SplitProfileId, "run-v4", "generation-v4");
+        await SeedVersionFourWithoutRequestedChapterAsync(options, anchor.AnchorId);
+
+        Assert.DoesNotContain(
+            "requested_chapter_index",
+            await ReadColumnsAsync(options, "reference_materialization_runs"));
+
+        await using (var connection = await OpenConnectionAsync(options))
+        {
+            await ReferenceCorpusSchemaProvisioner.EnsureCoreTablesAsync(connection, CancellationToken.None);
+        }
+
+        Assert.Contains(
+            "requested_chapter_index",
+            await ReadColumnsAsync(options, "reference_materialization_runs"));
+        Assert.Equal(0, await ReadCountAsync(options, "reference_materialization_runs"));
+        Assert.Equal(0, await ReadCountAsync(options, "reference_materialization_chapter_progress"));
+        Assert.Equal(0, await ReadCountAsync(options, "reference_materials"));
+        Assert.Equal(0, await ReadCountAsync(options, "reference_material_embeddings"));
+
+        var referenceDirectory = Path.Combine(options.DefaultDataDirectory, "reference-anchor");
+        Assert.Single(Directory.GetFiles(referenceDirectory, "index.sqlite.reference-schema-v6-*.bak"));
+        Assert.Single(Directory.GetFiles(referenceDirectory, "reference-schema-migration-v6-*.json"));
     }
 
     public void Dispose()
@@ -137,8 +247,7 @@ public sealed class ReferenceMaterializationSchemaTests : IDisposable
         long anchorId,
         string profileId,
         string runId,
-        string generationId,
-        int chapterBatchSize)
+        string generationId)
     {
         await using var connection = await OpenConnectionAsync(options);
         await using var command = connection.CreateCommand();
@@ -146,17 +255,16 @@ public sealed class ReferenceMaterializationSchemaTests : IDisposable
             INSERT INTO reference_materialization_runs (
               run_id, anchor_id, split_profile_id, generation_id, policy_version, extractor_schema_version,
               model_provider, model_id, embedding_provider, embedding_model_id, embedding_dimensions,
-              status, chapter_batch_size, total_chapters, total_chapter_batches, started_at)
+              status, total_chapters, current_chapter_index, started_at)
             VALUES (
               $run_id, $anchor_id, $split_profile_id, $generation_id, 'policy-v1', 'extractor-v1',
               'provider', 'model', 'embedding-provider', 'embedding-model', 8,
-              'queued', $chapter_batch_size, 2, 1, '2026-07-12T00:00:00.0000000Z');
+              'queued', 2, 1, '2026-07-12T00:00:00.0000000Z');
             """;
         command.Parameters.AddWithValue("$run_id", runId);
         command.Parameters.AddWithValue("$anchor_id", anchorId);
         command.Parameters.AddWithValue("$split_profile_id", profileId);
         command.Parameters.AddWithValue("$generation_id", generationId);
-        command.Parameters.AddWithValue("$chapter_batch_size", chapterBatchSize);
         await command.ExecuteNonQueryAsync(CancellationToken.None);
     }
 
@@ -224,6 +332,12 @@ public sealed class ReferenceMaterializationSchemaTests : IDisposable
             );
             INSERT INTO reference_session_library_scope_state (session_id, is_explicit, updated_at)
             VALUES ('legacy-session', 1, '2026-07-21T00:00:00.0000000Z');
+            DROP TABLE reference_materials;
+            CREATE TABLE reference_materials (
+              material_id TEXT PRIMARY KEY, generation_id TEXT NOT NULL, run_id TEXT NOT NULL,
+              anchor_id INTEGER NOT NULL, chapter_index INTEGER NOT NULL, ordinal INTEGER NOT NULL,
+              material_type TEXT NOT NULL, text TEXT NOT NULL, description TEXT NOT NULL,
+              tags_json TEXT NOT NULL, text_hash TEXT NOT NULL, created_at TEXT NOT NULL);
             INSERT INTO reference_text_nodes (node_id, anchor_id, text)
             VALUES ('legacy-node', $anchor_id, '旧节点材料');
             INSERT INTO reference_materials (
@@ -238,6 +352,87 @@ public sealed class ReferenceMaterializationSchemaTests : IDisposable
         command.Parameters.Clear();
         command.CommandText = "PRAGMA journal_mode = DELETE;";
         await command.ExecuteScalarAsync(CancellationToken.None);
+    }
+
+    private static async ValueTask SeedVersionTwoMaterializationSchemaAsync(AppInitializationOptions options)
+    {
+        await using var connection = await OpenConnectionAsync(options);
+        await using var command = connection.CreateCommand();
+        command.CommandText = """
+            PRAGMA foreign_keys = OFF;
+            DROP TABLE reference_material_embeddings;
+            DROP TABLE reference_materials;
+            DROP TABLE reference_materialization_vector_indexes;
+            DROP TABLE reference_materialization_chapter_progress;
+            DROP TABLE reference_materialization_run_leases;
+            DROP TABLE reference_materialization_runs;
+            DROP TABLE reference_anchor_materialization_state;
+            CREATE TABLE reference_materialization_runs (
+              run_id TEXT PRIMARY KEY,
+              chapter_batch_size INTEGER NOT NULL CHECK(chapter_batch_size IN (5, 10))
+            );
+            UPDATE reference_schema_metadata
+            SET schema_version = 2
+            WHERE schema_key = 'reference-materialization';
+            PRAGMA foreign_keys = ON;
+            """;
+        await command.ExecuteNonQueryAsync(CancellationToken.None);
+    }
+
+    private static async ValueTask SeedVersionThreeMaterializationSchemaAsync(AppInitializationOptions options)
+    {
+        await using var connection = await OpenConnectionAsync(options);
+        await using var command = connection.CreateCommand();
+        command.CommandText = """
+            ALTER TABLE reference_materialization_chapter_progress
+            ADD COLUMN current_stage TEXT NOT NULL DEFAULT 'pending';
+            UPDATE reference_schema_metadata
+            SET schema_version = 3
+            WHERE schema_key = 'reference-materialization';
+            """;
+        await command.ExecuteNonQueryAsync(CancellationToken.None);
+    }
+
+    private static async ValueTask SeedVersionFourWithoutRequestedChapterAsync(
+        AppInitializationOptions options,
+        long anchorId)
+    {
+        await using var connection = await OpenConnectionAsync(options);
+        await using var command = connection.CreateCommand();
+        command.CommandText = """
+            PRAGMA foreign_keys = OFF;
+            DROP TABLE reference_materials;
+            CREATE TABLE reference_materials (
+              material_id TEXT PRIMARY KEY, generation_id TEXT NOT NULL, run_id TEXT NOT NULL,
+              anchor_id INTEGER NOT NULL, chapter_index INTEGER NOT NULL, ordinal INTEGER NOT NULL,
+              material_type TEXT NOT NULL, text TEXT NOT NULL, description TEXT NOT NULL,
+              tags_json TEXT NOT NULL, text_hash TEXT NOT NULL, created_at TEXT NOT NULL);
+            INSERT INTO reference_materialization_chapter_progress (
+              run_id, chapter_index, status, material_count, vector_count, model_call_count,
+              started_at, completed_at)
+            VALUES (
+              'run-v4', 1, 'completed', 1, 1, 1,
+              '2026-07-22T00:00:00.0000000Z', '2026-07-22T00:01:00.0000000Z');
+
+            INSERT INTO reference_materials (
+              material_id, generation_id, run_id, anchor_id, chapter_index, ordinal,
+              material_type, text, description, tags_json, text_hash, created_at)
+            VALUES (
+              'material-v4', 'generation-v4', 'run-v4', $anchor_id, 1, 0,
+              'dialogue', '保留的章节材料', '迁移后仍应存在', '[]', 'material-v4-hash',
+              '2026-07-22T00:01:00.0000000Z');
+
+            INSERT INTO reference_material_embeddings (
+              material_id, generation_id, provider, model_id, dimensions,
+              embedding_hash, embedding_blob, created_at)
+            VALUES (
+              'material-v4', 'generation-v4', 'embedding-provider', 'embedding-model', 8,
+              'embedding-v4-hash', X'00000000', '2026-07-22T00:01:00.0000000Z');
+
+            ALTER TABLE reference_materialization_runs DROP COLUMN requested_chapter_index;
+            """;
+        command.Parameters.AddWithValue("$anchor_id", anchorId);
+        await command.ExecuteNonQueryAsync(CancellationToken.None);
     }
 
     private static async ValueTask<int> ReadCountAsync(AppInitializationOptions options, string tableName)

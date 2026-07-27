@@ -261,7 +261,7 @@ public sealed class ReferenceWritingServiceTests : IDisposable
         string materialId,
         string generationId,
         long anchorId,
-        string materialType,
+        string sourceKind,
         string text,
         double distance) => new(
             materialId,
@@ -269,10 +269,8 @@ public sealed class ReferenceWritingServiceTests : IDisposable
             anchorId,
             1,
             0,
-            materialType,
             text,
-            "Useful for the requested beat.",
-            [materialType],
+            ArchiveMetadata(sourceKind == "dialogue" ? "对话" : "叙述", "Useful for the requested beat."),
             Hash(text),
             distance);
 
@@ -329,23 +327,23 @@ public sealed class ReferenceWritingServiceTests : IDisposable
               run_id, anchor_id, split_profile_id, generation_id,
               policy_version, extractor_schema_version,
               model_provider, model_id, embedding_provider, embedding_model_id,
-              embedding_dimensions, status, chapter_batch_size, total_chapters,
-              processed_chapters, material_count, vector_count, started_at, completed_at, activated_at)
+              embedding_dimensions, status, total_chapters,
+              processed_chapters, material_count, vector_count, started_at, completed_at)
             VALUES (
               $run_id, $anchor_id, $profile_id, $generation_id,
               'test', 'test', 'test', 'test', 'test', 'test',
-              3, 'completed', 5, 1, 1, 1, 1, $now, $now, $now);
+              3, 'completed', 1, 1, 1, 1, $now, $now);
 
             INSERT INTO reference_anchor_materialization_state (
-              anchor_id, active_generation_id, updated_at)
-            VALUES ($anchor_id, $generation_id, $now);
+              anchor_id, active_generation_id)
+            VALUES ($anchor_id, $generation_id);
 
             INSERT INTO reference_materials (
               material_id, generation_id, run_id, anchor_id, chapter_index, ordinal,
-              material_type, text, description, tags_json, text_hash, created_at)
+              text, metadata_json, text_hash, created_at)
             VALUES (
               $material_id, $generation_id, $run_id, $anchor_id, 1, 0,
-              $material_type, $text, 'Useful for the requested beat.', '[]', $text_hash, $now);
+              $text, $metadata_json, $text_hash, $now);
             """;
         command.Parameters.AddWithValue("$anchor_id", anchorId);
         command.Parameters.AddWithValue("$title", "Reference " + anchorId);
@@ -355,12 +353,21 @@ public sealed class ReferenceWritingServiceTests : IDisposable
         command.Parameters.AddWithValue("$run_id", "run-" + anchorId);
         command.Parameters.AddWithValue("$generation_id", generationId);
         command.Parameters.AddWithValue("$material_id", materialId);
-        command.Parameters.AddWithValue("$material_type", materialType);
+        command.Parameters.AddWithValue(
+            "$metadata_json",
+            JsonSerializer.Serialize(ArchiveMetadata(
+                materialType == "dialogue" ? "对话" : "叙述",
+                "Useful for the requested beat.")));
         command.Parameters.AddWithValue("$text", text);
         command.Parameters.AddWithValue("$text_hash", Hash(text));
         command.Parameters.AddWithValue("$now", DateTimeOffset.UtcNow.ToString("O"));
         await command.ExecuteNonQueryAsync(CancellationToken.None);
     }
+
+    private static ReferenceMaterialMetadata ArchiveMetadata(string sourceKind, string reuseHint) =>
+        new(
+            new ReferenceMaterialSourceSpan(1, 1), sourceKind, [], null, null, null, [], null, [], null,
+            null, null, null, [], [], [], [], reuseHint);
 
     private static async ValueTask SetActiveGenerationAsync(
         AppInitializationOptions options,
@@ -377,12 +384,10 @@ public sealed class ReferenceWritingServiceTests : IDisposable
         await using var command = connection.CreateCommand();
         command.CommandText = """
             UPDATE reference_anchor_materialization_state
-            SET active_generation_id = $generation_id,
-                updated_at = $updated_at
+            SET active_generation_id = $generation_id
             WHERE anchor_id = $anchor_id;
             """;
         command.Parameters.AddWithValue("$generation_id", generationId);
-        command.Parameters.AddWithValue("$updated_at", DateTimeOffset.UtcNow.ToString("O"));
         command.Parameters.AddWithValue("$anchor_id", anchorId);
         await command.ExecuteNonQueryAsync(CancellationToken.None);
     }

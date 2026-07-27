@@ -16,13 +16,13 @@ public sealed class ReferenceMaterializationVectorIndexer
         _vecProvisioner = vecProvisioner ?? throw new ArgumentNullException(nameof(vecProvisioner));
     }
 
-    public async ValueTask<ReferenceMaterializationVectorIndexResult> IndexCurrentBatchAsync(
-        string runId,
+    internal async ValueTask<ReferenceMaterializationVectorIndexResult> IndexCurrentChapterAsync(
+        ReferenceMaterializationChapterClaim claim,
         CancellationToken cancellationToken)
     {
         var databasePath = await _databasePathResolver.ResolveAsync(cancellationToken);
         var store = new SqliteReferenceMaterializationRunStore(_databasePathResolver);
-        var workItem = await store.ReadCurrentBatchVectorIndexWorkItemAsync(runId, cancellationToken);
+        var workItem = await store.ReadCurrentChapterVectorIndexWorkItemAsync(claim, cancellationToken);
         try
         {
             await _vecProvisioner.ProvisionAsync(
@@ -42,9 +42,10 @@ public sealed class ReferenceMaterializationVectorIndexer
         {
             throw new ReferenceMaterializationException(
                 ReferenceMaterializationErrorCodes.VectorIndexFailed,
-                "Materialization vector index creation failed.");
+                "Materialization vector index creation failed.",
+                exception);
         }
 
-        return await store.CompleteCurrentBatchIndexAsync(workItem, cancellationToken);
+        return await store.CompleteCurrentChapterIndexAsync(claim, workItem, cancellationToken);
     }
 }

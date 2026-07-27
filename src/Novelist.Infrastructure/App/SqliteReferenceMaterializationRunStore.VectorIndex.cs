@@ -6,24 +6,32 @@ namespace Novelist.Infrastructure.App;
 
 internal sealed partial class SqliteReferenceMaterializationRunStore
 {
-    public async ValueTask<ReferenceMaterializationVectorIndexWorkItem> ReadCurrentBatchVectorIndexWorkItemAsync(
-        string runId,
+    public async ValueTask<ReferenceMaterializationVectorIndexWorkItem> ReadCurrentChapterVectorIndexWorkItemAsync(
+        ReferenceMaterializationChapterClaim claim,
         CancellationToken cancellationToken)
     {
-        var normalizedRunId = NormalizeRunId(runId);
+        ArgumentNullException.ThrowIfNull(claim);
+        var normalizedRunId = NormalizeRunId(claim.RunId);
         var databasePath = await EnsureSchemaAsync(cancellationToken);
         await using var connection = await OpenConnectionAsync(databasePath, cancellationToken);
-        var run = await ReadVectorIndexRunAsync(connection, null, normalizedRunId, cancellationToken)
-            ?? throw new ArgumentException("Materialization run does not exist.", nameof(runId));
-        if (run.Status is not (ReferenceMaterializationRunStates.Embedding or ReferenceMaterializationRunStates.Indexing) ||
-            run.CurrentBatchIndex is null)
+        await using var transaction = (SqliteTransaction)await connection.BeginTransactionAsync(cancellationToken);
+        var run = await ReadVectorIndexRunAsync(connection, transaction, normalizedRunId, cancellationToken)
+            ?? throw new ArgumentException("Materialization run does not exist.", nameof(claim));
+        if (!await IsClaimLeaseOwnedAsync(connection, transaction, claim, cancellationToken))
         {
-            throw new InvalidOperationException("Materialization run has no active batch to index.");
+            await transaction.RollbackAsync(cancellationToken);
+            throw new InvalidOperationException("Materialization worker lost the current chapter lease.");
         }
 
-        await EnsureBatchReadyForIndexAsync(connection, null, run, cancellationToken);
-        var vectors = await ReadGenerationVectorsAsync(connection, null, run, cancellationToken);
-        var materialCount = await CountGenerationMaterialsAsync(connection, null, run, cancellationToken);
+        if (run.Status is not (ReferenceMaterializationRunStates.Embedding or ReferenceMaterializationRunStates.Indexing) ||
+            run.CurrentChapterIndex != claim.ChapterIndex)
+        {
+            throw new InvalidOperationException("Materialization run has no active chapter to index.");
+        }
+
+        await EnsureChapterReadyForIndexAsync(connection, transaction, run, cancellationToken);
+        var vectors = await ReadGenerationVectorsAsync(connection, transaction, run, cancellationToken);
+        var materialCount = await CountGenerationMaterialsAsync(connection, transaction, run, cancellationToken);
         if (materialCount == 0 || vectors.Count != materialCount)
         {
             throw new ReferenceMaterializationException(
@@ -37,15 +45,18 @@ internal sealed partial class SqliteReferenceMaterializationRunStore
                 ReferenceMaterializationRunStates.Embedding,
                 ReferenceMaterializationRunStates.Indexing);
             await using var update = connection.CreateCommand();
+            update.Transaction = transaction;
             update.CommandText = """
                 UPDATE reference_materialization_runs
                 SET status = $indexing
                 WHERE run_id = $run_id
-                  AND status = $embedding;
+                  AND status = $embedding
+                  AND current_chapter_index = $chapter_index;
                 """;
             update.Parameters.AddWithValue("$indexing", ReferenceMaterializationRunStates.Indexing);
             update.Parameters.AddWithValue("$run_id", run.RunId);
             update.Parameters.AddWithValue("$embedding", ReferenceMaterializationRunStates.Embedding);
+            update.Parameters.AddWithValue("$chapter_index", run.CurrentChapterIndex.Value);
             if (await update.ExecuteNonQueryAsync(cancellationToken) != 1)
             {
                 throw new InvalidOperationException("Materialization run changed before vector indexing.");
@@ -54,10 +65,12 @@ internal sealed partial class SqliteReferenceMaterializationRunStore
             run = run with { Status = ReferenceMaterializationRunStates.Indexing };
         }
 
+        await transaction.CommitAsync(cancellationToken);
+
         return new ReferenceMaterializationVectorIndexWorkItem(
             run.RunId,
             run.GenerationId,
-            run.CurrentBatchIndex.Value,
+            run.CurrentChapterIndex.Value,
             run.EmbeddingProvider,
             run.EmbeddingModelId,
             run.EmbeddingDimensions,
@@ -67,18 +80,26 @@ internal sealed partial class SqliteReferenceMaterializationRunStore
             vectors);
     }
 
-    public async ValueTask<ReferenceMaterializationVectorIndexResult> CompleteCurrentBatchIndexAsync(
+    public async ValueTask<ReferenceMaterializationVectorIndexResult> CompleteCurrentChapterIndexAsync(
+        ReferenceMaterializationChapterClaim claim,
         ReferenceMaterializationVectorIndexWorkItem workItem,
         CancellationToken cancellationToken)
     {
+        ArgumentNullException.ThrowIfNull(claim);
         ArgumentNullException.ThrowIfNull(workItem);
         var databasePath = await EnsureSchemaAsync(cancellationToken);
         await using var connection = await OpenConnectionAsync(databasePath, cancellationToken);
         await using var transaction = (SqliteTransaction)await connection.BeginTransactionAsync(cancellationToken);
         var run = await ReadVectorIndexRunAsync(connection, transaction, NormalizeRunId(workItem.RunId), cancellationToken)
             ?? throw new ArgumentException("Materialization run does not exist.", nameof(workItem));
+        if (!await IsClaimLeaseOwnedAsync(connection, transaction, claim, cancellationToken))
+        {
+            await transaction.RollbackAsync(cancellationToken);
+            throw new InvalidOperationException("Materialization worker lost the current chapter lease.");
+        }
+
         ValidateIndexWorkItem(run, workItem);
-        await EnsureBatchReadyForIndexAsync(connection, transaction, run, cancellationToken);
+        await EnsureChapterReadyForIndexAsync(connection, transaction, run, cancellationToken);
         var vectors = await ReadGenerationVectorsAsync(connection, transaction, run, cancellationToken);
         var materialCount = await CountGenerationMaterialsAsync(connection, transaction, run, cancellationToken);
         if (materialCount == 0 || vectors.Count != materialCount || vectors.Count != workItem.Vectors.Count)
@@ -89,24 +110,29 @@ internal sealed partial class SqliteReferenceMaterializationRunStore
         }
 
         var now = DateTimeOffset.UtcNow;
-        await UpsertVectorIndexMetadataAsync(connection, transaction, run, workItem, now, cancellationToken);
-        var completedBatchCount = await CountCompletedBatchesAsync(connection, transaction, run.RunId, cancellationToken);
+        await UpsertVectorIndexMetadataAsync(connection, transaction, run, workItem, cancellationToken);
+        await CompleteChapterAsync(connection, transaction, run, now, cancellationToken);
         var processedChapterCount = await CountCompletedChaptersAsync(connection, transaction, run.RunId, cancellationToken);
-        var nextBatchIndex = await FindFirstIncompleteBatchIndexAsync(connection, transaction, run.RunId, cancellationToken);
-        await AdvanceRunBatchAsync(
+        var firstIncompleteChapterIndex = await FindFirstIncompleteChapterIndexAsync(
+            connection,
+            transaction,
+            run.RunId,
+            cancellationToken);
+        var pauseAfterChapter = run.RequestedChapterIndex is not null && firstIncompleteChapterIndex is not null;
+        var nextChapterIndex = pauseAfterChapter ? null : firstIncompleteChapterIndex;
+        await AdvanceRunChapterAsync(
             connection,
             transaction,
             run,
-            nextBatchIndex,
-            completedBatchCount,
+            nextChapterIndex,
             processedChapterCount,
+            pauseAfterChapter,
             cancellationToken);
         await transaction.CommitAsync(cancellationToken);
         return new ReferenceMaterializationVectorIndexResult(
-            workItem.BatchIndex,
-            await CountBatchChaptersAsync(connection, workItem.RunId, workItem.BatchIndex, cancellationToken),
+            workItem.ChapterIndex,
             vectors.Count,
-            nextBatchIndex);
+            nextChapterIndex);
     }
 
     private static async ValueTask<VectorIndexRun?> ReadVectorIndexRunAsync(
@@ -120,7 +146,7 @@ internal sealed partial class SqliteReferenceMaterializationRunStore
         command.CommandText = """
             SELECT run_id, generation_id, status,
                    embedding_provider, embedding_model_id, embedding_dimensions,
-                   chapter_batch_size, total_chapters, current_batch_index
+                   current_chapter_index, requested_chapter_index
             FROM reference_materialization_runs
             WHERE run_id = $run_id;
             """;
@@ -134,46 +160,41 @@ internal sealed partial class SqliteReferenceMaterializationRunStore
                 reader.GetString(3),
                 reader.GetString(4),
                 reader.GetInt32(5),
-                reader.GetInt32(6),
-                reader.GetInt32(7),
-                reader.IsDBNull(8) ? null : reader.GetInt32(8))
+                reader.IsDBNull(6) ? null : reader.GetInt32(6),
+                reader.IsDBNull(7) ? null : reader.GetInt32(7))
             : null;
     }
 
-    private static async ValueTask EnsureBatchReadyForIndexAsync(
+    private static async ValueTask EnsureChapterReadyForIndexAsync(
         SqliteConnection connection,
         SqliteTransaction? transaction,
         VectorIndexRun run,
         CancellationToken cancellationToken)
     {
-        if (run.CurrentBatchIndex is null)
+        if (run.CurrentChapterIndex is null)
         {
-            throw new InvalidOperationException("Materialization run has no active batch to index.");
+            throw new InvalidOperationException("Materialization run has no active chapter to index.");
         }
 
         await using var command = connection.CreateCommand();
         command.Transaction = transaction;
         command.CommandText = """
-            SELECT COUNT(*),
-                   COALESCE(SUM(CASE WHEN status = $completed
-                                          AND material_count > 0
-                                          AND vector_count = material_count
-                                     THEN 1 ELSE 0 END), 0)
+            SELECT status, material_count, vector_count
             FROM reference_materialization_chapter_progress
             WHERE run_id = $run_id
-              AND batch_index = $batch_index;
+              AND chapter_index = $chapter_index;
             """;
-        command.Parameters.AddWithValue("$completed", ReferenceMaterializationChapterStates.Completed);
         command.Parameters.AddWithValue("$run_id", run.RunId);
-        command.Parameters.AddWithValue("$batch_index", run.CurrentBatchIndex.Value);
+        command.Parameters.AddWithValue("$chapter_index", run.CurrentChapterIndex.Value);
         await using var reader = await command.ExecuteReaderAsync(cancellationToken);
         if (!await reader.ReadAsync(cancellationToken) ||
-            reader.GetInt32(0) == 0 ||
-            reader.GetInt32(0) != reader.GetInt32(1))
+            !string.Equals(reader.GetString(0), ReferenceMaterializationChapterStates.Embedding, StringComparison.Ordinal) ||
+            reader.GetInt32(1) <= 0 ||
+            reader.GetInt32(1) != reader.GetInt32(2))
         {
             throw new ReferenceMaterializationException(
                 ReferenceMaterializationErrorCodes.GenerationIncomplete,
-                "Materialization chapter batch is not ready for vector indexing.");
+                "Materialization chapter is not ready for vector indexing.");
         }
     }
 
@@ -239,7 +260,6 @@ internal sealed partial class SqliteReferenceMaterializationRunStore
         SqliteTransaction transaction,
         VectorIndexRun run,
         ReferenceMaterializationVectorIndexWorkItem workItem,
-        DateTimeOffset now,
         CancellationToken cancellationToken)
     {
         await using var command = connection.CreateCommand();
@@ -247,18 +267,17 @@ internal sealed partial class SqliteReferenceMaterializationRunStore
         command.CommandText = """
             INSERT INTO reference_materialization_vector_indexes (
               generation_id, run_id, table_name, provider, model_id, dimensions,
-              vector_count, status, created_at, updated_at)
+              vector_count, status)
             VALUES (
               $generation_id, $run_id, $table_name, $provider, $model_id, $dimensions,
-              $vector_count, 'ready', $created_at, $updated_at)
+              $vector_count, 'ready')
             ON CONFLICT(generation_id) DO UPDATE SET
               table_name = excluded.table_name,
               provider = excluded.provider,
               model_id = excluded.model_id,
               dimensions = excluded.dimensions,
               vector_count = excluded.vector_count,
-              status = excluded.status,
-              updated_at = excluded.updated_at;
+              status = excluded.status;
             """;
         command.Parameters.AddWithValue("$generation_id", run.GenerationId);
         command.Parameters.AddWithValue("$run_id", run.RunId);
@@ -267,32 +286,7 @@ internal sealed partial class SqliteReferenceMaterializationRunStore
         command.Parameters.AddWithValue("$model_id", run.EmbeddingModelId);
         command.Parameters.AddWithValue("$dimensions", run.EmbeddingDimensions);
         command.Parameters.AddWithValue("$vector_count", workItem.Vectors.Count);
-        command.Parameters.AddWithValue("$created_at", FormatTimestamp(now));
-        command.Parameters.AddWithValue("$updated_at", FormatTimestamp(now));
         await command.ExecuteNonQueryAsync(cancellationToken);
-    }
-
-    private static async ValueTask<int> CountCompletedBatchesAsync(
-        SqliteConnection connection,
-        SqliteTransaction transaction,
-        string runId,
-        CancellationToken cancellationToken)
-    {
-        await using var command = connection.CreateCommand();
-        command.Transaction = transaction;
-        command.CommandText = """
-            SELECT COUNT(*)
-            FROM (
-              SELECT batch_index
-              FROM reference_materialization_chapter_progress
-              WHERE run_id = $run_id
-              GROUP BY batch_index
-              HAVING SUM(CASE WHEN status = $completed THEN 0 ELSE 1 END) = 0
-            );
-            """;
-        command.Parameters.AddWithValue("$run_id", runId);
-        command.Parameters.AddWithValue("$completed", ReferenceMaterializationChapterStates.Completed);
-        return Convert.ToInt32(await command.ExecuteScalarAsync(cancellationToken));
     }
 
     private static async ValueTask<int> CountCompletedChaptersAsync(
@@ -314,7 +308,38 @@ internal sealed partial class SqliteReferenceMaterializationRunStore
         return Convert.ToInt32(await command.ExecuteScalarAsync(cancellationToken));
     }
 
-    private static async ValueTask<int?> FindFirstIncompleteBatchIndexAsync(
+    private static async ValueTask CompleteChapterAsync(
+        SqliteConnection connection,
+        SqliteTransaction transaction,
+        VectorIndexRun run,
+        DateTimeOffset now,
+        CancellationToken cancellationToken)
+    {
+        ReferenceMaterializationChapterStateMachine.EnsureCanTransition(
+            ReferenceMaterializationChapterStates.Embedding,
+            ReferenceMaterializationChapterStates.Completed);
+        await using var command = connection.CreateCommand();
+        command.Transaction = transaction;
+        command.CommandText = """
+            UPDATE reference_materialization_chapter_progress
+            SET status = $completed,
+                completed_at = $completed_at
+            WHERE run_id = $run_id
+              AND chapter_index = $chapter_index
+              AND status = $embedding;
+            """;
+        command.Parameters.AddWithValue("$completed", ReferenceMaterializationChapterStates.Completed);
+        command.Parameters.AddWithValue("$completed_at", FormatTimestamp(now));
+        command.Parameters.AddWithValue("$run_id", run.RunId);
+        command.Parameters.AddWithValue("$chapter_index", run.CurrentChapterIndex!.Value);
+        command.Parameters.AddWithValue("$embedding", ReferenceMaterializationChapterStates.Embedding);
+        if (await command.ExecuteNonQueryAsync(cancellationToken) != 1)
+        {
+            throw new InvalidOperationException("Materialization chapter changed while completing vector indexing.");
+        }
+    }
+
+    private static async ValueTask<int?> FindFirstIncompleteChapterIndexAsync(
         SqliteConnection connection,
         SqliteTransaction transaction,
         string runId,
@@ -323,7 +348,7 @@ internal sealed partial class SqliteReferenceMaterializationRunStore
         await using var command = connection.CreateCommand();
         command.Transaction = transaction;
         command.CommandText = """
-            SELECT MIN(batch_index)
+            SELECT MIN(chapter_index)
             FROM reference_materialization_chapter_progress
             WHERE run_id = $run_id
               AND status <> $completed;
@@ -334,13 +359,13 @@ internal sealed partial class SqliteReferenceMaterializationRunStore
         return value is null or DBNull ? null : Convert.ToInt32(value);
     }
 
-    private static async ValueTask AdvanceRunBatchAsync(
+    private static async ValueTask AdvanceRunChapterAsync(
         SqliteConnection connection,
         SqliteTransaction transaction,
         VectorIndexRun run,
-        int? nextBatchIndex,
-        int completedBatchCount,
+        int? nextChapterIndex,
         int processedChapterCount,
+        bool pauseAfterChapter,
         CancellationToken cancellationToken)
     {
         await using var command = connection.CreateCommand();
@@ -349,58 +374,40 @@ internal sealed partial class SqliteReferenceMaterializationRunStore
             UPDATE reference_materialization_runs
             SET status = $next_status,
                 processed_chapters = $processed_chapters,
-                completed_chapter_batches = $completed_chapter_batches,
-                current_batch_index = $current_batch_index,
-                current_batch_start_chapter = $current_batch_start_chapter,
-                current_batch_end_chapter = $current_batch_end_chapter
+                current_chapter_index = $current_chapter_index,
+                requested_chapter_index = NULL
             WHERE run_id = $run_id
               AND status = $indexing
-              AND current_batch_index = $expected_batch_index;
+              AND current_chapter_index = $expected_chapter_index;
             """;
-        var nextStatus = nextBatchIndex is null
+        var nextStatus = pauseAfterChapter
+            ? ReferenceMaterializationRunStates.Paused
+            : nextChapterIndex is null
             ? ReferenceMaterializationRunStates.Indexing
             : ReferenceMaterializationRunStates.Extracting;
-        if (nextBatchIndex is not null)
+        if (pauseAfterChapter)
+        {
+            ReferenceMaterializationRunStateMachine.EnsureCanTransition(
+                ReferenceMaterializationRunStates.Indexing,
+                ReferenceMaterializationRunStates.Paused);
+        }
+        else if (nextChapterIndex is not null)
         {
             ReferenceMaterializationRunStateMachine.EnsureCanTransition(
                 ReferenceMaterializationRunStates.Indexing,
                 ReferenceMaterializationRunStates.Extracting);
         }
+
         command.Parameters.AddWithValue("$next_status", nextStatus);
         command.Parameters.AddWithValue("$processed_chapters", processedChapterCount);
-        command.Parameters.AddWithValue("$completed_chapter_batches", completedBatchCount);
-        command.Parameters.AddWithValue("$current_batch_index", nextBatchIndex is null ? DBNull.Value : nextBatchIndex.Value);
-        command.Parameters.AddWithValue("$current_batch_start_chapter", nextBatchIndex is null
-            ? DBNull.Value
-            : nextBatchIndex.Value * run.ChapterBatchSize + 1);
-        command.Parameters.AddWithValue("$current_batch_end_chapter", nextBatchIndex is null
-            ? DBNull.Value
-            : Math.Min((nextBatchIndex.Value + 1) * run.ChapterBatchSize, run.TotalChapters));
+        command.Parameters.AddWithValue("$current_chapter_index", nextChapterIndex is null ? DBNull.Value : nextChapterIndex.Value);
         command.Parameters.AddWithValue("$run_id", run.RunId);
         command.Parameters.AddWithValue("$indexing", ReferenceMaterializationRunStates.Indexing);
-        command.Parameters.AddWithValue("$expected_batch_index", run.CurrentBatchIndex!.Value);
+        command.Parameters.AddWithValue("$expected_chapter_index", run.CurrentChapterIndex!.Value);
         if (await command.ExecuteNonQueryAsync(cancellationToken) != 1)
         {
             throw new InvalidOperationException("Materialization run changed while completing vector indexing.");
         }
-    }
-
-    private static async ValueTask<int> CountBatchChaptersAsync(
-        SqliteConnection connection,
-        string runId,
-        int batchIndex,
-        CancellationToken cancellationToken)
-    {
-        await using var command = connection.CreateCommand();
-        command.CommandText = """
-            SELECT COUNT(*)
-            FROM reference_materialization_chapter_progress
-            WHERE run_id = $run_id
-              AND batch_index = $batch_index;
-            """;
-        command.Parameters.AddWithValue("$run_id", runId);
-        command.Parameters.AddWithValue("$batch_index", batchIndex);
-        return Convert.ToInt32(await command.ExecuteScalarAsync(cancellationToken));
     }
 
     private static void ValidateIndexWorkItem(
@@ -408,10 +415,11 @@ internal sealed partial class SqliteReferenceMaterializationRunStore
         ReferenceMaterializationVectorIndexWorkItem workItem)
     {
         if (run.Status != ReferenceMaterializationRunStates.Indexing ||
-            run.CurrentBatchIndex is null ||
+            run.CurrentChapterIndex is null ||
+            (run.RequestedChapterIndex is not null && run.RequestedChapterIndex != run.CurrentChapterIndex) ||
             !string.Equals(run.RunId, workItem.RunId, StringComparison.Ordinal) ||
             !string.Equals(run.GenerationId, workItem.GenerationId, StringComparison.Ordinal) ||
-            run.CurrentBatchIndex.Value != workItem.BatchIndex ||
+            run.CurrentChapterIndex.Value != workItem.ChapterIndex ||
             !string.Equals(run.EmbeddingProvider, workItem.Provider, StringComparison.Ordinal) ||
             !string.Equals(run.EmbeddingModelId, workItem.ModelId, StringComparison.Ordinal) ||
             run.EmbeddingDimensions != workItem.Dimensions ||
@@ -437,15 +445,14 @@ internal sealed partial class SqliteReferenceMaterializationRunStore
         string EmbeddingProvider,
         string EmbeddingModelId,
         int EmbeddingDimensions,
-        int ChapterBatchSize,
-        int TotalChapters,
-        int? CurrentBatchIndex);
+        int? CurrentChapterIndex,
+        int? RequestedChapterIndex);
 }
 
 internal sealed record ReferenceMaterializationVectorIndexWorkItem(
     string RunId,
     string GenerationId,
-    int BatchIndex,
+    int ChapterIndex,
     string Provider,
     string ModelId,
     int Dimensions,
@@ -453,7 +460,6 @@ internal sealed record ReferenceMaterializationVectorIndexWorkItem(
     IReadOnlyList<SqliteVecVectorRecord> Vectors);
 
 public sealed record ReferenceMaterializationVectorIndexResult(
-    int BatchIndex,
-    int CompletedChapterCount,
+    int ChapterIndex,
     int VectorCount,
-    int? NextBatchIndex);
+    int? NextChapterIndex);

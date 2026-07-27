@@ -19,10 +19,15 @@ public static class ReferenceMaterializationRunStateMachine
                 ReferenceMaterializationRunStates.Failed,
             ReferenceMaterializationRunStates.Indexing =>
                 next is ReferenceMaterializationRunStates.Extracting or
+                ReferenceMaterializationRunStates.Paused or
                 ReferenceMaterializationRunStates.Completed or
                 ReferenceMaterializationRunStates.Failed,
+            ReferenceMaterializationRunStates.Paused =>
+                next is ReferenceMaterializationRunStates.Queued,
             ReferenceMaterializationRunStates.Failed =>
-                next == ReferenceMaterializationRunStates.Extracting,
+                next is ReferenceMaterializationRunStates.Queued,
+            ReferenceMaterializationRunStates.Completed =>
+                next is ReferenceMaterializationRunStates.Queued,
             _ => false
         };
     }
@@ -52,7 +57,9 @@ public static class ReferenceMaterializationChapterStateMachine
                 next is ReferenceMaterializationChapterStates.Completed or
                 ReferenceMaterializationChapterStates.Failed,
             ReferenceMaterializationChapterStates.Failed =>
-                next == ReferenceMaterializationChapterStates.Pending,
+                next is ReferenceMaterializationChapterStates.Pending,
+            ReferenceMaterializationChapterStates.Completed =>
+                next is ReferenceMaterializationChapterStates.Pending,
             _ => false
         };
     }

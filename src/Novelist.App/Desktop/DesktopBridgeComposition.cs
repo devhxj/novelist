@@ -121,7 +121,8 @@ public static PhotinoWebMessageBridge CreateBridge(
             materializationDatabasePathResolver,
             new ReferenceChapterMaterialChatCompletionExtractor(chatCompletionClient),
             new ReferenceMaterializationEmbeddingProcessor(embeddingService, embeddingClient),
-            new ReferenceMaterializationVectorIndexer(materializationDatabasePathResolver, sqliteVecProvider));
+            new ReferenceMaterializationVectorIndexer(materializationDatabasePathResolver, sqliteVecProvider),
+            writeLog: DesktopLaunchLog.Write);
  var initializationService = new CoordinatedAppInitializationService(
  new FileSystemAppInitializationService(
  options,

@@ -26,7 +26,7 @@ public sealed class ReferenceMaterializationServiceTests : IDisposable
             CancellationToken.None);
 
         var created = await service.EnqueueMaterializationAsync(
-            new EnqueueReferenceMaterializationPayload(anchor.NovelId, anchor.AnchorId, profile.SplitProfileId, ChapterBatchSize: 10),
+            new EnqueueReferenceMaterializationPayload(anchor.NovelId, anchor.AnchorId, profile.SplitProfileId),
             CancellationToken.None);
         var status = await service.GetMaterializationStatusAsync(
             new GetReferenceMaterializationStatusPayload(anchor.NovelId, anchor.AnchorId, created.RunId),
@@ -37,7 +37,7 @@ public sealed class ReferenceMaterializationServiceTests : IDisposable
 
         Assert.Equal(1, preflight.CallCount);
         Assert.Equal(ReferenceMaterializationRunStates.Queued, created.Status);
-        Assert.Equal(10, created.ChapterBatchSize);
+        Assert.Equal(1, created.CurrentChapterIndex);
         Assert.Equal("llm-provider", created.Llm.Provider);
         Assert.Equal("embedding-model", created.Embedding.ModelId);
         Assert.NotNull(status);
@@ -125,98 +125,6 @@ public sealed class ReferenceMaterializationServiceTests : IDisposable
         Assert.Equal(0, preflight.CallCount);
         Assert.Equal(0, await CountRunsAsync(options));
         Assert.Equal(ReferenceChapterSplitProfileStates.Stale, await ReadProfileStatusAsync(options, profile.SplitProfileId));
-    }
-
-    [Fact]
-    public async Task RetryRejectsModelIdentityDriftAndRequiresANewRun()
-    {
-        var options = CreateOptions();
-        var anchor = await CreateAnchorAsync(options);
-        var service = new SqliteReferenceMaterializationService(
-            options,
-            new EmptyChapterSplitAnalyzer(),
-            modelPreflight: new RecordingPreflight(new ReferenceMaterializationModelPreflightResult(
-                new ReferenceMaterializationModelIdentityPayload("different-llm", "different-model"),
-                new ReferenceMaterializationModelIdentityPayload("different-embedding", "different-model", 8))));
-        var profile = await service.PreviewChapterSplitAsync(
-            new PreviewReferenceChapterSplitPayload(anchor.NovelId, anchor.AnchorId, "# {title}"),
-            CancellationToken.None);
-        await service.ConfirmChapterSplitAsync(
-            new ConfirmReferenceChapterSplitPayload(anchor.NovelId, anchor.AnchorId, profile.SplitProfileId),
-            CancellationToken.None);
-        var store = new SqliteReferenceMaterializationRunStore(new ReferenceCorpusDatabasePathResolver(options));
-        var run = await store.CreateAsync(new ReferenceMaterializationRunSeed(
-            Guid.NewGuid().ToString("N"),
-            anchor.AnchorId,
-            profile.SplitProfileId,
-            Guid.NewGuid().ToString("N"),
-            "policy-v1",
-            "qualifier-v1",
-            new ReferenceMaterializationModelIdentityPayload("llm", "model"),
-            new ReferenceMaterializationModelIdentityPayload("embedding", "model", 8),
-            5,
-            DateTimeOffset.UtcNow), CancellationToken.None);
-        var claim = await store.ClaimCurrentBatchAsync(run.RunId, "failing-owner", TimeSpan.FromMinutes(1), CancellationToken.None);
-        Assert.NotNull(claim);
-        await store.FailCurrentBatchAsync(
-            claim!,
-            ReferenceMaterializationErrorCodes.LlmRequestFailed,
-            "Provider timed out.",
-            CancellationToken.None);
-
-        var exception = await Assert.ThrowsAsync<ReferenceMaterializationException>(async () =>
-            await service.RetryMaterializationAsync(
-                new RetryReferenceMaterializationPayload(anchor.NovelId, anchor.AnchorId, run.RunId),
-                CancellationToken.None));
-
-        Assert.Equal(ReferenceMaterializationErrorCodes.RetryRequiresNewRun, exception.ErrorCode);
-        var failed = await store.GetAsync(run.RunId, CancellationToken.None);
-        Assert.Equal(ReferenceMaterializationRunStates.Failed, failed?.Status);
-    }
-
-    [Fact]
-    public async Task RetryRejectsAnExtractorSchemaThatDoesNotMatchTheCurrentMaterializationSchema()
-    {
-        var options = CreateOptions();
-        var anchor = await CreateAnchorAsync(options);
-        var service = new SqliteReferenceMaterializationService(
-            options,
-            new EmptyChapterSplitAnalyzer(),
-            modelPreflight: new RecordingPreflight(new ReferenceMaterializationModelPreflightResult(
-                new ReferenceMaterializationModelIdentityPayload("llm", "model"),
-                new ReferenceMaterializationModelIdentityPayload("embedding", "model", 8))));
-        var profile = await service.PreviewChapterSplitAsync(
-            new PreviewReferenceChapterSplitPayload(anchor.NovelId, anchor.AnchorId, "# {title}"),
-            CancellationToken.None);
-        await service.ConfirmChapterSplitAsync(
-            new ConfirmReferenceChapterSplitPayload(anchor.NovelId, anchor.AnchorId, profile.SplitProfileId),
-            CancellationToken.None);
-        var store = new SqliteReferenceMaterializationRunStore(new ReferenceCorpusDatabasePathResolver(options));
-        var run = await store.CreateAsync(new ReferenceMaterializationRunSeed(
-            Guid.NewGuid().ToString("N"),
-            anchor.AnchorId,
-            profile.SplitProfileId,
-            Guid.NewGuid().ToString("N"),
-            "policy-v1",
-            "legacy-extractor-v1",
-            new ReferenceMaterializationModelIdentityPayload("llm", "model"),
-            new ReferenceMaterializationModelIdentityPayload("embedding", "model", 8),
-            5,
-            DateTimeOffset.UtcNow), CancellationToken.None);
-        var claim = await store.ClaimCurrentBatchAsync(run.RunId, "failing-owner", TimeSpan.FromMinutes(1), CancellationToken.None);
-        Assert.NotNull(claim);
-        await store.FailCurrentBatchAsync(
-            claim!,
-            ReferenceMaterializationErrorCodes.LlmOutputInvalid,
-            "Schema did not validate.",
-            CancellationToken.None);
-
-        var exception = await Assert.ThrowsAsync<ReferenceMaterializationException>(async () =>
-            await service.RetryMaterializationAsync(
-                new RetryReferenceMaterializationPayload(anchor.NovelId, anchor.AnchorId, run.RunId),
-                CancellationToken.None));
-
-        Assert.Equal(ReferenceMaterializationErrorCodes.RetryRequiresNewRun, exception.ErrorCode);
     }
 
     public void Dispose()

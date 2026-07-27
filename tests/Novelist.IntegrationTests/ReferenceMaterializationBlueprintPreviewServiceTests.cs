@@ -94,7 +94,7 @@ public sealed class ReferenceMaterializationBlueprintPreviewServiceTests : IDisp
         string materialId,
         string generationId,
         long anchorId,
-        string materialType,
+        string sourceKind,
         string text,
         double distance) => new(
             materialId,
@@ -102,12 +102,15 @@ public sealed class ReferenceMaterializationBlueprintPreviewServiceTests : IDisp
             anchorId,
             1,
             0,
-            materialType,
             text,
-            "Useful for the requested beat.",
-            [materialType],
+            ArchiveMetadata(sourceKind == "dialogue" ? "对话" : "叙述", "Useful for the requested beat."),
             "text-hash",
             distance);
+
+    private static ReferenceMaterialMetadata ArchiveMetadata(string sourceKind, string reuseHint) =>
+        new(
+            new ReferenceMaterialSourceSpan(1, 1), sourceKind, [], null, null, null, [], null, [], null,
+            null, null, null, [], [], [], [], reuseHint);
 
     private sealed class FakeSearch(
         IReadOnlyDictionary<long, IReadOnlyList<ReferenceMaterialSearchHit>> hitsByAnchor)

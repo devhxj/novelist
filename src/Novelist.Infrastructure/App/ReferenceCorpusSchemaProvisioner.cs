@@ -5,7 +5,7 @@ namespace Novelist.Infrastructure.App;
 
 internal static class ReferenceCorpusSchemaProvisioner
 {
-    private const int CurrentSchemaVersion = 2;
+    private const int CurrentSchemaVersion = 6;
     private const string SchemaKey = "reference-materialization";
     private static readonly SemaphoreSlim ProvisioningGate = new(1, 1);
 
@@ -97,6 +97,17 @@ internal static class ReferenceCorpusSchemaProvisioner
         "reference_schema_metadata"
     ];
 
+    private static readonly string[] MaterializationTablesToReset =
+    [
+        "reference_material_embeddings",
+        "reference_materials",
+        "reference_materialization_vector_indexes",
+        "reference_materialization_chapter_progress",
+        "reference_materialization_run_leases",
+        "reference_materialization_runs",
+        "reference_anchor_materialization_state"
+    ];
+
     public static async ValueTask EnsureCoreTablesAsync(
         SqliteConnection connection,
         CancellationToken cancellationToken)
@@ -117,7 +128,13 @@ internal static class ReferenceCorpusSchemaProvisioner
 
             if (await HasRetiredTablesAsync(connection, cancellationToken))
             {
-                await UpgradeLegacySchemaAsync(connection, cancellationToken);
+                await UpgradeSchemaAsync(connection, DerivedTablesToReset, cancellationToken);
+                return;
+            }
+
+            if (await HasOutdatedMaterializationSchemaAsync(connection, cancellationToken))
+            {
+                await UpgradeSchemaAsync(connection, MaterializationTablesToReset, cancellationToken);
                 return;
             }
 
@@ -132,8 +149,9 @@ internal static class ReferenceCorpusSchemaProvisioner
         }
     }
 
-    private static async ValueTask UpgradeLegacySchemaAsync(
+    private static async ValueTask UpgradeSchemaAsync(
         SqliteConnection connection,
+        IReadOnlyList<string> tablesToReset,
         CancellationToken cancellationToken)
     {
         var sourcePath = GetDatabasePath(connection);
@@ -151,7 +169,7 @@ internal static class ReferenceCorpusSchemaProvisioner
         {
             await EnableWriteAheadLoggingAsync(connection, cancellationToken);
             await using var transaction = (SqliteTransaction)await connection.BeginTransactionAsync(cancellationToken);
-            await DropDerivedTablesAsync(connection, transaction, cancellationToken);
+            await DropTablesAsync(connection, transaction, tablesToReset, cancellationToken);
             await EnsureCurrentSchemaAsync(connection, transaction, cancellationToken);
             await transaction.CommitAsync(cancellationToken);
         }
@@ -250,21 +268,16 @@ internal static class ReferenceCorpusSchemaProvisioner
               embedding_model_id TEXT NOT NULL,
               embedding_dimensions INTEGER NOT NULL CHECK(embedding_dimensions > 0),
               status TEXT NOT NULL,
-              chapter_batch_size INTEGER NOT NULL CHECK(chapter_batch_size IN (5, 10)),
               total_chapters INTEGER NOT NULL DEFAULT 0 CHECK(total_chapters >= 0),
               processed_chapters INTEGER NOT NULL DEFAULT 0 CHECK(processed_chapters >= 0),
-              total_chapter_batches INTEGER NOT NULL DEFAULT 0 CHECK(total_chapter_batches >= 0),
-              completed_chapter_batches INTEGER NOT NULL DEFAULT 0 CHECK(completed_chapter_batches >= 0),
-              current_batch_index INTEGER,
-              current_batch_start_chapter INTEGER,
-              current_batch_end_chapter INTEGER,
+              current_chapter_index INTEGER CHECK(current_chapter_index > 0),
+              requested_chapter_index INTEGER CHECK(requested_chapter_index > 0),
               material_count INTEGER NOT NULL DEFAULT 0 CHECK(material_count >= 0),
               vector_count INTEGER NOT NULL DEFAULT 0 CHECK(vector_count >= 0),
               last_error_code TEXT,
               last_error_message TEXT,
               started_at TEXT NOT NULL,
               completed_at TEXT,
-              activated_at TEXT,
               FOREIGN KEY(anchor_id) REFERENCES reference_anchors(anchor_id) ON DELETE CASCADE,
               FOREIGN KEY(split_profile_id) REFERENCES reference_chapter_split_profiles(split_profile_id) ON DELETE RESTRICT
             );
@@ -278,17 +291,13 @@ internal static class ReferenceCorpusSchemaProvisioner
             CREATE TABLE IF NOT EXISTS reference_anchor_materialization_state (
               anchor_id INTEGER PRIMARY KEY,
               active_generation_id TEXT,
-              row_version INTEGER NOT NULL DEFAULT 0 CHECK(row_version >= 0),
-              updated_at TEXT NOT NULL,
               FOREIGN KEY(anchor_id) REFERENCES reference_anchors(anchor_id) ON DELETE CASCADE
             );
 
             CREATE TABLE IF NOT EXISTS reference_materialization_chapter_progress (
               run_id TEXT NOT NULL,
               chapter_index INTEGER NOT NULL CHECK(chapter_index > 0),
-              batch_index INTEGER NOT NULL CHECK(batch_index >= 0),
               status TEXT NOT NULL,
-              current_stage TEXT NOT NULL,
               material_count INTEGER NOT NULL DEFAULT 0 CHECK(material_count >= 0),
               vector_count INTEGER NOT NULL DEFAULT 0 CHECK(vector_count >= 0),
               model_call_count INTEGER NOT NULL DEFAULT 0 CHECK(model_call_count >= 0),
@@ -296,20 +305,14 @@ internal static class ReferenceCorpusSchemaProvisioner
               completed_at TEXT,
               last_error_code TEXT,
               last_error_message TEXT,
-              row_version INTEGER NOT NULL DEFAULT 0 CHECK(row_version >= 0),
               PRIMARY KEY(run_id, chapter_index),
               FOREIGN KEY(run_id) REFERENCES reference_materialization_runs(run_id) ON DELETE CASCADE
             );
 
-            CREATE INDEX IF NOT EXISTS idx_reference_materialization_chapter_progress_run_batch
-              ON reference_materialization_chapter_progress(run_id, batch_index, chapter_index);
-
             CREATE TABLE IF NOT EXISTS reference_materialization_run_leases (
               run_id TEXT PRIMARY KEY,
-              worker_id TEXT NOT NULL,
               lease_token TEXT NOT NULL,
               lease_expires_at TEXT NOT NULL,
-              updated_at TEXT NOT NULL,
               FOREIGN KEY(run_id) REFERENCES reference_materialization_runs(run_id) ON DELETE CASCADE
             );
 
@@ -322,8 +325,6 @@ internal static class ReferenceCorpusSchemaProvisioner
               dimensions INTEGER NOT NULL CHECK(dimensions > 0),
               vector_count INTEGER NOT NULL CHECK(vector_count >= 0),
               status TEXT NOT NULL,
-              created_at TEXT NOT NULL,
-              updated_at TEXT NOT NULL,
               FOREIGN KEY(run_id) REFERENCES reference_materialization_runs(run_id) ON DELETE CASCADE
             );
 
@@ -337,10 +338,9 @@ internal static class ReferenceCorpusSchemaProvisioner
               anchor_id INTEGER NOT NULL,
               chapter_index INTEGER NOT NULL CHECK(chapter_index > 0),
               ordinal INTEGER NOT NULL CHECK(ordinal >= 0),
-              material_type TEXT NOT NULL,
               text TEXT NOT NULL,
-              description TEXT NOT NULL,
-              tags_json TEXT NOT NULL,
+              metadata_schema_version TEXT NOT NULL DEFAULT 'reference-material-archive-v1',
+              metadata_json TEXT NOT NULL,
               text_hash TEXT NOT NULL,
               created_at TEXT NOT NULL,
               FOREIGN KEY(run_id) REFERENCES reference_materialization_runs(run_id) ON DELETE CASCADE,
@@ -420,6 +420,7 @@ internal static class ReferenceCorpusSchemaProvisioner
             """;
         await command.ExecuteNonQueryAsync(cancellationToken);
         await EnsureAnchorMetadataColumnsAsync(connection, transaction, cancellationToken);
+        await EnsureMaterializationRunColumnsAsync(connection, transaction, cancellationToken);
         await WriteSchemaVersionAsync(connection, transaction, cancellationToken);
     }
 
@@ -440,14 +441,42 @@ internal static class ReferenceCorpusSchemaProvisioner
             }
         }
 
-        await EnsureColumnAsync(connection, transaction, columns, "corpus_visibility", "TEXT NOT NULL DEFAULT 'private'", cancellationToken);
-        await EnsureColumnAsync(connection, transaction, columns, "source_trust", "TEXT NOT NULL DEFAULT 'user_verified'", cancellationToken);
-        await EnsureColumnAsync(connection, transaction, columns, "user_tags_json", "TEXT NOT NULL DEFAULT '[]'", cancellationToken);
+        await EnsureColumnAsync(connection, transaction, "reference_anchors", columns, "corpus_visibility", "TEXT NOT NULL DEFAULT 'private'", cancellationToken);
+        await EnsureColumnAsync(connection, transaction, "reference_anchors", columns, "source_trust", "TEXT NOT NULL DEFAULT 'user_verified'", cancellationToken);
+        await EnsureColumnAsync(connection, transaction, "reference_anchors", columns, "user_tags_json", "TEXT NOT NULL DEFAULT '[]'", cancellationToken);
+    }
+
+    private static async ValueTask EnsureMaterializationRunColumnsAsync(
+        SqliteConnection connection,
+        SqliteTransaction transaction,
+        CancellationToken cancellationToken)
+    {
+        var columns = new HashSet<string>(StringComparer.Ordinal);
+        await using (var query = connection.CreateCommand())
+        {
+            query.Transaction = transaction;
+            query.CommandText = "PRAGMA table_info(reference_materialization_runs);";
+            await using var reader = await query.ExecuteReaderAsync(cancellationToken);
+            while (await reader.ReadAsync(cancellationToken))
+            {
+                columns.Add(reader.GetString(1));
+            }
+        }
+
+        await EnsureColumnAsync(
+            connection,
+            transaction,
+            "reference_materialization_runs",
+            columns,
+            "requested_chapter_index",
+            "INTEGER CHECK(requested_chapter_index > 0)",
+            cancellationToken);
     }
 
     private static async ValueTask EnsureColumnAsync(
         SqliteConnection connection,
         SqliteTransaction transaction,
+        string tableName,
         ISet<string> columns,
         string columnName,
         string definition,
@@ -460,7 +489,7 @@ internal static class ReferenceCorpusSchemaProvisioner
 
         await using var command = connection.CreateCommand();
         command.Transaction = transaction;
-        command.CommandText = $"ALTER TABLE reference_anchors ADD COLUMN {columnName} {definition};";
+        command.CommandText = $"ALTER TABLE {tableName} ADD COLUMN {columnName} {definition};";
         await command.ExecuteNonQueryAsync(cancellationToken);
     }
 
@@ -517,11 +546,83 @@ internal static class ReferenceCorpusSchemaProvisioner
             return version is long schemaVersion &&
                    schemaVersion == CurrentSchemaVersion &&
                    !await HasRetiredTablesAsync(connection, cancellationToken) &&
+                   await HasCurrentMaterializationColumnsAsync(connection, cancellationToken) &&
                    await HasWriteAheadLoggingAsync(connection, cancellationToken);
         }
         catch (SqliteException exception) when (exception.SqliteErrorCode == 1)
         {
             return false;
+        }
+    }
+
+    private static async ValueTask<bool> HasCurrentMaterializationColumnsAsync(
+        SqliteConnection connection,
+        CancellationToken cancellationToken)
+    {
+        if (!await HasColumnAsync(connection, "reference_materialization_runs", "requested_chapter_index", cancellationToken))
+        {
+            return false;
+        }
+
+        return await HasColumnAsync(connection, "reference_materials", "metadata_json", cancellationToken) &&
+               await HasColumnAsync(connection, "reference_materials", "metadata_schema_version", cancellationToken);
+    }
+
+    private static async ValueTask<bool> HasColumnAsync(
+        SqliteConnection connection,
+        string table,
+        string column,
+        CancellationToken cancellationToken)
+    {
+        await using var command = connection.CreateCommand();
+        command.CommandText = $"PRAGMA table_info({table});";
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        while (await reader.ReadAsync(cancellationToken))
+        {
+            if (string.Equals(reader.GetString(1), column, StringComparison.Ordinal))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private static async ValueTask<bool> HasOutdatedMaterializationSchemaAsync(
+        SqliteConnection connection,
+        CancellationToken cancellationToken)
+    {
+        await using var tables = connection.CreateCommand();
+        tables.CommandText = """
+            SELECT EXISTS(
+              SELECT 1
+              FROM sqlite_master
+              WHERE type = 'table'
+                AND name = 'reference_materialization_runs');
+            """;
+        if (Convert.ToInt64(await tables.ExecuteScalarAsync(cancellationToken)) == 0)
+        {
+            return false;
+        }
+
+        await using var version = connection.CreateCommand();
+        version.CommandText = """
+            SELECT schema_version
+            FROM reference_schema_metadata
+            WHERE schema_key = $schema_key;
+            """;
+        version.Parameters.AddWithValue("$schema_key", SchemaKey);
+        try
+        {
+            var value = await version.ExecuteScalarAsync(cancellationToken);
+            return value is not long schemaVersion ||
+                   schemaVersion < CurrentSchemaVersion ||
+                   (schemaVersion == CurrentSchemaVersion &&
+                    !await HasCurrentMaterializationColumnsAsync(connection, cancellationToken));
+        }
+        catch (SqliteException exception) when (exception.SqliteErrorCode == 1)
+        {
+            return true;
         }
     }
 
@@ -550,12 +651,13 @@ internal static class ReferenceCorpusSchemaProvisioner
         }
     }
 
-    private static async ValueTask DropDerivedTablesAsync(
+    private static async ValueTask DropTablesAsync(
         SqliteConnection connection,
         SqliteTransaction transaction,
+        IReadOnlyList<string> tables,
         CancellationToken cancellationToken)
     {
-        foreach (var tableName in DerivedTablesToReset)
+        foreach (var tableName in tables)
         {
             await using var command = connection.CreateCommand();
             command.Transaction = transaction;

@@ -20,15 +20,19 @@ public interface IReferenceMaterializationService
         EnqueueReferenceMaterializationPayload input,
         CancellationToken cancellationToken);
 
+    ValueTask<ReferenceMaterializationStatusPayload> RunMaterializationChapterAsync(
+        RunReferenceMaterializationChapterPayload input,
+        CancellationToken cancellationToken);
+
     ValueTask<ReferenceMaterializationStatusPayload?> GetMaterializationStatusAsync(
         GetReferenceMaterializationStatusPayload input,
         CancellationToken cancellationToken);
 
-    ValueTask<ReferenceMaterializationStatusPayload> RetryMaterializationAsync(
-        RetryReferenceMaterializationPayload input,
-        CancellationToken cancellationToken);
-
     ValueTask<PageResultPayload<ReferenceMaterializationChapterProgressPayload>> ListMaterializationChapterProgressAsync(
         ListReferenceMaterializationChapterProgressPayload input,
+        CancellationToken cancellationToken);
+
+    ValueTask<PageResultPayload<ReferenceMaterialListItemPayload>> ListMaterializationChapterMaterialsAsync(
+        ListReferenceMaterializationChapterMaterialsPayload input,
         CancellationToken cancellationToken);
 }
