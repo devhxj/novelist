@@ -6,48 +6,24 @@
 
 Do not use `SqliteVecTableProvisioner.BuildVectorTableName(long novelId, int dimensions)` directly because it creates story-memory names like `vec_novel_1_1536`.
 
-Use the reference-anchor specific helper in `SqliteVecTableProvisioner`:
+Use the materialization generation helper in `SqliteVecTableProvisioner`:
 
 ```text
-vec_reference_anchor_{anchorId}_{dimensions}
+BuildReferenceMaterializationVectorTableName(generationId, dimensions)
+=> vec_reference_materialization_{generationHash}_{dimensions}
 ```
 
-Validate the generated identifier with the same simple identifier rule used by `SqliteVecTableProvisioner.BuildCreateTableSql`.
+The generation id is hashed before it becomes an identifier. `BuildCreateTableSql` still validates the final name with the shared simple-identifier rule.
 
 ## Material Extraction Strategy
 
-Initial material extraction should be deterministic for the core corpus:
+> **Accepted replacement (2026-07-20):** A confirmed full chapter is the only materialization input unit. The selected LLM receives one complete chapter per request as transient numbered physical lines and returns inclusive start/end line ranges for all materials in that chapter. The server resolves each range to a non-empty, continuous, exact chapter substring that may span any number of paragraphs. Line numbers are request-local addresses only; they are not persisted text nodes or a preprocessing hierarchy. The selected embedding model must produce one valid vector for every returned material before the generation can be activated.
+>
+> There is no sentence, paragraph, scene, semantic-window, candidate, review, truncation, sliding-window, rule-only, lexical-only, old-vector, JSON-scan, alternate-model, partial-success, automatic retry, or rollback path. Missing configuration, provider failure, empty or invalid structured output, source-text mismatch, vector mismatch, or index failure fails the chapter and run explicitly. One worker processes exactly one chapter at a time and commits its materials, embeddings, and vector index before claiming the next chapter. “运行全部”复用同一个 run/generation，跳过实际提交完整的章节，从首个未完成章节继续；“运行本章”无论该章是否 completed 都强制重做该章，提交后停止，不隐式推进后续章节。
+>
+> The replacement is deliberately breaking. Delete the old extraction interfaces, tables, bridge methods, UI, and tests after consumers move to active material identity. Do not preserve them behind adapters or dual reads. See the authoritative [whole-chapter materialization plan](../corpus-driven-writing/materialization-quality-plan.md).
 
-- chapter segments
-- paragraph segments
-- sentence segments
-- simple passage windows
-
-For sentence bank and passage bank, use rule-based first-pass tags:
-
-- punctuation and dialogue quote detection
-- paragraph length
-- sentence position in paragraph/chapter
-- contains dialogue marker
-- contains action verbs or sensory nouns from a small local list
-- connector patterns
-- silence/hesitation/action-afterbeat patterns
-- narrative-duty compatibility with blueprint beats
-- emotion-trigger and external-evidence compatibility
-- POV/narrative-distance compatibility
-
-Current Phase 10 decision: material extraction and tagging stay deterministic-only. The current service must not require LLM configuration for segmentation, sentence/passage bank creation, tag assignment, slot detection, or searchable material persistence. LLM-assisted tagging can be added later only behind a separate opt-in extractor interface or feature flag, and its output must still be stored as auditable material tags that pass the same deterministic binding and audit rules.
-
-Recommended extractor interfaces in Infrastructure:
-
-```csharp
-internal interface IReferenceTextSegmenter { ... }
-internal interface IReferenceMaterialExtractor { ... }
-internal interface IReferenceSlotDetector { ... }
-internal interface IReferenceCandidateAuditor { ... }
-```
-
-Keep these internal until the abstractions prove stable.
+The sole extraction abstraction is `IReferenceChapterMaterialExtractor`. Its request contains the frozen model identity and full chapter; its result contains material type, server-resolved exact source text, a short description, and simple tags. The model does not copy source text into tool arguments. Server-side validation accepts the complete result or fails the entire chapter.
 
 ## Adaptation Strategy
 
