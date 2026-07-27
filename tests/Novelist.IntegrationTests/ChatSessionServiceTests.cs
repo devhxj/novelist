@@ -1189,6 +1189,11 @@ public sealed class ChatSessionServiceTests : IDisposable
             {
                 Assert.Equal(ChatCompletionStreamEventKind.Usage, usage.Kind);
                 Assert.Equal(5, usage.Usage!.Value.GetProperty("total_tokens").GetInt32());
+            },
+            finish =>
+            {
+                Assert.Equal(ChatCompletionStreamEventKind.Finish, finish.Kind);
+                Assert.Equal("completed", finish.Data);
             });
 
         var request = handler.Requests.Single();

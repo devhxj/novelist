@@ -20,7 +20,8 @@ public sealed record ChatCompletionRequest(
     IReadOnlyList<ChatCompletionMessage> Messages,
     IReadOnlyList<ChatToolDefinition>? Tools = null,
     int? MaxOutputTokens = null,
-    double? TemperatureOverride = null);
+    double? TemperatureOverride = null,
+    bool RequireToolCall = false);
 
 public sealed record ChatCompletionMessage(
     string Role,
@@ -87,6 +88,7 @@ public enum ChatCompletionStreamEventKind
     Thinking,
     Content,
     Usage,
+    Finish,
     ToolCall
 }
 

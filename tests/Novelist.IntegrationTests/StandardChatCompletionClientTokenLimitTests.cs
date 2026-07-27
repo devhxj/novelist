@@ -88,6 +88,53 @@ public sealed class StandardChatCompletionClientTokenLimitTests
     }
 
     [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task StreamChatAsyncRequiresToolCallWhenRequested(bool responsesEndpoint)
+    {
+        var handler = new RecordingHandler();
+        var client = CreateClient(responsesEndpoint, 2048, handler);
+        using var schema = JsonDocument.Parse("""{"type":"object","properties":{}}""");
+        var request = CreateRequest(640) with
+        {
+            Tools = [new ChatToolDefinition("submit_result", "Submit a result.", schema.RootElement.Clone(), Strict: true)],
+            RequireToolCall = true
+        };
+
+        await DrainAsync(client.StreamChatAsync(request, CancellationToken.None));
+
+        using var payload = JsonDocument.Parse(Assert.Single(handler.Bodies));
+        Assert.Equal("required", payload.RootElement.GetProperty("tool_choice").GetString());
+    }
+
+    [Fact]
+    public async Task StreamChatAsyncSurfacesChatCompletionFinishReason()
+    {
+        var handler = new RecordingHandler
+        {
+            ResponseBody = """
+                data: {"choices":[{"delta":{"reasoning_content":"checking"},"finish_reason":null}]}
+
+                data: {"choices":[{"delta":{},"finish_reason":"length"}]}
+
+                data: [DONE]
+
+                """
+        };
+        var client = CreateClient(false, 2048, handler);
+        var events = new List<ChatCompletionStreamEvent>();
+
+        await foreach (var item in client.StreamChatAsync(CreateRequest(640), CancellationToken.None))
+        {
+            events.Add(item);
+        }
+
+        Assert.Contains(events, item =>
+            item.Kind == ChatCompletionStreamEventKind.Finish &&
+            item.Data == "length");
+    }
+
+    [Theory]
     [InlineData(0)]
     [InlineData(-1)]
     public async Task StreamChatAsyncRejectsNonPositiveRequestLimitWithoutSending(int limit)
@@ -179,6 +226,8 @@ public sealed class StandardChatCompletionClientTokenLimitTests
     {
         public List<string> Bodies { get; } = [];
 
+        public string ResponseBody { get; init; } = string.Empty;
+
         protected override Task<HttpResponseMessage> SendAsync(
         HttpRequestMessage request,
         CancellationToken cancellationToken)
@@ -186,7 +235,7 @@ public sealed class StandardChatCompletionClientTokenLimitTests
             Bodies.Add(request.Content!.ReadAsStringAsync(cancellationToken).GetAwaiter().GetResult());
             return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
             {
-                Content = new StringContent(string.Empty)
+                Content = new StringContent(ResponseBody)
             });
         }
     }

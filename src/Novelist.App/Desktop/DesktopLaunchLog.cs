@@ -6,6 +6,14 @@ internal static class DesktopLaunchLog
 
     public static void Write(string message, Exception? exception = null)
     {
+#if DEBUG
+        Console.WriteLine($"{DateTimeOffset.Now:O} {message}");
+        if (exception is not null)
+        {
+            Console.WriteLine(exception);
+        }
+#endif
+
         foreach (var root in CandidateLogRoots())
         {
             try

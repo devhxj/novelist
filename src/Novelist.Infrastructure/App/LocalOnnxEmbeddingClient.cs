@@ -4,6 +4,7 @@ using Microsoft.ML.OnnxRuntime.Tensors;
 using Novelist.Contracts.Bridge;
 using Novelist.Core.App;
 using Novelist.Core.Bridge;
+using HuggingFaceTokenizer = Tokenizers.HuggingFace.Tokenizer.Tokenizer;
 
 namespace Novelist.Infrastructure.App;
 
@@ -14,7 +15,7 @@ public sealed class LocalOnnxEmbeddingClient : IEmbeddingClient, IDisposable
     private const int MaxModelIdLength = 256;
     private const int MaxPathLength = 2_048;
     private const int DefaultMaxSequenceLength = 512;
-    private const int MaxSequenceLength = 8_192;
+    private const int MaxSequenceLength = Qwen3OnnxEmbeddingModel.MaxSequenceLength;
     private const int MaxDimensions = 1_000_000;
     private const string ProviderTypeOnnx = "onnx";
 
@@ -49,35 +50,49 @@ public sealed class LocalOnnxEmbeddingClient : IEmbeddingClient, IDisposable
         var encoded = normalizedInputs
             .Select(input => model.Tokenizer.Encode(PrepareInput(input, normalizedOptions), normalizedOptions.MaxSequenceLength))
             .ToArray();
-        var tensorInputs = LocalOnnxTensorInputs.From(encoded);
-        var output = await model.Runner.RunAsync(tensorInputs, cancellationToken);
-        if (!IsValidOutputShape(output, normalizedInputs.Count, tensorInputs.SequenceLength))
-        {
-            throw ProviderError("ONNX embedding output shape is invalid.", retryable: false);
-        }
-
-        if (normalizedOptions.Dimensions is not null && normalizedOptions.Dimensions.Value != output.HiddenSize)
-        {
-            throw ProviderError(
-                $"ONNX embedding dimensions mismatch: expected {normalizedOptions.Dimensions.Value}, got {output.HiddenSize}.",
-                retryable: false);
-        }
-
         var items = new List<EmbeddingItemResult>(normalizedInputs.Count);
-        for (var batch = 0; batch < normalizedInputs.Count; batch++)
+        int? outputDimensions = null;
+        for (var offset = 0; offset < encoded.Length; offset += normalizedOptions.MicroBatchSize)
         {
-            var vector = ProjectVector(
-                output,
-                encoded[batch].AttentionMask,
-                batch,
-                normalizedOptions.NormalizeEmbeddings,
-                normalizedOptions.PoolingStrategy);
-            items.Add(new EmbeddingItemResult(batch, vector));
+            var microBatch = encoded
+                .Skip(offset)
+                .Take(normalizedOptions.MicroBatchSize)
+                .ToArray();
+            var tensorInputs = LocalOnnxTensorInputs.From(microBatch, normalizedOptions.PadTokenId);
+            var output = await model.Runner.RunAsync(tensorInputs, cancellationToken);
+            if (!IsValidOutputShape(output, microBatch.Length, tensorInputs.SequenceLength))
+            {
+                throw ProviderError("ONNX embedding output shape is invalid.", retryable: false);
+            }
+
+            if (normalizedOptions.Dimensions is not null && normalizedOptions.Dimensions.Value != output.HiddenSize)
+            {
+                throw ProviderError(
+                    $"ONNX embedding dimensions mismatch: expected {normalizedOptions.Dimensions.Value}, got {output.HiddenSize}.",
+                    retryable: false);
+            }
+
+            if (outputDimensions is not null && outputDimensions.Value != output.HiddenSize)
+            {
+                throw ProviderError("ONNX embedding dimensions changed between micro-batches.", retryable: false);
+            }
+
+            outputDimensions = output.HiddenSize;
+            for (var batch = 0; batch < microBatch.Length; batch++)
+            {
+                var vector = ProjectVector(
+                    output,
+                    microBatch[batch].AttentionMask,
+                    batch,
+                    normalizedOptions.NormalizeEmbeddings,
+                    normalizedOptions.PoolingStrategy);
+                items.Add(new EmbeddingItemResult(offset + batch, vector));
+            }
         }
 
         return new EmbeddingBatchResult(
             normalizedOptions.ModelId,
-            output.HiddenSize,
+            outputDimensions ?? throw ProviderError("ONNX inference returned no embeddings.", retryable: false),
             items,
             new EmbeddingUsage(
                 encoded.Sum(item => item.TokenCount),
@@ -101,18 +116,37 @@ public sealed class LocalOnnxEmbeddingClient : IEmbeddingClient, IDisposable
 
         foreach (var model in models)
         {
-            if (model.IsValueCreated && model.Value.Runner is IDisposable disposable)
+            if (model.IsValueCreated)
             {
-                disposable.Dispose();
+                model.Value.Dispose();
             }
         }
     }
 
     private LocalOnnxModel CreateModel(LocalOnnxEmbeddingOptions options)
     {
-        var tokenizer = BertWordPieceTokenizer.Load(options.VocabPath);
-        var runner = _runnerFactory.Create(options);
-        return new LocalOnnxModel(tokenizer, runner);
+        ILocalOnnxTokenizer? tokenizer = null;
+        try
+        {
+            tokenizer = options.TokenizerKind switch
+            {
+                BuiltinOnnxEmbeddingModel.TokenizerKind => BertWordPieceTokenizer.Load(options.TokenizerPath),
+                Qwen3OnnxEmbeddingModel.TokenizerKind => HuggingFaceJsonTokenizer.Load(options.TokenizerPath),
+                _ => throw ProviderError($"Unsupported ONNX tokenizer kind: {options.TokenizerKind}.", retryable: false)
+            };
+            var runner = _runnerFactory.Create(options);
+            return new LocalOnnxModel(tokenizer, runner);
+        }
+        catch (BridgeRequestException)
+        {
+            tokenizer?.Dispose();
+            throw;
+        }
+        catch (Exception ex)
+        {
+            tokenizer?.Dispose();
+            throw ProviderError($"ONNX tokenizer initialization failed: {ex.Message}", retryable: false);
+        }
     }
 
     private static IReadOnlyList<string> NormalizeInputs(IReadOnlyList<string> inputs)
@@ -164,19 +198,35 @@ public sealed class LocalOnnxEmbeddingClient : IEmbeddingClient, IDisposable
             ? BuiltinOnnxEmbeddingModel.ModelId
             : NormalizeRequiredText(options.ModelId, nameof(options.ModelId), MaxModelIdLength);
         var isBuiltinModel = IsBuiltinModelId(modelId);
+        var isQwenModel = IsQwenModelId(modelId);
+        var modelDirectoryName = isQwenModel
+            ? Qwen3OnnxEmbeddingModel.ModelDirectoryName
+            : isBuiltinModel
+                ? BuiltinOnnxEmbeddingModel.ModelDirectoryName
+                : string.Empty;
+        var modelFileName = isQwenModel
+            ? Qwen3OnnxEmbeddingModel.ModelFileName
+            : BuiltinOnnxEmbeddingModel.ModelFileName;
+        var tokenizerFileName = isQwenModel
+            ? Qwen3OnnxEmbeddingModel.TokenizerFileName
+            : BuiltinOnnxEmbeddingModel.TokenizerFileName;
         var modelPath = ResolveOnnxModelFile(
             options.OnnxModelPath,
-            "model.onnx",
-            "NOVELIST_ONNX_MODEL_PATH",
+            modelDirectoryName,
+            modelFileName,
+            isQwenModel ? "NOVELIST_QWEN3_ONNX_MODEL_PATH" : "NOVELIST_ONNX_MODEL_PATH",
             nameof(options.OnnxModelPath));
-        var vocabPath = ResolveOnnxModelFile(
+        var tokenizerPath = ResolveOnnxModelFile(
             options.OnnxVocabPath,
-            "vocab.txt",
-            "NOVELIST_ONNX_VOCAB_PATH",
+            modelDirectoryName,
+            tokenizerFileName,
+            isQwenModel ? "NOVELIST_QWEN3_TOKENIZER_PATH" : "NOVELIST_ONNX_VOCAB_PATH",
             nameof(options.OnnxVocabPath));
-        var maxSequenceLength = isBuiltinModel
-            ? BuiltinOnnxEmbeddingModel.MaxSequenceLength
-            : options.MaxSequenceLength ?? DefaultMaxSequenceLength;
+        var maxSequenceLength = isQwenModel
+            ? Qwen3OnnxEmbeddingModel.MaxSequenceLength
+            : isBuiltinModel
+                ? BuiltinOnnxEmbeddingModel.MaxSequenceLength
+                : options.MaxSequenceLength ?? DefaultMaxSequenceLength;
         if (maxSequenceLength is <= 2 or > MaxSequenceLength)
         {
             throw new ArgumentOutOfRangeException(
@@ -185,9 +235,11 @@ public sealed class LocalOnnxEmbeddingClient : IEmbeddingClient, IDisposable
                 $"Max sequence length must be between 3 and {MaxSequenceLength}.");
         }
 
-        var dimensions = isBuiltinModel
-            ? BuiltinOnnxEmbeddingModel.Dimensions
-            : options.Dimensions;
+        var dimensions = isQwenModel
+            ? Qwen3OnnxEmbeddingModel.Dimensions
+            : isBuiltinModel
+                ? BuiltinOnnxEmbeddingModel.Dimensions
+                : options.Dimensions;
         if (dimensions is <= 0 or > MaxDimensions)
         {
             throw new ArgumentOutOfRangeException(nameof(options.Dimensions), dimensions, $"Dimensions must be between 1 and {MaxDimensions}.");
@@ -196,20 +248,41 @@ public sealed class LocalOnnxEmbeddingClient : IEmbeddingClient, IDisposable
         return new LocalOnnxEmbeddingOptions(
             modelId,
             modelPath,
-            vocabPath,
+            tokenizerPath,
             maxSequenceLength,
             dimensions,
-            isBuiltinModel ? BuiltinOnnxEmbeddingModel.NormalizeEmbeddings : options.NormalizeEmbeddings,
-            isBuiltinModel ? BuiltinOnnxEmbeddingModel.PoolingStrategy : "mean",
+            isBuiltinModel || isQwenModel ? true : options.NormalizeEmbeddings,
+            isQwenModel
+                ? Qwen3OnnxEmbeddingModel.PoolingStrategy
+                : isBuiltinModel
+                    ? BuiltinOnnxEmbeddingModel.PoolingStrategy
+                    : "mean",
+            isQwenModel ? Qwen3OnnxEmbeddingModel.TokenizerKind : BuiltinOnnxEmbeddingModel.TokenizerKind,
+            isQwenModel ? Qwen3OnnxEmbeddingModel.ExecutionProvider : BuiltinOnnxEmbeddingModel.ExecutionProvider,
+            isQwenModel
+                ? Qwen3OnnxEmbeddingModel.MicroBatchSize
+                : isBuiltinModel
+                    ? BuiltinOnnxEmbeddingModel.MicroBatchSize
+                    : MaxBatchSize,
+            isQwenModel ? Qwen3OnnxEmbeddingModel.PadTokenId : BuiltinOnnxEmbeddingModel.PadTokenId,
             NormalizeInputKind(options.InputKind));
     }
 
     private static string PrepareInput(string input, LocalOnnxEmbeddingOptions options)
     {
-        return IsBuiltinModelId(options.ModelId) &&
-            string.Equals(options.InputKind, BuiltinOnnxEmbeddingModel.QueryInputKind, StringComparison.Ordinal)
-                ? BuiltinOnnxEmbeddingModel.QueryInstruction + input
-                : input;
+        if (!string.Equals(options.InputKind, BuiltinOnnxEmbeddingModel.QueryInputKind, StringComparison.Ordinal))
+        {
+            return input;
+        }
+
+        if (IsBuiltinModelId(options.ModelId))
+        {
+            return BuiltinOnnxEmbeddingModel.QueryInstruction + input;
+        }
+
+        return IsQwenModelId(options.ModelId)
+            ? Qwen3OnnxEmbeddingModel.QueryInstruction + input
+            : input;
     }
 
     private static bool IsValidOutputShape(LocalOnnxTensorOutput output, int expectedBatchSize, int expectedSequenceLength)
@@ -243,7 +316,9 @@ public sealed class LocalOnnxEmbeddingClient : IEmbeddingClient, IDisposable
 
         return string.Equals(poolingStrategy, BuiltinOnnxEmbeddingModel.PoolingStrategy, StringComparison.Ordinal)
             ? ClsPool(output, batch, normalize)
-            : MeanPool(output, attentionMask, batch, normalize);
+            : string.Equals(poolingStrategy, Qwen3OnnxEmbeddingModel.PoolingStrategy, StringComparison.Ordinal)
+                ? LastTokenPool(output, attentionMask, batch, normalize)
+                : MeanPool(output, attentionMask, batch, normalize);
     }
 
     private static IReadOnlyList<float> CopyPooledVector(
@@ -306,6 +381,33 @@ public sealed class LocalOnnxEmbeddingClient : IEmbeddingClient, IDisposable
         return vector;
     }
 
+    private static IReadOnlyList<float> LastTokenPool(
+        LocalOnnxTensorOutput output,
+        IReadOnlyList<long> attentionMask,
+        int batch,
+        bool normalize)
+    {
+        var token = -1;
+        for (var index = 0; index < attentionMask.Count && index < output.SequenceLength; index++)
+        {
+            if (attentionMask[index] != 0)
+            {
+                token = index;
+            }
+        }
+
+        if (token < 0)
+        {
+            throw ProviderError("ONNX embedding attention mask is empty.", retryable: false);
+        }
+
+        var vector = new float[output.HiddenSize];
+        var offset = ((batch * output.SequenceLength) + token) * output.HiddenSize;
+        Array.Copy(output.Values, offset, vector, 0, output.HiddenSize);
+        NormalizeVector(vector, normalize);
+        return vector;
+    }
+
     private static void NormalizeVector(float[] vector, bool normalize)
     {
         if (normalize)
@@ -334,6 +436,7 @@ public sealed class LocalOnnxEmbeddingClient : IEmbeddingClient, IDisposable
 
     private static string ResolveOnnxModelFile(
         string? configuredPath,
+        string modelDirectoryName,
         string fileName,
         string environmentVariableName,
         string parameterName)
@@ -343,7 +446,7 @@ public sealed class LocalOnnxEmbeddingClient : IEmbeddingClient, IDisposable
             return NormalizeExistingFile(configuredPath, parameterName);
         }
 
-        foreach (var candidate in CandidateBuiltinModelFiles(fileName, environmentVariableName)
+        foreach (var candidate in CandidateBuiltinModelFiles(modelDirectoryName, fileName, environmentVariableName)
             .Distinct(StringComparer.OrdinalIgnoreCase))
         {
             if (File.Exists(candidate))
@@ -353,11 +456,14 @@ public sealed class LocalOnnxEmbeddingClient : IEmbeddingClient, IDisposable
         }
 
         throw ProviderError(
-            $"内置 ONNX embedding 模型文件缺失：{fileName}。请确认发布目录包含 runtime/models/{fileName}，或通过 {environmentVariableName} / NOVELIST_ONNX_MODELS_DIR 指向固定 BGE 模型文件。",
+            $"内置 ONNX embedding 模型文件缺失：runtime/models/{modelDirectoryName}/{fileName}。请部署完整模型目录，或通过 {environmentVariableName} / NOVELIST_ONNX_MODELS_DIR 指向对应文件。",
             retryable: false);
     }
 
-    private static IEnumerable<string> CandidateBuiltinModelFiles(string fileName, string environmentVariableName)
+    private static IEnumerable<string> CandidateBuiltinModelFiles(
+        string modelDirectoryName,
+        string fileName,
+        string environmentVariableName)
     {
         var configuredFile = Environment.GetEnvironmentVariable(environmentVariableName);
         if (!string.IsNullOrWhiteSpace(configuredFile))
@@ -368,27 +474,25 @@ public sealed class LocalOnnxEmbeddingClient : IEmbeddingClient, IDisposable
         var configuredDirectory = Environment.GetEnvironmentVariable("NOVELIST_ONNX_MODELS_DIR");
         if (!string.IsNullOrWhiteSpace(configuredDirectory))
         {
-            yield return Path.Combine(Path.GetFullPath(ExpandLocalPath(configuredDirectory)), fileName);
+            yield return Path.Combine(
+                Path.GetFullPath(ExpandLocalPath(configuredDirectory)),
+                modelDirectoryName,
+                fileName);
         }
 
-        foreach (var root in CandidateBuiltinModelDirectories())
+        foreach (var root in CandidateBuiltinModelRoots())
         {
-            yield return Path.Combine(root, fileName);
+            yield return Path.Combine(root, modelDirectoryName, fileName);
         }
     }
 
-    private static IEnumerable<string> CandidateBuiltinModelDirectories()
+    private static IEnumerable<string> CandidateBuiltinModelRoots()
     {
         var baseDirectory = AppContext.BaseDirectory;
         yield return Path.Combine(baseDirectory, "runtime", "models");
-        yield return Path.Combine(baseDirectory, "runtime", "onnx", "models", BuiltinOnnxEmbeddingModel.ModelId);
-        yield return Path.Combine(baseDirectory, "runtime", "onnx", "models");
-        yield return Path.Combine(baseDirectory, "models");
 
         var currentDirectory = Directory.GetCurrentDirectory();
         yield return Path.Combine(currentDirectory, "build", "runtime", "models");
-        yield return Path.Combine(currentDirectory, "build", "runtime", "onnx", "models", BuiltinOnnxEmbeddingModel.ModelId);
-        yield return Path.Combine(currentDirectory, "build", "runtime", "onnx", "models");
     }
 
     private static string NormalizeLocalPath(string? raw, string name, bool mustExist)
@@ -455,6 +559,11 @@ public sealed class LocalOnnxEmbeddingClient : IEmbeddingClient, IDisposable
             string.Equals(modelId, "Xenova/" + BuiltinOnnxEmbeddingModel.ModelId, StringComparison.OrdinalIgnoreCase);
     }
 
+    private static bool IsQwenModelId(string modelId)
+    {
+        return string.Equals(modelId, Qwen3OnnxEmbeddingModel.ModelId, StringComparison.OrdinalIgnoreCase);
+    }
+
     private static string NormalizeInputKind(string? value)
     {
         var normalized = (value ?? string.Empty).Trim().ToLowerInvariant();
@@ -475,28 +584,45 @@ public sealed class LocalOnnxEmbeddingClient : IEmbeddingClient, IDisposable
             retryable: retryable);
     }
 
-    private sealed record LocalOnnxModel(BertWordPieceTokenizer Tokenizer, ILocalOnnxEmbeddingRunner Runner);
+    private sealed record LocalOnnxModel(ILocalOnnxTokenizer Tokenizer, ILocalOnnxEmbeddingRunner Runner) : IDisposable
+    {
+        public void Dispose()
+        {
+            Tokenizer.Dispose();
+            if (Runner is IDisposable disposable)
+            {
+                disposable.Dispose();
+            }
+        }
+    }
 }
 
 public sealed record LocalOnnxEmbeddingOptions(
     string ModelId,
     string ModelPath,
-    string VocabPath,
+    string TokenizerPath,
     int MaxSequenceLength,
     int? Dimensions,
     bool NormalizeEmbeddings,
     string PoolingStrategy = "mean",
+    string TokenizerKind = BuiltinOnnxEmbeddingModel.TokenizerKind,
+    string ExecutionProvider = BuiltinOnnxEmbeddingModel.ExecutionProvider,
+    int MicroBatchSize = 512,
+    long PadTokenId = BuiltinOnnxEmbeddingModel.PadTokenId,
     string InputKind = BuiltinOnnxEmbeddingModel.DocumentInputKind)
 {
     public string CacheKey => string.Join(
         "|",
         ModelId,
         ModelPath,
-        VocabPath,
+        TokenizerPath,
         MaxSequenceLength.ToString(System.Globalization.CultureInfo.InvariantCulture),
         Dimensions?.ToString(System.Globalization.CultureInfo.InvariantCulture) ?? "",
         NormalizeEmbeddings ? "1" : "0",
-        PoolingStrategy);
+        PoolingStrategy,
+        TokenizerKind,
+        ExecutionProvider,
+        MicroBatchSize.ToString(System.Globalization.CultureInfo.InvariantCulture));
 }
 
 public interface ILocalOnnxEmbeddingRunnerFactory
@@ -515,39 +641,57 @@ public sealed record LocalOnnxTensorInputs(
     long[] InputIds,
     long[] AttentionMask,
     long[] TokenTypeIds,
+    long[] PositionIds,
     int BatchSize,
     int SequenceLength)
 {
-    public static LocalOnnxTensorInputs From(IReadOnlyList<BertTokenizedInput> inputs)
+    public static LocalOnnxTensorInputs From(IReadOnlyList<BertTokenizedInput> inputs, long padTokenId = 0)
     {
         if (inputs.Count == 0)
         {
             throw new ArgumentException("At least one tokenized input is required.", nameof(inputs));
         }
 
-        var sequenceLength = inputs[0].InputIds.Count;
-        if (inputs.Any(input => input.InputIds.Count != sequenceLength ||
-            input.AttentionMask.Count != sequenceLength ||
-            input.TokenTypeIds.Count != sequenceLength))
+        if (inputs.Any(input => input.InputIds.Count == 0 ||
+            input.InputIds.Count != input.AttentionMask.Count ||
+            input.InputIds.Count != input.TokenTypeIds.Count))
         {
-            throw new ArgumentException("Tokenized inputs must have equal sequence lengths.", nameof(inputs));
+            throw new ArgumentException("Tokenized input tensor lengths are invalid.", nameof(inputs));
         }
 
+        var sequenceLength = inputs.Max(input => input.InputIds.Count);
         var inputIds = new long[inputs.Count * sequenceLength];
+        if (padTokenId != 0)
+        {
+            Array.Fill(inputIds, padTokenId);
+        }
+
         var attentionMask = new long[inputIds.Length];
         var tokenTypeIds = new long[inputIds.Length];
+        var positionIds = new long[inputIds.Length];
         for (var batch = 0; batch < inputs.Count; batch++)
         {
-            for (var index = 0; index < sequenceLength; index++)
+            for (var index = 0; index < inputs[batch].InputIds.Count; index++)
             {
                 var offset = batch * sequenceLength + index;
                 inputIds[offset] = inputs[batch].InputIds[index];
                 attentionMask[offset] = inputs[batch].AttentionMask[index];
                 tokenTypeIds[offset] = inputs[batch].TokenTypeIds[index];
             }
+
+            for (var index = 0; index < sequenceLength; index++)
+            {
+                positionIds[(batch * sequenceLength) + index] = index;
+            }
         }
 
-        return new LocalOnnxTensorInputs(inputIds, attentionMask, tokenTypeIds, inputs.Count, sequenceLength);
+        return new LocalOnnxTensorInputs(
+            inputIds,
+            attentionMask,
+            tokenTypeIds,
+            positionIds,
+            inputs.Count,
+            sequenceLength);
     }
 }
 
@@ -566,7 +710,12 @@ public sealed record BertTokenizedInput(
     public int TokenCount => AttentionMask.Count(value => value != 0);
 }
 
-public sealed class BertWordPieceTokenizer
+internal interface ILocalOnnxTokenizer : IDisposable
+{
+    BertTokenizedInput Encode(string text, int maxSequenceLength);
+}
+
+public sealed class BertWordPieceTokenizer : ILocalOnnxTokenizer
 {
     private const string UnknownToken = "[UNK]";
     private const string ClsToken = "[CLS]";
@@ -624,7 +773,7 @@ public sealed class BertWordPieceTokenizer
         var available = maxSequenceLength - 2;
         if (wordPieces.Count > available)
         {
-            wordPieces.RemoveRange(available, wordPieces.Count - available);
+            throw TokenLimitError(wordPieces.Count + 2, maxSequenceLength);
         }
 
         var inputIds = new List<long>(maxSequenceLength) { _clsId };
@@ -633,14 +782,12 @@ public sealed class BertWordPieceTokenizer
 
         var attentionMask = Enumerable.Repeat(1L, inputIds.Count).ToList();
         var tokenTypeIds = Enumerable.Repeat(0L, inputIds.Count).ToList();
-        while (inputIds.Count < maxSequenceLength)
-        {
-            inputIds.Add(_padId);
-            attentionMask.Add(0);
-            tokenTypeIds.Add(0);
-        }
 
         return new BertTokenizedInput(inputIds, attentionMask, tokenTypeIds);
+    }
+
+    public void Dispose()
+    {
     }
 
     private IEnumerable<string> BasicTokenize(string text)
@@ -757,6 +904,63 @@ public sealed class BertWordPieceTokenizer
             ? value
             : throw new ArgumentException($"ONNX vocab is missing required token {token}.");
     }
+
+    private static BridgeRequestException TokenLimitError(int tokenCount, int maxSequenceLength)
+    {
+        return new BridgeRequestException(
+            BridgeErrorCodes.LlmProviderError,
+            $"ONNX embedding input exceeds token limit {maxSequenceLength}: got {tokenCount} tokens.",
+            retryable: false);
+    }
+}
+
+internal sealed class HuggingFaceJsonTokenizer : ILocalOnnxTokenizer
+{
+    private readonly HuggingFaceTokenizer _tokenizer;
+
+    private HuggingFaceJsonTokenizer(HuggingFaceTokenizer tokenizer)
+    {
+        _tokenizer = tokenizer;
+    }
+
+    public static HuggingFaceJsonTokenizer Load(string tokenizerPath)
+    {
+        return new HuggingFaceJsonTokenizer(HuggingFaceTokenizer.FromFile(tokenizerPath));
+    }
+
+    public BertTokenizedInput Encode(string text, int maxSequenceLength)
+    {
+        var encodings = _tokenizer.Encode(
+            text,
+            addSpecialTokens: true,
+            includeAttentionMask: true);
+        var encoding = encodings.SingleOrDefault()
+            ?? throw new InvalidOperationException("Hugging Face tokenizer returned no encoding.");
+        if (encoding.Ids.Count > maxSequenceLength)
+        {
+            throw new BridgeRequestException(
+                BridgeErrorCodes.LlmProviderError,
+                $"ONNX embedding input exceeds token limit {maxSequenceLength}: got {encoding.Ids.Count} tokens.",
+                retryable: false);
+        }
+
+        var inputIds = encoding.Ids.Select(value => (long)value).ToArray();
+        var attentionMask = encoding.AttentionMask.Select(value => (long)value).ToArray();
+        if (attentionMask.Length != inputIds.Length)
+        {
+            throw new InvalidOperationException("Hugging Face tokenizer returned an invalid attention mask.");
+        }
+
+        return new BertTokenizedInput(
+            inputIds,
+            attentionMask,
+            new long[inputIds.Length]);
+    }
+
+    public void Dispose()
+    {
+        _tokenizer.Dispose();
+    }
 }
 
 internal sealed class LocalOnnxEmbeddingRunnerFactory : ILocalOnnxEmbeddingRunnerFactory
@@ -777,7 +981,31 @@ internal sealed class LocalOnnxEmbeddingRunner : ILocalOnnxEmbeddingRunner, IDis
     {
         try
         {
-            _session = new InferenceSession(options.ModelPath);
+            using var sessionOptions = new SessionOptions
+            {
+                GraphOptimizationLevel = GraphOptimizationLevel.ORT_ENABLE_ALL
+            };
+            if (string.Equals(
+                options.ExecutionProvider,
+                Qwen3OnnxEmbeddingModel.ExecutionProvider,
+                StringComparison.Ordinal))
+            {
+                sessionOptions.EnableMemoryPattern = false;
+                sessionOptions.ExecutionMode = ExecutionMode.ORT_SEQUENTIAL;
+                // DirectML leaves dynamic shape-tensor work on CPU; session and inference failures still propagate.
+                sessionOptions.AppendExecutionProvider_DML(0);
+            }
+            else if (!string.Equals(
+                options.ExecutionProvider,
+                BuiltinOnnxEmbeddingModel.ExecutionProvider,
+                StringComparison.Ordinal))
+            {
+                throw ProviderError(
+                    $"Unsupported ONNX execution provider: {options.ExecutionProvider}.",
+                    retryable: false);
+            }
+
+            _session = new InferenceSession(options.ModelPath, sessionOptions);
             _inputNames = LocalOnnxSessionInputNames.From(ReadSessionInputNames(_session));
         }
         catch (BridgeRequestException)
@@ -798,7 +1026,7 @@ internal sealed class LocalOnnxEmbeddingRunner : ILocalOnnxEmbeddingRunner, IDis
         lock (_sync)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            var requestItems = new List<NamedOnnxValue>(3)
+            var requestItems = new List<NamedOnnxValue>(4)
             {
                 CreateInput(_inputNames.InputIdsName, inputs.InputIds, inputs.BatchSize, inputs.SequenceLength)
             };
@@ -812,13 +1040,16 @@ internal sealed class LocalOnnxEmbeddingRunner : ILocalOnnxEmbeddingRunner, IDis
                 requestItems.Add(CreateInput(_inputNames.TokenTypeIdsName, inputs.TokenTypeIds, inputs.BatchSize, inputs.SequenceLength));
             }
 
+            if (_inputNames.PositionIdsName is not null)
+            {
+                requestItems.Add(CreateInput(_inputNames.PositionIdsName, inputs.PositionIds, inputs.BatchSize, inputs.SequenceLength));
+            }
+
             try
             {
                 using var results = _session.Run(requestItems);
                 var output = ExtractOutput(results);
-                var values = ExtractFloatValues(output.Tensor);
-                var shape = ExtractTensorDimensions(output.Tensor);
-                return ValueTask.FromResult(CreateTensorOutput(output.Name, values, shape, inputs));
+                return ValueTask.FromResult(CreateTensorOutput(output.Name, output.Values, output.Dimensions, inputs));
             }
             catch (BridgeRequestException)
             {
@@ -859,7 +1090,17 @@ internal sealed class LocalOnnxEmbeddingRunner : ILocalOnnxEmbeddingRunner, IDis
         {
             if (item.Value is Tensor<float> tensor)
             {
-                outputs.Add(new LocalOnnxNamedTensorOutput(item.Name ?? string.Empty, tensor));
+                outputs.Add(new LocalOnnxNamedTensorOutput(
+                    item.Name ?? string.Empty,
+                    tensor.ToArray(),
+                    tensor.Dimensions.ToArray()));
+            }
+            else if (item.Value is Tensor<Float16> halfTensor)
+            {
+                outputs.Add(new LocalOnnxNamedTensorOutput(
+                    item.Name ?? string.Empty,
+                    halfTensor.Select(value => (float)value).ToArray(),
+                    halfTensor.Dimensions.ToArray()));
             }
         }
 
@@ -871,16 +1112,6 @@ internal sealed class LocalOnnxEmbeddingRunner : ILocalOnnxEmbeddingRunner, IDis
         return outputs.FirstOrDefault(item => IsPooledOutputName(item.Name)) ??
             outputs.FirstOrDefault(item => string.Equals(item.Name, "last_hidden_state", StringComparison.Ordinal)) ??
             outputs[0];
-    }
-
-    private static float[] ExtractFloatValues(Tensor<float> tensor)
-    {
-        return tensor.ToArray();
-    }
-
-    private static IReadOnlyList<int> ExtractTensorDimensions(Tensor<float> tensor)
-    {
-        return tensor.Dimensions.ToArray();
     }
 
     private static LocalOnnxTensorOutput CreateTensorOutput(
@@ -998,23 +1229,28 @@ internal sealed class LocalOnnxEmbeddingRunner : ILocalOnnxEmbeddingRunner, IDis
             retryable: retryable);
     }
 
-    private sealed record LocalOnnxNamedTensorOutput(string Name, Tensor<float> Tensor);
+    private sealed record LocalOnnxNamedTensorOutput(
+        string Name,
+        float[] Values,
+        IReadOnlyList<int> Dimensions);
 
     private sealed record LocalOnnxSessionInputNames(
         string InputIdsName,
         string? AttentionMaskName,
-        string? TokenTypeIdsName)
+        string? TokenTypeIdsName,
+        string? PositionIdsName)
     {
         public static LocalOnnxSessionInputNames From(IReadOnlyList<string> inputNames)
         {
             if (inputNames.Count == 0)
             {
-                return new LocalOnnxSessionInputNames("input_ids", "attention_mask", "token_type_ids");
+                return new LocalOnnxSessionInputNames("input_ids", "attention_mask", "token_type_ids", null);
             }
 
             var inputIds = inputNames.FirstOrDefault(IsInputIdsName);
             var attentionMask = inputNames.FirstOrDefault(IsAttentionMaskName);
             var tokenTypeIds = inputNames.FirstOrDefault(IsTokenTypeIdsName);
+            var positionIds = inputNames.FirstOrDefault(IsPositionIdsName);
             if (inputIds is null && inputNames.Count == 1)
             {
                 inputIds = inputNames[0];
@@ -1041,6 +1277,11 @@ internal sealed class LocalOnnxEmbeddingRunner : ILocalOnnxEmbeddingRunner, IDis
                 recognized.Add(tokenTypeIds);
             }
 
+            if (positionIds is not null)
+            {
+                recognized.Add(positionIds);
+            }
+
             var unsupported = inputNames.Where(name => !recognized.Contains(name)).ToArray();
             if (unsupported.Length > 0)
             {
@@ -1049,7 +1290,7 @@ internal sealed class LocalOnnxEmbeddingRunner : ILocalOnnxEmbeddingRunner, IDis
                     retryable: false);
             }
 
-            return new LocalOnnxSessionInputNames(inputIds, attentionMask, tokenTypeIds);
+            return new LocalOnnxSessionInputNames(inputIds, attentionMask, tokenTypeIds, positionIds);
         }
 
         private static bool IsInputIdsName(string name)
@@ -1076,6 +1317,13 @@ internal sealed class LocalOnnxEmbeddingRunner : ILocalOnnxEmbeddingRunner, IDis
                 normalized.Contains("tokentypeids", StringComparison.Ordinal) ||
                 normalized.Contains("segment_ids", StringComparison.Ordinal) ||
                 normalized.Contains("segmentids", StringComparison.Ordinal);
+        }
+
+        private static bool IsPositionIdsName(string name)
+        {
+            var normalized = NormalizeName(name);
+            return normalized.Contains("position_ids", StringComparison.Ordinal) ||
+                normalized.Contains("positionids", StringComparison.Ordinal);
         }
     }
 }

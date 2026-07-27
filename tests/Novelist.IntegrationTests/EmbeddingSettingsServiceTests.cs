@@ -29,7 +29,8 @@ public sealed class EmbeddingSettingsServiceTests : IDisposable
 
         var initial = await service.GetConfigAsync(CancellationToken.None);
         Assert.Equal("", initial.ApiKey);
-        Assert.Null(await service.GetActiveEmbeddingOptionsAsync(CancellationToken.None));
+        Assert.Equal(BuiltinOnnxEmbeddingModel.ModelId, initial.ModelId);
+        Assert.Equal(BuiltinOnnxEmbeddingModel.ModelId, (await service.GetActiveEmbeddingOptionsAsync(CancellationToken.None))!.ModelId);
 
         var input = new EmbeddingConfigPayload(
             "Custom",
@@ -113,7 +114,7 @@ public sealed class EmbeddingSettingsServiceTests : IDisposable
     }
 
     [Fact]
-    public async Task OnnxEmbeddingConfigUsesFixedBuiltinModelWithoutApiSecretOrEndpoint()
+    public async Task OnnxEmbeddingConfigUsesFixedQwenProfileWithoutApiSecretOrEndpoint()
     {
         var options = CreateOptions();
         await InitializeAsync(options);
@@ -128,7 +129,7 @@ public sealed class EmbeddingSettingsServiceTests : IDisposable
                 ProviderKey: "onnx",
                 EndpointUrl: "https://api.example.com/v1/embeddings",
                 ApiKey: "sk-secret",
-                ModelId: "text2vec-base-chinese",
+                ModelId: Qwen3OnnxEmbeddingModel.ModelId,
                 Dimensions: 768,
                 User: "ignored",
                 ProviderType: "onnx",
@@ -144,11 +145,11 @@ public sealed class EmbeddingSettingsServiceTests : IDisposable
         Assert.Equal("", saved.EndpointUrl);
         Assert.Equal("", saved.ApiKey);
         Assert.Equal("", saved.User);
-        Assert.Equal(BuiltinOnnxEmbeddingModel.ModelId, saved.ModelId);
-        Assert.Equal(BuiltinOnnxEmbeddingModel.Dimensions, saved.Dimensions);
+        Assert.Equal(Qwen3OnnxEmbeddingModel.ModelId, saved.ModelId);
+        Assert.Equal(Qwen3OnnxEmbeddingModel.Dimensions, saved.Dimensions);
         Assert.Equal("", saved.OnnxModelPath);
         Assert.Equal("", saved.OnnxVocabPath);
-        Assert.Equal(512, saved.MaxSequenceLength);
+        Assert.Equal(Qwen3OnnxEmbeddingModel.MaxSequenceLength, saved.MaxSequenceLength);
         Assert.True(saved.NormalizeEmbeddings);
 
         var active = await service.GetActiveEmbeddingOptionsAsync(CancellationToken.None);
@@ -156,14 +157,37 @@ public sealed class EmbeddingSettingsServiceTests : IDisposable
         Assert.Equal("onnx", active.ProviderType);
         Assert.Equal("", active.EndpointUrl);
         Assert.Equal("", active.ApiKey);
-        Assert.Equal(BuiltinOnnxEmbeddingModel.ModelId, active.ModelId);
-        Assert.Equal(BuiltinOnnxEmbeddingModel.Dimensions, active.Dimensions);
+        Assert.Equal(Qwen3OnnxEmbeddingModel.ModelId, active.ModelId);
+        Assert.Equal(Qwen3OnnxEmbeddingModel.Dimensions, active.Dimensions);
         Assert.Equal("", active.OnnxModelPath);
         Assert.Equal(BuiltinOnnxEmbeddingModel.DocumentInputKind, active.InputKind);
 
         await service.TestConnectionAsync(saved, CancellationToken.None);
         Assert.Equal("onnx", embeddings.Options.Single().ProviderType);
-        Assert.Equal(BuiltinOnnxEmbeddingModel.ModelId, embeddings.Options.Single().ModelId);
+        Assert.Equal(Qwen3OnnxEmbeddingModel.ModelId, embeddings.Options.Single().ModelId);
+    }
+
+    [Fact]
+    public async Task OnnxEmbeddingConfigRejectsUnknownLocalModel()
+    {
+        var options = CreateOptions();
+        await InitializeAsync(options);
+        var service = new FileSystemEmbeddingSettingsService(
+            options,
+            new RecordingEmbeddingClient(dimensions: 3),
+            new PackagedSqliteVecExtensionResolver(baseDirectory: _root, runtimeIdentifier: "win-x64"));
+
+        await Assert.ThrowsAsync<ArgumentException>(async () =>
+            await service.SaveConfigAsync(
+                new EmbeddingConfigPayload(
+                    ProviderKey: "onnx",
+                    EndpointUrl: "",
+                    ApiKey: "",
+                    ModelId: "unknown-local-model",
+                    Dimensions: null,
+                    User: "",
+                    ProviderType: "onnx"),
+                CancellationToken.None));
     }
 
     [Fact]
@@ -232,11 +256,41 @@ public sealed class EmbeddingSettingsServiceTests : IDisposable
             CancellationToken.None);
 
         Assert.Equal(2, result.Dimensions);
-        Assert.Equal(8, runner.LastInputs!.SequenceLength);
-        Assert.Equal(new long[] { 2, 4, 5, 6, 7, 3, 0, 0 }, runner.LastInputs.InputIds);
-        Assert.Equal(new long[] { 1, 1, 1, 1, 1, 1, 0, 0 }, runner.LastInputs.AttentionMask);
+        Assert.Equal(6, runner.LastInputs!.SequenceLength);
+        Assert.Equal(new long[] { 2, 4, 5, 6, 7, 3 }, runner.LastInputs.InputIds);
+        Assert.Equal(new long[] { 1, 1, 1, 1, 1, 1 }, runner.LastInputs.AttentionMask);
         var vector = result.Items.Single().Vector;
         Assert.Equal(1.0, Math.Sqrt(vector.Sum(value => value * value)), precision: 5);
+    }
+
+    [Fact]
+    public async Task LocalOnnxEmbeddingClientRejectsInputsOverTokenLimit()
+    {
+        var modelPath = Path.Combine(_root, "model.onnx");
+        var vocabPath = Path.Combine(_root, "vocab.txt");
+        Directory.CreateDirectory(_root);
+        await File.WriteAllTextAsync(modelPath, "fake", CancellationToken.None);
+        await File.WriteAllTextAsync(vocabPath, "[PAD]\n[UNK]\n[CLS]\n[SEP]\n你\n好", CancellationToken.None);
+        using var client = new LocalOnnxEmbeddingClient(
+            new StaticLocalOnnxRunnerFactory(new RecordingLocalOnnxRunner()));
+
+        var exception = await Assert.ThrowsAsync<BridgeRequestException>(async () =>
+            await client.EmbedAsync(
+                ["你好你好"],
+                new EmbeddingRequestOptions(
+                    ProviderKey: "onnx",
+                    EndpointUrl: "",
+                    ApiKey: "",
+                    ModelId: "local-model",
+                    Dimensions: null,
+                    User: null,
+                    ProviderType: "onnx",
+                    OnnxModelPath: modelPath,
+                    OnnxVocabPath: vocabPath,
+                    MaxSequenceLength: 4),
+                CancellationToken.None));
+
+        Assert.Contains("token limit", exception.Message, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
@@ -351,7 +405,7 @@ public sealed class EmbeddingSettingsServiceTests : IDisposable
             CancellationToken.None);
 
         Assert.Equal(BuiltinOnnxEmbeddingModel.Dimensions, result.Dimensions);
-        Assert.Equal(BuiltinOnnxEmbeddingModel.MaxSequenceLength, runner.LastInputs!.SequenceLength);
+        Assert.InRange(runner.LastInputs!.SequenceLength, 3, BuiltinOnnxEmbeddingModel.MaxSequenceLength - 1);
         Assert.Equal(4, runner.LastInputs.InputIds[1]);
         var vector = result.Items.Single().Vector;
         Assert.Equal(1f, vector[0]);
@@ -362,8 +416,8 @@ public sealed class EmbeddingSettingsServiceTests : IDisposable
     [Fact]
     public async Task LocalOnnxEmbeddingClientRunsBundledBgeModelWhenRuntimeAssetsExist()
     {
-        var modelPath = FindBundledOnnxModelFile("model.onnx");
-        var vocabPath = FindBundledOnnxModelFile("vocab.txt");
+        var modelPath = FindBundledOnnxModelFile(BuiltinOnnxEmbeddingModel.ModelDirectoryName, "model.onnx");
+        var vocabPath = FindBundledOnnxModelFile(BuiltinOnnxEmbeddingModel.ModelDirectoryName, "vocab.txt");
         if (!File.Exists(modelPath) || !File.Exists(vocabPath))
         {
             return;
@@ -397,6 +451,82 @@ public sealed class EmbeddingSettingsServiceTests : IDisposable
             Assert.Equal(1.0, Math.Sqrt(item.Vector.Sum(value => value * value)), precision: 3);
         });
         Assert.NotEqual(result.Items[0].Vector, result.Items[1].Vector);
+    }
+
+    [Fact]
+    public void QwenOnnxProfileUsesDirectMl()
+    {
+        Assert.Equal("directml", Qwen3OnnxEmbeddingModel.ExecutionProvider);
+    }
+
+    [Fact]
+    public async Task QwenOnnxUsesHuggingFaceTokenizerMicroBatchAndLastTokenPooling()
+    {
+        var modelPath = FindBundledOnnxModelFile(Qwen3OnnxEmbeddingModel.ModelDirectoryName, "model.onnx");
+        var tokenizerPath = FindBundledOnnxModelFile(Qwen3OnnxEmbeddingModel.ModelDirectoryName, "tokenizer.json");
+        if (!File.Exists(modelPath) || !File.Exists(tokenizerPath))
+        {
+            return;
+        }
+
+        var runner = new QwenLocalOnnxRunner();
+        using var client = new LocalOnnxEmbeddingClient(new StaticLocalOnnxRunnerFactory(runner));
+        var result = await client.EmbedAsync(
+            ["第一段材料。", "第二段略长一些的材料。"],
+            new EmbeddingRequestOptions(
+                ProviderKey: "onnx",
+                EndpointUrl: "",
+                ApiKey: "",
+                ModelId: Qwen3OnnxEmbeddingModel.ModelId,
+                Dimensions: Qwen3OnnxEmbeddingModel.Dimensions,
+                User: null,
+                ProviderType: "onnx",
+                OnnxModelPath: modelPath,
+                OnnxVocabPath: tokenizerPath),
+            CancellationToken.None);
+
+        Assert.Equal(2, runner.Inputs.Count);
+        Assert.All(runner.Inputs, input => Assert.Equal(1, input.BatchSize));
+        Assert.All(runner.Inputs, input => Assert.Equal(151643, input.InputIds[^1]));
+        Assert.All(runner.Inputs, input => Assert.Equal(
+            Enumerable.Range(0, input.SequenceLength).Select(value => (long)value),
+            input.PositionIds));
+        Assert.All(result.Items, item =>
+        {
+            Assert.Equal(1f, item.Vector[0]);
+            Assert.All(item.Vector.Skip(1), value => Assert.Equal(0f, value));
+        });
+    }
+
+    [Fact]
+    public async Task LocalOnnxEmbeddingClientRunsBundledQwenModelOnDirectMlWhenRuntimeAssetsExist()
+    {
+        var modelPath = FindBundledOnnxModelFile(Qwen3OnnxEmbeddingModel.ModelDirectoryName, "model.onnx");
+        var tokenizerPath = FindBundledOnnxModelFile(Qwen3OnnxEmbeddingModel.ModelDirectoryName, "tokenizer.json");
+        if (!File.Exists(modelPath) || !File.Exists(tokenizerPath))
+        {
+            return;
+        }
+
+        using var client = new LocalOnnxEmbeddingClient();
+        var result = await client.EmbedAsync(
+            ["旧城门下发现了一枚陌生暗号。"],
+            new EmbeddingRequestOptions(
+                ProviderKey: "onnx",
+                EndpointUrl: "",
+                ApiKey: "",
+                ModelId: Qwen3OnnxEmbeddingModel.ModelId,
+                Dimensions: Qwen3OnnxEmbeddingModel.Dimensions,
+                User: null,
+                ProviderType: "onnx",
+                OnnxModelPath: modelPath,
+                OnnxVocabPath: tokenizerPath),
+            CancellationToken.None);
+
+        var vector = result.Items.Single().Vector;
+        Assert.Equal(Qwen3OnnxEmbeddingModel.Dimensions, vector.Count);
+        Assert.All(vector, value => Assert.False(float.IsNaN(value) || float.IsInfinity(value)));
+        Assert.Equal(1.0, Math.Sqrt(vector.Sum(value => value * value)), precision: 3);
     }
 
     [Fact]
@@ -556,14 +686,20 @@ public sealed class EmbeddingSettingsServiceTests : IDisposable
         return JsonDocument.Parse(result.OutboundJson);
     }
 
-    private static string FindBundledOnnxModelFile(string fileName)
+    private static string FindBundledOnnxModelFile(string modelDirectoryName, string fileName)
     {
         foreach (var start in new[] { Directory.GetCurrentDirectory(), AppContext.BaseDirectory })
         {
             var directory = new DirectoryInfo(start);
             while (directory is not null)
             {
-                var candidate = Path.Combine(directory.FullName, "build", "runtime", "models", fileName);
+                var candidate = Path.Combine(
+                    directory.FullName,
+                    "build",
+                    "runtime",
+                    "models",
+                    modelDirectoryName,
+                    fileName);
                 if (File.Exists(candidate))
                 {
                     return candidate;
@@ -702,6 +838,34 @@ public sealed class EmbeddingSettingsServiceTests : IDisposable
                 inputs.BatchSize,
                 inputs.SequenceLength,
                 BuiltinOnnxEmbeddingModel.Dimensions));
+        }
+    }
+
+    private sealed class QwenLocalOnnxRunner : ILocalOnnxEmbeddingRunner
+    {
+        public List<LocalOnnxTensorInputs> Inputs { get; } = [];
+
+        public ValueTask<LocalOnnxTensorOutput> RunAsync(
+            LocalOnnxTensorInputs inputs,
+            CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            Inputs.Add(inputs);
+            var values = new float[
+                inputs.BatchSize * inputs.SequenceLength * Qwen3OnnxEmbeddingModel.Dimensions];
+            for (var batch = 0; batch < inputs.BatchSize; batch++)
+            {
+                var lastToken = Enumerable.Range(0, inputs.SequenceLength)
+                    .Last(index => inputs.AttentionMask[(batch * inputs.SequenceLength) + index] != 0);
+                var offset = ((batch * inputs.SequenceLength) + lastToken) * Qwen3OnnxEmbeddingModel.Dimensions;
+                values[offset] = 3;
+            }
+
+            return ValueTask.FromResult(new LocalOnnxTensorOutput(
+                values,
+                inputs.BatchSize,
+                inputs.SequenceLength,
+                Qwen3OnnxEmbeddingModel.Dimensions));
         }
     }
 

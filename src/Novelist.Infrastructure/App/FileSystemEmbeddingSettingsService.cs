@@ -33,18 +33,18 @@ public sealed class FileSystemEmbeddingSettingsService : IEmbeddingSettingsServi
         WriteIndented = true
     };
 
-    private static readonly EmbeddingConfigPayload EmptyConfig = new(
-        ProviderKey: string.Empty,
+    private static readonly EmbeddingConfigPayload DefaultConfig = new(
+        ProviderKey: BuiltinOnnxEmbeddingModel.ProviderKey,
         EndpointUrl: string.Empty,
         ApiKey: string.Empty,
-        ModelId: string.Empty,
-        Dimensions: null,
+        ModelId: BuiltinOnnxEmbeddingModel.ModelId,
+        Dimensions: BuiltinOnnxEmbeddingModel.Dimensions,
         User: string.Empty,
-        ProviderType: string.Empty,
+        ProviderType: BuiltinOnnxEmbeddingModel.ProviderType,
         OnnxModelPath: string.Empty,
         OnnxVocabPath: string.Empty,
-        MaxSequenceLength: null,
-        NormalizeEmbeddings: true);
+        MaxSequenceLength: BuiltinOnnxEmbeddingModel.MaxSequenceLength,
+        NormalizeEmbeddings: BuiltinOnnxEmbeddingModel.NormalizeEmbeddings);
 
     private readonly AppInitializationOptions _options;
     private readonly IEmbeddingClient _embeddings;
@@ -108,7 +108,7 @@ public sealed class FileSystemEmbeddingSettingsService : IEmbeddingSettingsServi
         try
         {
             var config = await LoadAsync(cancellationToken);
-            return IsDisabled(config) ? null : ToOptions(config);
+            return ToOptions(config);
         }
         finally
         {
@@ -133,7 +133,7 @@ public sealed class FileSystemEmbeddingSettingsService : IEmbeddingSettingsServi
         var path = await StorePathAsync(cancellationToken);
         if (!File.Exists(path))
         {
-            return EmptyConfig;
+            return DefaultConfig;
         }
 
         var encrypted = await File.ReadAllBytesAsync(path, cancellationToken);
@@ -178,7 +178,7 @@ public sealed class FileSystemEmbeddingSettingsService : IEmbeddingSettingsServi
     {
         if (allowDisabled && IsDisabled(input))
         {
-            return EmptyConfig;
+            return DefaultConfig;
         }
 
         var providerType = NormalizeProviderType(input.ProviderType, input);
@@ -190,18 +190,7 @@ public sealed class FileSystemEmbeddingSettingsService : IEmbeddingSettingsServi
             var vocabPath = string.IsNullOrWhiteSpace(input.OnnxVocabPath)
                 ? string.Empty
                 : NormalizeLocalFilePath(input.OnnxVocabPath, nameof(input.OnnxVocabPath));
-            return new EmbeddingConfigPayload(
-                BuiltinOnnxEmbeddingModel.ProviderKey,
-                string.Empty,
-                string.Empty,
-                BuiltinOnnxEmbeddingModel.ModelId,
-                BuiltinOnnxEmbeddingModel.Dimensions,
-                string.Empty,
-                BuiltinOnnxEmbeddingModel.ProviderType,
-                modelPath,
-                vocabPath,
-                BuiltinOnnxEmbeddingModel.MaxSequenceLength,
-                BuiltinOnnxEmbeddingModel.NormalizeEmbeddings);
+            return NormalizeLocalProfile(input.ModelId, modelPath, vocabPath);
         }
 
         var providerKey = NormalizeProviderKey(input.ProviderKey);
@@ -232,6 +221,59 @@ public sealed class FileSystemEmbeddingSettingsService : IEmbeddingSettingsServi
             string.Empty,
             null,
             true);
+    }
+
+    private static EmbeddingConfigPayload NormalizeLocalProfile(
+        string? modelId,
+        string modelPath,
+        string tokenizerPath)
+    {
+        var normalizedModelId = (modelId ?? string.Empty).Trim();
+        if (normalizedModelId.Length == 0 ||
+            string.Equals(normalizedModelId, BuiltinOnnxEmbeddingModel.ModelId, StringComparison.OrdinalIgnoreCase))
+        {
+            return LocalConfig(
+                BuiltinOnnxEmbeddingModel.ModelId,
+                BuiltinOnnxEmbeddingModel.Dimensions,
+                BuiltinOnnxEmbeddingModel.MaxSequenceLength,
+                modelPath,
+                tokenizerPath);
+        }
+
+        if (string.Equals(normalizedModelId, Qwen3OnnxEmbeddingModel.ModelId, StringComparison.OrdinalIgnoreCase))
+        {
+            return LocalConfig(
+                Qwen3OnnxEmbeddingModel.ModelId,
+                Qwen3OnnxEmbeddingModel.Dimensions,
+                Qwen3OnnxEmbeddingModel.MaxSequenceLength,
+                modelPath,
+                tokenizerPath);
+        }
+
+        throw new ArgumentException(
+            $"Local ONNX embedding model must be {BuiltinOnnxEmbeddingModel.ModelId} or {Qwen3OnnxEmbeddingModel.ModelId}.",
+            nameof(modelId));
+    }
+
+    private static EmbeddingConfigPayload LocalConfig(
+        string modelId,
+        int dimensions,
+        int maxSequenceLength,
+        string modelPath,
+        string tokenizerPath)
+    {
+        return new EmbeddingConfigPayload(
+            BuiltinOnnxEmbeddingModel.ProviderKey,
+            string.Empty,
+            string.Empty,
+            modelId,
+            dimensions,
+            string.Empty,
+            BuiltinOnnxEmbeddingModel.ProviderType,
+            modelPath,
+            tokenizerPath,
+            maxSequenceLength,
+            NormalizeEmbeddings: true);
     }
 
     private static EmbeddingRequestOptions ToOptions(EmbeddingConfigPayload config)

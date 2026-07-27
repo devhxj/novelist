@@ -236,7 +236,7 @@ public sealed class StandardChatCompletionClient : IChatCompletionClient
         if (request.Tools is { Count: > 0 })
         {
             payload["tools"] = request.Tools.Select(ToOpenAiToolDefinition).ToArray();
-            payload["tool_choice"] = "auto";
+            payload["tool_choice"] = request.RequireToolCall ? "required" : "auto";
         }
 
         if (provider.Model.SupportsThinking)
@@ -278,7 +278,7 @@ public sealed class StandardChatCompletionClient : IChatCompletionClient
         if (request.Tools is { Count: > 0 })
         {
             payload["tools"] = request.Tools.Select(ToResponsesToolDefinition).ToArray();
-            payload["tool_choice"] = "auto";
+            payload["tool_choice"] = request.RequireToolCall ? "required" : "auto";
         }
 
         if (provider.Model.SupportsThinking)
@@ -450,6 +450,15 @@ public sealed class StandardChatCompletionClient : IChatCompletionClient
                 toolCallsElement.ValueKind == JsonValueKind.Array)
             {
                 AccumulateToolCalls(toolCallsElement, toolCalls);
+            }
+
+            if (choice.TryGetProperty("finish_reason", out var finishReason) &&
+                finishReason.ValueKind == JsonValueKind.String &&
+                !string.IsNullOrWhiteSpace(finishReason.GetString()))
+            {
+                yield return new ChatCompletionStreamEvent(
+                    ChatCompletionStreamEventKind.Finish,
+                    finishReason.GetString()!);
             }
         }
     }
@@ -692,6 +701,24 @@ public sealed class StandardChatCompletionClient : IChatCompletionClient
                             string.Empty,
                             usage.Clone());
                     }
+
+                    yield return new ChatCompletionStreamEvent(
+                        ChatCompletionStreamEventKind.Finish,
+                        "completed");
+
+                    break;
+                case "response.incomplete":
+                    var incompleteReason = "incomplete";
+                    if (TryReadProperty(root, "response", out var incompleteResponse) &&
+                        TryReadProperty(incompleteResponse, "incomplete_details", out var incompleteDetails) &&
+                        ReadString(incompleteDetails, "reason") is { Length: > 0 } reason)
+                    {
+                        incompleteReason = reason;
+                    }
+
+                    yield return new ChatCompletionStreamEvent(
+                        ChatCompletionStreamEventKind.Finish,
+                        incompleteReason);
 
                     break;
             }
