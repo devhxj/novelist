@@ -10,12 +10,22 @@ export namespace app {
     provider_name: string
     model_id: string
     reasoning_effort: string
+    chapter_number?: number | null
+  }
+
+  export interface ChatCorpusUsageItem {
+    material_id: string
+    anchor_id: number
+    anchor_title: string
+    text_preview: string
+    tags: string[]
   }
 
   export interface ChatResult {
     session_id: string
     turn_id: number
     final_text: string
+    corpus_usage?: ChatCorpusUsageItem[] | null
   }
 
   export interface CompressInput {
@@ -1157,61 +1167,6 @@ has_more: boolean
     score_components?: Record<string, number> | null
   }
 
-  export interface GenerateMaterializationBlueprintPreviewInput {
-    novel_id: number
-    anchor_ids: number[]
-    goal: string
-    requested_count?: 1 | 2 | 3
-  }
-
-  export interface GetMaterializationBlueprintPreviewInput {
-    novel_id: number
-    session_id: string
-  }
-
-  export interface MaterializationBlueprintPreviewSource {
-    anchor_id: number
-    generation_id: string
-    material_count: number
-  }
-
-  export interface MaterializationBlueprintPreviewMaterialLink {
-    material_id: string
-    anchor_id: number
-    generation_id: string
-    material_type: string
-    text_preview: string
-    quality_score: number
-    vector_score: number
-    fit_explanation: string
-  }
-
-  export interface MaterializationBlueprintPreviewBeat {
-    beat_id: string
-    beat_index: number
-    intent: string
-    narrative_function: string
-    materials: MaterializationBlueprintPreviewMaterialLink[]
-  }
-
-  export interface MaterializationBlueprintPreviewCandidate {
-    blueprint_id: string
-    strategy: string
-    beats: MaterializationBlueprintPreviewBeat[]
-  }
-
-  export interface MaterializationBlueprintPreview {
-    session_id: string
-    status: 'active' | 'stale'
-    next_action: 'none' | 'rebuild'
-    goal: string
-    sources: MaterializationBlueprintPreviewSource[]
-    candidates: MaterializationBlueprintPreviewCandidate[]
-    stale_anchor_ids: number[]
-    created_at: Timestamp
-    updated_at: Timestamp
-  }
-
   export interface CreateAnchorFailure {
     index: number
     title: string
@@ -2279,6 +2234,29 @@ candidates: CorpusInsertionDraftCandidate[]
     material_count: number
     source_count: number
     facets: MaterialFacet[]
+  }
+
+  export interface ChapterCorpusBeatCoverage {
+    beat: string
+    covered: boolean
+    anchor_title?: string | null
+    text_preview?: string | null
+  }
+
+  export interface ChapterCorpusCoverage {
+    novel_id: number
+    chapter_number?: number | null
+    scope: string
+    beats: ChapterCorpusBeatCoverage[]
+    covered_count: number
+    total_count: number
+    coverage_ratio: number
+    sufficient: boolean
+  }
+
+  export interface GetChapterCorpusCoverageInput {
+    novel_id: number
+    chapter_number?: number | null
   }
 
   export interface SlotValue {

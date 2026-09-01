@@ -8,6 +8,7 @@ import type {
   location,
   novel,
   reader,
+  reference,
   search,
   session,
   skill,
@@ -33,4 +34,5 @@ export type {
   reader,
   skill,
   search,
+  reference,
 }

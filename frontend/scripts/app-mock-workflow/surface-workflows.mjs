@@ -10,7 +10,6 @@ import {
   assertActiveTabTitle,
   assertBridgeCallCount,
   assertChapterTitle,
-  assertCreatedReferenceAnchor,
   assertEditorContains,
   assertEditorNotContains,
   assertExportedNovels,
@@ -28,7 +27,6 @@ import {
   dispatchNovelImportDrop,
   expectHidden,
   expectInputValue,
-  expectSelectedValue,
   expectVisible,
   insertEditorText,
   replaceEditorText,
@@ -56,6 +54,9 @@ export async function verifyShellNavigation(page) {
   await expectVisible(page.getByRole('button', { name: '新建作品' }).last(), 'bookshelf create action')
   await expectVisible(page.getByText('全局回归小说').first(), 'bookshelf novel')
 
+  // 本书工具组只在书籍上下文可见：从书架点击卡片标题进入作品后再导航到章节（卡片中心是封面，悬浮态会命中“更换封面”）。
+  await novelCard(page, '全局回归小说').locator('h3').click()
+  await expectVisible(page.getByText('章节 (6)'), 'chapter count after entering book')
   await clickActivity(page, '章节')
   await expectVisible(page.getByText('章节 (6)'), 'chapter count')
   await expectVisible(page.getByRole('button', { name: /故事状态/ }), 'novelist entry')
@@ -75,9 +76,7 @@ export async function verifyShellNavigation(page) {
   await expectVisible(page.getByRole('heading', { name: '选择一个参考来源' }), 'reference materialization workspace from shell navigation')
   await expectVisible(page.getByTestId('reference-book-sidebar'), 'reference source sidebar from shell navigation')
 
-  await clickActivity(page, '风格素材')
-  await expectVisible(page.getByRole('heading', { name: /风格素材/ }), 'style sample panel from shell navigation')
-  await expectVisible(page.getByText('全局雨夜节奏').first(), 'style sample fixture from shell navigation')
+  // 风格素材入口已在轻量化聚焦 Phase 1 断入口退役，见 docs/corpus-driven-writing/lightweight-refocus-proposal-2026-08-31.md §8.2。
 
   await clickActivity(page, 'Git 历史')
   await expectVisible(page.getByRole('heading', { name: 'Git 历史' }), 'Git history panel from shell navigation')
@@ -189,7 +188,8 @@ export async function verifyEditorSaveWorkflow(browser, url, consoleErrors, page
   await expectVisible(page.getByText('全局回归小说'), 'editor save workspace')
   await assertBridgeCallCount(page, 'SaveContent', 0)
 
-  await page.getByTitle('章节').click()
+  // 限定导航条作用域：正文面板的「打开章节参考素材」按钮 title 含「章节」子串，会触发 strict mode 冲突。
+  await page.locator('nav').first().getByTitle('章节').click()
   await ensureChapterBlockExpanded(page)
   await chapterButton(page, '雨夜线索').click()
   await expectVisible(page.getByText('第1章 雨夜线索').first(), 'editable chapter tab')
@@ -227,7 +227,7 @@ export async function verifyEditorSaveWorkflow(browser, url, consoleErrors, page
   await assertStoredContent(page, 'chapters/1.md', savedText)
 
   await page.getByTitle('搜索').click()
-  await page.getByTitle('章节').click()
+  await page.locator('nav').first().getByTitle('章节').click()
   await ensureChapterBlockExpanded(page)
   await assertSelectedChapterPath(page, 'chapters/1.md')
   await assertActiveTabTitle(page, '第1章 雨夜线索')
@@ -264,7 +264,7 @@ export async function verifyEditorSaveWorkflow(browser, url, consoleErrors, page
 
   await page.getByTitle('搜索').click()
   await delay(700)
-  await page.getByTitle('章节').click()
+  await page.locator('nav').first().getByTitle('章节').click()
   await ensureChapterBlockExpanded(page)
   await assertBridgeCallCount(page, 'SaveContent', saveCountAfterRetry)
   await assertActiveTabTitle(page, '第2章 旧城门')
@@ -621,18 +621,20 @@ export async function verifyImportExportFilePickerWorkflow(browser, url, console
   await assertSavedAvatar(page, { byte_count: 4 })
 
   await clickActivity(page, '素材库')
-  await page.getByRole('button', { name: '选择参考源文件' }).click()
+  // 整章素材化重构后注册走 RegisterReferenceMaterializationSource（原 CreateReferenceAnchor 表单已随 ReferenceAnchorView 退役）。
+  const referenceSidebar = page.getByTestId('reference-book-sidebar')
+  await referenceSidebar.getByRole('button', { name: '添加参考书籍' }).click()
+  await referenceSidebar.getByRole('button', { name: '选择参考书文件' }).click()
   await waitForBridgeCall(page, 'PickReferenceSourceFile')
-  await expectInputValue(page.getByLabel('本地路径'), pickedReferenceSourceFile)
-  await expectSelectedValue(page.locator('select').first(), 'markdown')
-  await page.getByPlaceholder('参考书名').fill('文件选择参考')
-  await page.getByRole('button', { name: /^创建$/ }).click()
-  await waitForBridgeCall(page, 'CreateReferenceAnchor')
-  await expectVisible(page.getByText('参考锚点已创建'), 'reference anchor created from picked file')
-  await assertCreatedReferenceAnchor(page, {
+  await expectInputValue(referenceSidebar.getByLabel('参考书文件路径'), pickedReferenceSourceFile)
+  await referenceSidebar.getByLabel('参考书标题').fill('文件选择参考')
+  await referenceSidebar.getByRole('button', { name: '添加参考书', exact: true }).click()
+  await waitForBridgeCall(page, 'RegisterReferenceMaterializationSource')
+  await expectVisible(referenceSidebar.getByText('文件选择参考'), 'reference book registered from picked file')
+  await assertLastBridgeCallInput(page, 'RegisterReferenceMaterializationSource', {
     title: '文件选择参考',
-    sourcePath: pickedReferenceSourceFile,
-    sourceKind: 'markdown',
+    source_path: pickedReferenceSourceFile,
+    source_kind: 'markdown',
   })
 
   await assertBridgeCallCount(page, 'PickReferenceSourceFile', 1)
@@ -701,6 +703,64 @@ export async function verifySearchWorkflow(page) {
   await assertBridgeCallCount(page, 'runtime.shell.openExternal', 0)
 }
 
+export async function verifyCorpusChatWorkflow(page) {
+  // 进入章节上下文：打开第 1 章后聊天面板拿到 chapter_number。
+  await clickActivity(page, '章节')
+  await ensureChapterBlockExpanded(page)
+  await chapterButton(page, '雨夜线索').click()
+  await expectVisible(page.locator('.monaco-editor').first(), 'chapter editor before corpus chat')
+
+  const input = page.getByPlaceholder('输入消息，按 / 调用技能...')
+
+  // 覆盖度信号：写入两命中一落空的细纲 beat，横幅应显示 67%。
+  await page.evaluate(async () => {
+    await window.novelist.invoke('UpdateChapterPlan', { args: [42, { scope: 'next', content: '雨夜门口对峙\n灯影停顿收尾\n完全无关的日常桥段' }] })
+  })
+  await expectVisible(page.getByTestId('chapter-coverage-banner'), 'chapter coverage banner')
+  await page.getByTestId('chapter-coverage-banner').getByRole('button', { name: '刷新' }).click()
+  await expectVisible(page.getByText('语料覆盖：67%（2/3 beat）'), 'chapter coverage ratio text')
+  await expectVisible(page.getByText('· 完全无关的日常桥段'), 'chapter coverage uncovered beat entry')
+
+  // 语料不足：全部 beat 无命中时横幅切换为不足提示。
+  await page.evaluate(async () => {
+    await window.novelist.invoke('UpdateChapterPlan', { args: [42, { scope: 'next', content: '完全无关甲\n完全无关乙' }] })
+  })
+  await page.getByTestId('chapter-coverage-banner').getByRole('button', { name: '刷新' }).click()
+  await expectVisible(page.getByText('语料不足：0%（0/2 beat）'), 'chapter coverage insufficient text')
+  await expectVisible(page.getByText('可直写（AI 会诚实标注语料不足），或先到「语料」区导入同类参考书补足 beat 对应素材。'), 'chapter coverage guidance')
+
+  // 恢复可命中细纲，验证写作注入与用量展示。
+  await page.evaluate(async () => {
+    await window.novelist.invoke('UpdateChapterPlan', { args: [42, { scope: 'next', content: '雨夜门口对峙\n灯影停顿收尾' }] })
+  })
+  await page.getByTestId('chapter-coverage-banner').getByRole('button', { name: '刷新' }).click()
+  await expectVisible(page.getByText('语料覆盖：100%（2/2 beat）'), 'chapter coverage full text')
+
+  const chatBefore = await bridgeCallCount(page, 'Chat')
+  await input.fill('帮我细化本章')
+  await input.press('Enter')
+  await waitForBridgeCall(page, 'Chat')
+  const chatCalls = await page.evaluate(() =>
+    window.__appMockState.calls.filter((call) => call.method === 'Chat'))
+  assert.equal(chatCalls.length, chatBefore + 1, 'corpus chat must send exactly one Chat call')
+  assert.equal(chatCalls.at(-1).args?.[0]?.chapter_number, 1, 'corpus chat must carry the active chapter number')
+  await expectVisible(page.getByTestId('corpus-usage-card'), 'corpus usage card')
+  await expectVisible(page.getByText('本章语料注入'), 'corpus usage card heading')
+  await expectVisible(page.getByTestId('corpus-usage-card').getByText('《全局雨夜参考》').first(), 'corpus usage material source book')
+
+  // 访谈选择题：AI 以 choices 块提问，点击选项即作为作者回答发送。
+  await input.fill('访谈：林岚在雨夜发现新线索')
+  await input.press('Enter')
+  await expectVisible(page.getByTestId('choice-block'), 'interview choice block')
+  await expectVisible(page.getByText('这处冲突的处理方式，两本参考书给出了不同的示范，你倾向哪一种？'), 'interview question text')
+  await page.getByTestId('choice-block').getByRole('button', { name: /冷处理/ }).click()
+  await expectVisible(page.getByText(/冷处理：参考《全局雨夜参考》用停顿和沉默压住情绪/), 'interview picked option echoed as user message')
+  await page.getByRole('button', { name: '发送消息' }).waitFor({ state: 'visible', timeout: 12_000 })
+
+  await assertBridgeCallCount(page, 'SaveContent', 0)
+  await page.screenshot({ path: path.join(outputDir, 'app-corpus-chat.png'), fullPage: true })
+}
+
 export async function verifyChatWorkflow(page) {
   const chapterContentBefore = await page.evaluate(() => window.__appMockState.contentByPath['chapters/1.md'])
   const saveContentBefore = await bridgeCallCount(page, 'SaveContent')
@@ -762,20 +822,25 @@ export async function verifyReferenceSmoke(page) {
   await page.getByTitle('素材库').click()
   await expectVisible(page.getByRole('heading', { name: '选择一个参考来源' }), 'reference materialization workspace heading')
   await expectVisible(page.getByText('全局雨夜参考').first(), 'reference anchor fixture')
-  await expectVisible(page.getByTestId('blueprint-preview-panel'), 'materialization blueprint preview')
+  const corpusTabs = page.getByTestId('corpus-area-tabs')
+  await expectVisible(corpusTabs, 'corpus area tabs')
+  await expectVisible(corpusTabs.getByRole('tab', { name: '总览' }), 'corpus overview tab')
+  await expectVisible(corpusTabs.getByRole('tab', { name: '制作' }), 'corpus make tab')
+  await expectVisible(corpusTabs.getByRole('tab', { name: '浏览' }), 'corpus browse tab')
+  await expectVisible(corpusTabs.getByRole('tab', { name: '语料包' }), 'corpus pack tab')
+  assert.equal(await corpusTabs.getByRole('tab', { name: '制作' }).getAttribute('aria-selected'), 'true', 'corpus area should default to the make tab')
 }
 
 export async function verifyReferenceWorkspaceWorkflow(page) {
   await clickActivity(page, '素材库')
 
   const referenceBooks = page.getByTestId('reference-book-sidebar')
-  const blueprintPreview = page.getByTestId('blueprint-preview-panel')
   const corpusWorkspace = page.getByTestId('reference-corpus-workspace')
+  const corpusTabs = page.getByTestId('corpus-area-tabs')
   await expectVisible(referenceBooks.getByRole('heading', { name: '参考书籍' }), 'reference books sidebar heading')
   await expectVisible(referenceBooks.getByText('全局雨夜参考'), 'reference books sidebar fixture')
-  await expectVisible(blueprintPreview.getByRole('heading', { name: 'AI 蓝图预演' }), 'blueprint preview heading')
   await expectVisible(corpusWorkspace.getByRole('heading', { name: '选择一个参考来源' }), 'empty materialization workspace')
-  await expectHidden(page.getByText('AI 对话', { exact: true }), 'generic chat is hidden for the corpus workspace')
+  await expectVisible(page.getByText('AI 对话'), 'chat panel stays available alongside the corpus workspace')
 
   await referenceBooks.getByRole('button', { name: '选择《全局雨夜参考》' }).click()
   await expectVisible(corpusWorkspace.getByRole('heading', { name: '全局雨夜参考' }), 'selected materialization source')
@@ -793,14 +858,41 @@ export async function verifyReferenceWorkspaceWorkflow(page) {
   await corpusWorkspace.getByRole('button', { name: '启动材料化' }).click()
   await waitForBridgeCallCountAfter(page, 'EnqueueReferenceMaterialization', enqueueCount)
   await expectVisible(corpusWorkspace.getByText('向量索引完整'), 'completed materialization index state')
-
-  await blueprintPreview.getByLabel('预演目标').fill('让林岚确认门口线索，并在结尾留下新的悬念。')
-  await expectVisible(blueprintPreview.getByText('可预演 1 本'), 'active material source count')
-  const previewCallCount = await bridgeCallCount(page, 'GenerateReferenceMaterializationBlueprintPreview')
-  await blueprintPreview.getByRole('button', { name: '生成预演' }).click()
-  await waitForBridgeCallCountAfter(page, 'GenerateReferenceMaterializationBlueprintPreview', previewCallCount)
-  await expectVisible(blueprintPreview.getByTestId('blueprint-preview-candidate').first(), 'generated blueprint candidate')
   await page.screenshot({ path: path.join(outputDir, 'materialized-reference-workspace.png'), fullPage: true })
+
+  // 蓝图预演已随拼装线退役：右侧恢复 AI 对话，预演面板不再存在。
+  await expectHidden(page.getByTestId('blueprint-preview-panel'), 'retired blueprint preview panel')
+
+  await corpusTabs.getByRole('tab', { name: '总览' }).click()
+  const overview = page.getByTestId('corpus-overview')
+  await expectVisible(overview.getByRole('heading', { name: '语料资产总览' }), 'corpus overview heading')
+  await expectVisible(overview.getByText('参考书'), 'corpus overview book card label')
+  await expectVisible(overview.getByText('特征观察'), 'corpus overview observation card label')
+  await expectVisible(overview.getByText('技法标本'), 'corpus overview specimen card label')
+  await expectVisible(overview.getByText('覆盖度地图'), 'corpus coverage map heading')
+  await expectVisible(page.getByTestId('corpus-coverage-map').getByText('rain_threshold').first(), 'corpus coverage facet chip')
+  await page.screenshot({ path: path.join(outputDir, 'corpus-overview.png'), fullPage: true })
+
+  await corpusTabs.getByRole('tab', { name: '浏览' }).click()
+  const browse = page.getByTestId('corpus-browse')
+  await expectVisible(browse.getByLabel('选择参考书'), 'corpus browse anchor selector')
+  await expectVisible(browse.getByRole('tab', { name: '特征观察' }), 'corpus browse observations kind')
+  await expectVisible(browse.getByRole('tab', { name: '技法标本' }), 'corpus browse specimens kind')
+  await waitForBridgeCallCountAfter(page, 'ListReferenceCorpusFeatureObservations', 0)
+  await expectVisible(browse.getByRole('button', { name: /emotion_state/ }), 'corpus browse observation family entry')
+  await browse.getByRole('button', { name: /mock-101/ }).first().click()
+  await expectVisible(browse.getByText('证据').first(), 'corpus browse observation evidence')
+  const specimenCount = await bridgeCallCount(page, 'ListReferenceCorpusTechniqueSpecimens')
+  await browse.getByRole('tab', { name: '技法标本' }).click()
+  await waitForBridgeCallCountAfter(page, 'ListReferenceCorpusTechniqueSpecimens', specimenCount)
+  await expectVisible(browse.getByRole('button', { name: /action_as_emotion/ }), 'corpus browse specimen entry')
+  await page.screenshot({ path: path.join(outputDir, 'corpus-browse.png'), fullPage: true })
+
+  await corpusTabs.getByRole('tab', { name: '语料包' }).click()
+  const pack = page.getByTestId('corpus-pack')
+  await expectVisible(pack.getByRole('heading', { name: '语料包' }), 'corpus pack heading')
+  await expectVisible(pack.getByText('导出 / 导入通道建设中'), 'corpus pack coming-soon note')
+  await page.screenshot({ path: path.join(outputDir, 'corpus-pack.png'), fullPage: true })
 
   await referenceBooks.getByRole('button', { name: '归档《全局雨夜参考》为受限语料' }).click()
   await expectVisible(referenceBooks.getByText('确认将工作区语料归档为受限？'), 'workspace corpus archive confirmation')
@@ -846,9 +938,7 @@ export async function verifyCompactViewportSmoke(browser, url, consoleErrors, pa
   await expectVisible(page.getByRole('heading', { name: '选择一个参考来源' }), 'compact reference materialization workspace')
   await expectVisible(page.getByTestId('reference-book-sidebar'), 'compact reference source sidebar')
 
-  await clickActivity(page, '风格素材')
-  await expectVisible(page.getByRole('heading', { name: /风格素材/ }), 'compact style sample surface')
-  await expectVisible(page.getByText('全局雨夜节奏').first(), 'compact style sample card')
+  // 风格素材入口已在轻量化聚焦 Phase 1 断入口退役（docs/corpus-driven-writing/lightweight-refocus-proposal-2026-08-31.md §8.2）。
 
   await clickActivity(page, 'Git 历史')
   await expectVisible(page.getByRole('heading', { name: 'Git 历史' }), 'compact Git history surface')

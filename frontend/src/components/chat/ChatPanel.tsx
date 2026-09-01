@@ -3,10 +3,13 @@ import type { KeyboardEvent as ReactKeyboardEvent, MouseEvent as ReactMouseEvent
 import { MessageSquare, Loader2, History, Plus } from 'lucide-react'
 import { EventsOn } from '@/lib/novelist/events'
 import { useApp } from '@/hooks/useApp'
-import type { llm, app } from '@/hooks/useApp'
+import type { llm, app, reference } from '@/hooks/useApp'
 import type { AgentEvent, Turn } from './types'
 import { AgentEventType, emptySegment, rebuildTurns } from './types'
 import ChatInput from './ChatInput'
+import CorpusUsageCard, { type CorpusUsageMaterial } from './CorpusUsageCard'
+import ChoiceBlock from './ChoiceBlock'
+import { parseChoices } from './choices'
 import ChatControls from './ChatControls'
 import MessageBubble from './MessageBubble'
 import ThinkingBlock from './ThinkingBlock'
@@ -26,6 +29,7 @@ interface Props {
   onWidthChange: (width: number) => void
   onWidthCommit: (width: number) => void
   novelId: number
+  chapterNumber?: number | null
   onApprove: (toolId: string, feedback: string) => Promise<void>
   onReject: (toolId: string, feedback: string) => Promise<void>
   onApprovalFileEdit?: (payload: {
@@ -52,6 +56,7 @@ export default function ChatPanel({
   onWidthChange,
   onWidthCommit,
   novelId,
+  chapterNumber,
   onApprove,
   onReject,
   onApprovalFileEdit,
@@ -83,6 +88,9 @@ export default function ChatPanel({
   const [historyLoadError, setHistoryLoadError] = useState(false)
   const [historyLoadRetry, setHistoryLoadRetry] = useState(0)
   const [slashCommands, setSlashCommands] = useState<app.SlashCommand[]>([])
+  const [chapterCoverage, setChapterCoverage] = useState<reference.ChapterCorpusCoverage | null>(null)
+  const chapterNumberRef = useRef<number | null | undefined>(chapterNumber)
+  chapterNumberRef.current = chapterNumber
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const scrollContainerRef = useRef<HTMLDivElement>(null)
   const isNearBottomRef = useRef(true)
@@ -97,6 +105,28 @@ export default function ChatPanel({
   useEffect(() => {
     latestWidthRef.current = width
   }, [width])
+
+  // 章节语料覆盖度：打开章节后按细纲 beat 聚合检索命中，写作前给出“语料不足”信号。
+  const loadCoverage = useCallback(() => {
+    if (!novelId || !chapterNumber) {
+      setChapterCoverage(null)
+      return
+    }
+    app.GetChapterCorpusCoverage({ novel_id: novelId, chapter_number: chapterNumber })
+      .then((coverage) => { setChapterCoverage(coverage) })
+      .catch(() => { setChapterCoverage(null) })
+  }, [app, novelId, chapterNumber])
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => { loadCoverage() }, 0)
+    return () => { window.clearTimeout(timer) }
+  }, [loadCoverage])
+
+  useEffect(() => {
+    if (!isLoading) return
+    const refresh = () => { loadCoverage() }
+    return refresh
+  }, [isLoading, loadCoverage])
 
   // 加载模型列表并恢复持久化设置
   useEffect(() => {
@@ -852,6 +882,7 @@ export default function ChatPanel({
         provider_name: p,
         model_id: m,
         reasoning_effort: reasoningEffort,
+        chapter_number: chapterNumberRef.current ?? null,
       })
       // 刷新会话列表
       app.GetSessions({ novel_id: novelId, page: 1, size: 5, search: '' }).then(r => {
@@ -1034,6 +1065,10 @@ export default function ChatPanel({
                         if (seg.toolName === 'web_fetch' && seg.toolStatus === 'completed' && seg.result) {
                           return <WebFetchCard key={seg.id} result={seg.result} displayText={seg.displayText} />
                         }
+                        if (seg.toolName === 'search_reference_materials' && seg.toolStatus === 'completed' && seg.result?.automatic) {
+                          const materials = (seg.result.materials as CorpusUsageMaterial[] | undefined) ?? []
+                          return <CorpusUsageCard key={seg.id} materials={materials} />
+                        }
 
                         return (
                           <ToolCallCard
@@ -1078,9 +1113,17 @@ export default function ChatPanel({
                               />
                             </div>
                           )}
-                          {seg.content && (
-                            <MessageBubble role="assistant" content={seg.content} />
-                          )}
+                          {seg.content && (() => {
+                            const { body, options } = parseChoices(seg.content)
+                            return (
+                              <>
+                                <MessageBubble role="assistant" content={body} />
+                                {options.length > 0 && !isLoading && (
+                                  <ChoiceBlock options={options} onPick={(option) => { void handleSend(option) }} />
+                                )}
+                              </>
+                            )
+                          })()}
                         </div>
                       )
                     })}
@@ -1132,6 +1175,39 @@ export default function ChatPanel({
 
         <div ref={messagesEndRef} />
       </div>
+
+      {chapterNumber && chapterCoverage && chapterCoverage.total_count > 0 && (
+        <div
+          className={`mx-4 mb-1.5 rounded-md border px-2.5 py-2 text-[11px] ${chapterCoverage.sufficient ? 'border-border bg-muted/30 text-muted-foreground' : 'border-border bg-tag-amber text-tag-amber-foreground'}`}
+          data-testid="chapter-coverage-banner"
+        >
+          <div className="flex items-center justify-between gap-2">
+            <span className="font-medium">
+              {chapterCoverage.sufficient ? '语料覆盖' : '语料不足'}
+              ：{Math.round(chapterCoverage.coverage_ratio * 100)}%（{chapterCoverage.covered_count}/{chapterCoverage.total_count} beat）
+            </span>
+            <button
+              type="button"
+              onClick={() => { loadCoverage() }}
+              className="shrink-0 rounded px-1.5 py-0.5 text-[10px] underline-offset-2 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            >
+              刷新
+            </button>
+          </div>
+          {!chapterCoverage.sufficient && (
+            <p className="mt-1 leading-relaxed">
+              可直写（AI 会诚实标注语料不足），或先到「语料」区导入同类参考书补足 beat 对应素材。
+            </p>
+          )}
+          {chapterCoverage.beats.filter((beat) => !beat.covered).length > 0 && (
+            <ul className="mt-1 space-y-0.5">
+              {chapterCoverage.beats.filter((beat) => !beat.covered).slice(0, 3).map((beat) => (
+                <li key={beat.beat} className="truncate">· {beat.beat}</li>
+              ))}
+            </ul>
+          )}
+        </div>
+      )}
 
       <ChatInput
         disabled={!hasNovel || !selectedKey}

@@ -21,7 +21,6 @@ export async function verifyErrorFeedbackWorkflow(context) {
     dispatchNovelImportDrop,
   } = context
 
-  await verifyStyleSampleLibraryErrorFeedback(context)
   await verifyMetadataCrudErrorFeedback(context)
   await verifyLegacySaveExportErrorFeedback(context)
   await verifyLegacySurfaceErrorLifecycle(context)
@@ -127,60 +126,6 @@ export async function verifyErrorFeedbackWorkflow(context) {
     page,
   )
   await page.locator('.fixed').getByRole('button', { name: '✕' }).click()
-
-  const patternBefore = await bridgeCallCount(page, 'StartNarrativePatternExtraction')
-  await clickActivity(page, '叙事模式')
-  await expectVisible(page.getByRole('heading', { name: '叙事模式' }), 'narrative pattern heading')
-  await page.getByRole('button', { name: '开始抽取' }).click()
-  await waitForBridgeCallCountAfter(page, 'StartNarrativePatternExtraction', patternBefore)
-  const patternAlert = errorAlert(page, '叙事模式抽取失败')
-  await expectVisible(patternAlert, 'narrative pattern error callout')
-  await assertNoSensitiveDiagnosticsVisible(page)
-  await assertCopyableDiagnostic(page, patternAlert, 'StartNarrativePatternExtraction')
-
-  await clickActivity(page, '风格素材')
-  await expectVisible(page.getByRole('heading', { name: /风格素材/ }), 'style sample heading')
-
-  const createStyleSampleBefore = await bridgeCallCount(page, 'CreateStyleSample')
-  await page.getByRole('button', { name: '新建样本' }).click()
-  await page.locator('form').getByLabel('样本名称').fill('错误反馈样本')
-  await page.locator('form').getByLabel('样本内容').fill('她停了一下，没有把话说完。')
-  await page.locator('form').getByLabel('标签').fill('错误反馈;样本')
-  await page.getByRole('button', { name: '保存样本' }).click()
-  await waitForBridgeCallCountAfter(page, 'CreateStyleSample', createStyleSampleBefore)
-  const createStyleSampleAlert = errorAlert(page, '保存风格样本失败')
-  await expectVisible(createStyleSampleAlert, 'create style sample error callout')
-  await assertNoSensitiveDiagnosticsVisible(page)
-  await assertCopyableDiagnostic(page, createStyleSampleAlert, 'CreateStyleSample')
-
-  const updateStyleSampleBefore = await bridgeCallCount(page, 'UpdateStyleSample')
-  await page.getByRole('button', { name: '编辑 全局雨夜节奏' }).click()
-  await waitForBridgeCall(page, 'GetStyleSample')
-  await page.locator('form').getByLabel('样本名称').fill('全局雨夜节奏错误修订')
-  await page.getByRole('button', { name: '保存样本' }).click()
-  await waitForBridgeCallCountAfter(page, 'UpdateStyleSample', updateStyleSampleBefore)
-  const updateStyleSampleAlert = errorAlert(page, '保存风格样本失败')
-  await expectVisible(updateStyleSampleAlert, 'update style sample error callout')
-  await assertNoSensitiveDiagnosticsVisible(page)
-  await assertCopyableDiagnostic(page, updateStyleSampleAlert, 'UpdateStyleSample')
-
-  const deleteStyleSampleBefore = await bridgeCallCount(page, 'DeleteStyleSample')
-  await page.getByRole('button', { name: '删除 全局雨夜节奏' }).click()
-  await waitForBridgeCallCountAfter(page, 'DeleteStyleSample', deleteStyleSampleBefore)
-  const deleteStyleSampleAlert = errorAlert(page, '删除风格样本失败')
-  await expectVisible(deleteStyleSampleAlert, 'delete style sample error callout')
-  await assertNoSensitiveDiagnosticsVisible(page)
-  await assertCopyableDiagnostic(page, deleteStyleSampleAlert, 'DeleteStyleSample')
-
-  const styleBefore = await bridgeCallCount(page, 'ExtractStyleSkillFromSamples')
-  await page.getByRole('checkbox', { name: '选择样本 全局雨夜节奏' }).check()
-  await page.getByLabel('技能名称').fill('错误风格技能')
-  await page.getByRole('button', { name: '开始抽取' }).click()
-  await waitForBridgeCallCountAfter(page, 'ExtractStyleSkillFromSamples', styleBefore)
-  const styleAlert = errorAlert(page, '风格技能抽取失败')
-  await expectVisible(styleAlert, 'style extraction error callout')
-  await assertNoSensitiveDiagnosticsVisible(page)
-  await assertCopyableDiagnostic(page, styleAlert, 'ExtractStyleSkillFromSamples')
 }
 
 async function verifyMetadataCrudErrorFeedback(context) {
@@ -545,82 +490,11 @@ async function verifyMetadataCrudErrorFeedback(context) {
   await metadataPage.close()
 }
 
-async function verifyStyleSampleLibraryErrorFeedback(context) {
-  const {
-    browser,
-    url,
-    consoleErrors,
-    pageErrors,
-    newAppPage,
-    installClipboardSpy,
-    sensitiveDiagnosticDetails,
-    clickActivity,
-    waitForBridgeCall,
-    waitForBridgeCallCountAfter,
-    bridgeCallCount,
-    errorAlert,
-    expectVisible,
-    assertNoSensitiveDiagnosticsVisible,
-    assertCopyableDiagnostic,
-  } = context
-  const searchPage = await newAppPage(browser, consoleErrors, pageErrors, {
-    initialized: true,
-    faults: {
-      SearchStyleSamples: {
-        mode: 'storage',
-        code: 'STYLE_SAMPLE_SEARCH_FAILED',
-        message: '加载风格素材失败：Bearer style-sample-search-token-abcdefghijklmnopqrstuvwxyz',
-        details: sensitiveDiagnosticDetails(),
-        retryable: true,
-        once: false,
-      },
-    },
-  }, undefined, 'style-sample-search-error')
-  await installClipboardSpy(searchPage)
-  await searchPage.goto(url, { waitUntil: 'domcontentloaded' })
-  await expectVisible(searchPage.getByText('全局回归小说'), 'workspace title before style sample search failure')
-  await clickActivity(searchPage, '风格素材')
-  await waitForBridgeCall(searchPage, 'SearchStyleSamples')
-  const searchAlert = errorAlert(searchPage, '加载风格素材失败')
-  await expectVisible(searchAlert, 'style sample search error callout')
-  await assertNoSensitiveDiagnosticsVisible(searchPage)
-  await assertCopyableDiagnostic(searchPage, searchAlert, 'SearchStyleSamples')
-  await searchPage.close()
-
-  const detailPage = await newAppPage(browser, consoleErrors, pageErrors, {
-    initialized: true,
-    faults: {
-      GetStyleSample: {
-        mode: 'storage',
-        code: 'STYLE_SAMPLE_DETAIL_FAILED',
-        message: '加载样本详情失败：Bearer style-sample-detail-token-abcdefghijklmnopqrstuvwxyz',
-        details: sensitiveDiagnosticDetails(),
-        retryable: true,
-        once: false,
-      },
-    },
-  }, undefined, 'style-sample-detail-error')
-  await installClipboardSpy(detailPage)
-  await detailPage.goto(url, { waitUntil: 'domcontentloaded' })
-  await expectVisible(detailPage.getByText('全局回归小说'), 'workspace title before style sample detail failure')
-  await clickActivity(detailPage, '风格素材')
-  await expectVisible(detailPage.getByText('全局雨夜节奏').first(), 'style sample card before detail failure')
-  const detailBefore = await bridgeCallCount(detailPage, 'GetStyleSample')
-  await detailPage.getByRole('button', { name: '查看样本 全局雨夜节奏' }).click()
-  await waitForBridgeCallCountAfter(detailPage, 'GetStyleSample', detailBefore)
-  const detailAlert = errorAlert(detailPage, '加载样本详情失败')
-  await expectVisible(detailAlert, 'style sample detail error callout')
-  await assertNoSensitiveDiagnosticsVisible(detailPage)
-  await assertCopyableDiagnostic(detailPage, detailAlert, 'GetStyleSample')
-  await detailPage.close()
-}
-
 async function verifyLegacySurfaceErrorLifecycle(context) {
   await verifyCharacterAndLocationErrorLifecycle(context)
   await verifyStoryArcErrorLifecycle(context)
   await verifyTimelineErrorLifecycle(context)
   await verifyReaderPreferenceErrorLifecycle(context)
-  await verifyStyleSampleErrorLifecycle(context)
 }
 
 async function verifyCharacterAndLocationErrorLifecycle(context) {
@@ -900,47 +774,6 @@ async function verifyReaderPreferenceErrorLifecycle(context) {
     preferenceAlert,
     expectVisible,
     'preference create error after opening edit form',
-  )
-  await page.close()
-}
-
-async function verifyStyleSampleErrorLifecycle(context) {
-  const {
-    browser,
-    url,
-    consoleErrors,
-    pageErrors,
-    newAppPage,
-    installClipboardSpy,
-    sensitiveDiagnosticDetails,
-    clickActivity,
-    waitForBridgeCallCountAfter,
-    bridgeCallCount,
-    errorAlert,
-    expectVisible,
-  } = context
-
-  const page = await newAppPage(browser, consoleErrors, pageErrors, {
-    initialized: true,
-    faults: {
-      GetStyleSample: lifecycleFault('STYLE_SAMPLE_DETAIL_LIFECYCLE_FAILED', '加载样本详情失败：Bearer style-sample-detail-token-abcdefghijklmnopqrstuvwxyz', sensitiveDiagnosticDetails()),
-    },
-  }, undefined, 'style-sample-error-lifecycle')
-  await installClipboardSpy(page)
-  await page.goto(url, { waitUntil: 'domcontentloaded' })
-  await expectVisible(page.getByText('全局回归小说'), 'workspace title before style sample lifecycle review')
-  await clickActivity(page, '风格素材')
-  await expectVisible(page.getByText('全局雨夜节奏').first(), 'style sample card before lifecycle failure')
-  const detailBefore = await bridgeCallCount(page, 'GetStyleSample')
-  await page.getByRole('button', { name: '查看样本 全局雨夜节奏' }).click()
-  await waitForBridgeCallCountAfter(page, 'GetStyleSample', detailBefore)
-  const alert = errorAlert(page, '加载样本详情失败')
-  await expectVisible(alert, 'style sample detail lifecycle error callout')
-  await expectErrorPersistsAfter(
-    async () => { await page.getByRole('button', { name: '新建样本' }).click() },
-    alert,
-    expectVisible,
-    'style sample detail error after opening create form',
   )
   await page.close()
 }

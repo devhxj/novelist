@@ -1163,6 +1163,7 @@ referenceCorpusTechniqueSpecimenAnalysisRuns: [],
         return null
       case 'GetMaxChapterNumber': return maxChapterNumber(args[0])
       case 'GetChapterPlans': return chapterPlans(args[0])
+      case 'GetChapterCorpusCoverage': return getChapterCorpusCoverage(args[0])
       case 'UpdateChapterPlan':
         updateChapterPlan(args[0], args[1])
         return null
@@ -1236,7 +1237,6 @@ referenceCorpusTechniqueSpecimenAnalysisRuns: [],
       case 'ListReferenceMaterializationCandidates': return listReferenceMaterializationCandidates(args[0])
       case 'ReviewReferenceMaterializationCandidate': return reviewReferenceMaterializationCandidate(args[0])
       case 'ListActiveReferenceMaterializationMaterials': return listActiveReferenceMaterializationMaterials(args[0])
-      case 'GenerateReferenceMaterializationBlueprintPreview': return generateReferenceMaterializationBlueprintPreview(args[0])
       case 'SearchReferenceMaterials': return searchReferenceMaterials(args[0])
       case 'GetReferenceMaterialCoverage': return getReferenceMaterialCoverage(args[0])
       case 'GetReferenceMaterialTagReviewQueue': return getReferenceMaterialTagReviewQueue(args[0])
@@ -1297,31 +1297,10 @@ case 'ListReferenceCorpusTechniqueSpecimens': return listReferenceCorpusTechniqu
  })
  return { ...job }
  }
-      case 'GenerateReferenceCorpusBlueprintCandidates': return generateReferenceCorpusBlueprintCandidates(args[0])
-      case 'AdvanceReferenceCorpusBlueprintSession': return advanceReferenceCorpusBlueprintSession(args[0])
-      case 'GenerateReferenceCorpusInsertionDraft': return generateReferenceCorpusInsertionDraft(args[0])
-      case 'GenerateReferenceCorpusInsertionDraftCandidates': return generateReferenceCorpusInsertionDraftCandidates(args[0])
-      case 'GetReferenceCorpusBlueprintSession': return getReferenceCorpusBlueprintSession(args[0])
- case 'RecordReferenceCorpusInsertionAudit': return args[0]?.draft?.ready_for_insertion === true && args[0]?.draft?.gate?.passed === true && args[0]?.draft?.audit?.passed === true
       case 'UpdateReferenceMaterialTags': return updateReferenceMaterialTags(args[0])
       case 'UpdateReferenceMaterialsTags': return updateReferenceMaterialsTags(args[0])
-      case 'AdaptReferenceMaterial': return adaptReferenceMaterial(args[0])
       case 'BuildReferenceStyleProfile': return buildReferenceStyleProfile(args[0])
       case 'GetReferenceStyleProfileBuildStatus': return referenceStyleProfileBuildStatus(args[0])
-      case 'GetReferenceChapterBlueprints': return Object.values(state.referenceBlueprints).map(toReferenceBlueprintSummary)
-      case 'GetReferenceChapterBlueprint': return state.referenceBlueprints[String(args[1])] ?? null
-      case 'GenerateReferenceChapterBlueprint': return generateReferenceBlueprint(args[0])
-      case 'ReviewReferenceChapterBlueprint': return reviewReferenceBlueprint(args[0])
-      case 'ApproveReferenceChapterBlueprint': return approveReferenceBlueprint(args[0])
-      case 'BindReferenceBlueprintMaterials': return bindReferenceBlueprintMaterials(args[0])
-      case 'GetReferenceDraftCandidates': return getReferenceDraftCandidates(args[0])
-      case 'GetReferenceAnchoredDraftAudits': return getReferenceAnchoredDraftAudits(args[0])
-      case 'StartReferenceOrchestrationRun': return startReferenceOrchestrationRun(args[0])
-      case 'GetReferenceOrchestrationRuns': return referenceOrchestrationRuns(args[0], args[1])
-      case 'GetReferenceOrchestrationRun': return referenceOrchestrationRun(args[1])
-      case 'GetReferenceOrchestrationRunEvents': return referenceOrchestrationRunEvents(args[1])
-      case 'ResumeReferenceOrchestrationRun': return resumeReferenceOrchestrationRun(args[0])
-      case 'CancelReferenceOrchestrationRun': return cancelReferenceOrchestrationRun(args[0])
       default:
         return defaultValueFor(method)
     }
@@ -1952,6 +1931,46 @@ case 'ListReferenceCorpusTechniqueSpecimens': return listReferenceCorpusTechniqu
     const message = String(input?.message ?? '')
     emit('chat:started', { turn_id: turnId })
 
+    const corpusUsage = input?.chapter_number
+      ? chatCorpusUsage()
+      : null
+    if (corpusUsage) {
+      emit(`agent:${turnId}`, agentEvent(turnId, 1, {
+        type: 3,
+        tool_name: 'search_reference_materials',
+        tool_id: `corpus-injection-${turnId}`,
+        phase: 'completed',
+        display_text: `已注入本章参考语料 ${corpusUsage.length} 条`,
+        activity_kind: 'search',
+        metadata: {
+          automatic: true,
+          chapter_number: input?.chapter_number ?? null,
+          materials: corpusUsage,
+        },
+      }))
+    }
+
+    if (message.includes('访谈')) {
+      await wait(50)
+      const interviewText = [
+        '这处冲突的处理方式，两本参考书给出了不同的示范，你倾向哪一种？',
+        '',
+        '```choices',
+        '{"options": ["冷处理：参考《全局雨夜参考》用停顿和沉默压住情绪", "爆发：参考《重启恢复参考》让对话在雨夜门槛直接摊牌", "都不满意，换个方向"]}',
+        '```',
+      ].join('\n')
+      emit(`agent:${turnId}`, agentEvent(turnId, 2, { type: 2, data: interviewText }))
+      await wait(50)
+      return {
+        session_id: sessionId,
+        turn_id: turnId,
+        final_text: interviewText,
+        corpus_usage: corpusUsage,
+      }
+    }
+
+    const seqBase = corpusUsage ? 1 : 0
+
     if (message.includes('停止生成')) {
       await wait(600)
       return {
@@ -1964,7 +1983,7 @@ case 'ListReferenceCorpusTechniqueSpecimens': return listReferenceCorpusTechniqu
     if (message.includes('触发失败态') && !state.chatFailureRecovered) {
       state.chatFailureRecovered = true
       await wait(50)
-      emit(`agent:${turnId}`, agentEvent(turnId, 1, {
+      emit(`agent:${turnId}`, agentEvent(turnId, seqBase + 1, {
         type: 5,
         error: '模拟模型失败，请重试',
       }))
@@ -1979,7 +1998,7 @@ case 'ListReferenceCorpusTechniqueSpecimens': return listReferenceCorpusTechniqu
     if (message.includes('触发失败态')) {
       await wait(80)
       const retryText = '重试后恢复：模型返回稳定结果，未修改章节正文。'
-      emit(`agent:${turnId}`, agentEvent(turnId, 1, {
+      emit(`agent:${turnId}`, agentEvent(turnId, seqBase + 1, {
         type: 2,
         data: retryText,
       }))
@@ -1993,15 +2012,15 @@ case 'ListReferenceCorpusTechniqueSpecimens': return listReferenceCorpusTechniqu
 
     if (message.includes('长文本 Markdown')) {
       const chunks = longMarkdownChatChunks()
-      emit(`agent:${turnId}`, agentEvent(turnId, 1, {
+      emit(`agent:${turnId}`, agentEvent(turnId, seqBase + 1, {
         type: 0,
         data: '先检查章节约束、工具结果和是否需要写入正文。',
       }))
       await wait(80)
-      emit(`agent:${turnId}`, agentEvent(turnId, 2, {
+      emit(`agent:${turnId}`, agentEvent(turnId, seqBase + 2, {
         type: 1,
       }))
-      emit(`agent:${turnId}`, agentEvent(turnId, 3, {
+      emit(`agent:${turnId}`, agentEvent(turnId, seqBase + 3, {
         type: 3,
         tool_name: 'inspect_story_constraints',
         tool_id: 'tool-story-constraints-001',
@@ -2011,14 +2030,14 @@ case 'ListReferenceCorpusTechniqueSpecimens': return listReferenceCorpusTechniqu
         metadata: { chapter_path: 'chapters/1.md', can_mutate: false },
       }))
       for (let index = 0; index < chunks.length; index += 1) {
-        emit(`agent:${turnId}`, agentEvent(turnId, index + 4, {
+        emit(`agent:${turnId}`, agentEvent(turnId, seqBase + index + 4, {
           type: 2,
           data: chunks[index],
         }))
         await wait(index === 0 ? 1800 : 120)
       }
       const finalText = chunks.join('')
-      emit(`agent:${turnId}`, agentEvent(turnId, chunks.length + 4, {
+      emit(`agent:${turnId}`, agentEvent(turnId, seqBase + chunks.length + 4, {
         type: 4,
         usage: {
           prompt_tokens: 420,
@@ -2045,7 +2064,7 @@ case 'ListReferenceCorpusTechniqueSpecimens': return listReferenceCorpusTechniqu
     }
 
     await wait(100)
-    emit(`agent:${turnId}`, agentEvent(turnId, 1, {
+    emit(`agent:${turnId}`, agentEvent(turnId, seqBase + 1, {
       type: 3,
       tool_name: 'get_chapter_list',
       tool_id: 'tool-chapters-001',
@@ -2053,7 +2072,7 @@ case 'ListReferenceCorpusTechniqueSpecimens': return listReferenceCorpusTechniqu
       display_text: '读取章节列表',
       activity_kind: 'view',
     }))
-    emit(`agent:${turnId}`, agentEvent(turnId, 2, {
+    emit(`agent:${turnId}`, agentEvent(turnId, seqBase + 2, {
       type: 3,
       tool_name: 'get_chapter_list',
       tool_id: 'tool-chapters-001',
@@ -2062,7 +2081,7 @@ case 'ListReferenceCorpusTechniqueSpecimens': return listReferenceCorpusTechniqu
       activity_kind: 'view',
       metadata: { chapters: 2 },
     }))
-    emit(`agent:${turnId}`, agentEvent(turnId, 3, {
+    emit(`agent:${turnId}`, agentEvent(turnId, seqBase + 3, {
       type: 3,
       tool_name: 'web_search',
       tool_id: 'tool-web-001',
@@ -2075,11 +2094,11 @@ case 'ListReferenceCorpusTechniqueSpecimens': return listReferenceCorpusTechniqu
         sources: [{ title: 'Mock source', url: 'https://example.com/mock-source' }],
       },
     }))
-    emit(`agent:${turnId}`, agentEvent(turnId, 4, {
+    emit(`agent:${turnId}`, agentEvent(turnId, seqBase + 4, {
       type: 2,
       data: '已读取《雨夜线索》的章节列表，建议先保留受限视角。',
     }))
-    emit(`agent:${turnId}`, agentEvent(turnId, 5, {
+    emit(`agent:${turnId}`, agentEvent(turnId, seqBase + 5, {
       type: 4,
       usage: {
         prompt_tokens: 96,
@@ -2121,6 +2140,25 @@ case 'ListReferenceCorpusTechniqueSpecimens': return listReferenceCorpusTechniqu
   function toChineseOrdinal(value) {
     const values = ['一', '二', '三', '四', '五', '六', '七', '八', '九', '十', '十一', '十二']
     return values[value - 1] ?? String(value)
+  }
+
+  function chatCorpusUsage() {
+    const materials = (Array.isArray(state.referenceMaterials) ? state.referenceMaterials : [])
+      .filter((material) => !material.archived_at)
+      .slice(0, 3)
+    return materials.map((material) => ({
+      material_id: material.material_id,
+      anchor_id: material.anchor_id,
+      anchor_title: anchorTitleById(material.anchor_id) ?? '未知参考书',
+      text_preview: String(material.text ?? '').slice(0, 120),
+      tags: [
+        material.function_tag,
+        material.emotion_tag,
+        material.scene_tag,
+        material.pov_tag,
+        material.technique_tag,
+      ].filter(Boolean),
+    }))
   }
 
   function agentEvent(turnId, seq, patch) {
@@ -2438,6 +2476,55 @@ case 'ListReferenceCorpusTechniqueSpecimens': return listReferenceCorpusTechniqu
 
   function deleteArcNode(novelId, nodeId) {
     state.arcNodes = state.arcNodes.filter((item) => item.novel_id !== novelId || item.id !== nodeId)
+  }
+
+
+  function getChapterCorpusCoverage(input = {}) {
+    const novelId = Number(input?.novel_id ?? state.activeNovelId ?? 42)
+    const plan = state.chapterPlans.find(
+      (item) => Number(item.novel_id) === novelId && item.scope === 'next',
+    )
+    const beats = String(plan?.content ?? '')
+      .split('\n')
+      .map((line) => line.trim().replace(/^[-*+·]\s*/, '').trim())
+      .filter((line) => line.length > 0)
+    const materials = (Array.isArray(state.referenceMaterials) ? state.referenceMaterials : [])
+      .filter((material) => !material.archived_at)
+
+    const beatResults = beats.map((beat) => {
+      const shingles = []
+      for (let i = 0; i + 2 <= beat.length; i += 1) {
+        shingles.push(beat.slice(i, i + 2))
+      }
+      const hit = materials.find((material) => {
+        const text = String(material.text ?? '')
+        return shingles.some((shingle) => text.includes(shingle))
+      })
+      return {
+        beat,
+        covered: Boolean(hit),
+        anchor_title: hit ? anchorTitleById(hit.anchor_id) : null,
+        text_preview: hit ? String(hit.text ?? '').slice(0, 60) : null,
+      }
+    })
+    const coveredCount = beatResults.filter((beat) => beat.covered).length
+    const ratio = beats.length === 0 ? 0 : coveredCount / beats.length
+
+    return {
+      novel_id: novelId,
+      chapter_number: input?.chapter_number ?? null,
+      scope: 'next',
+      beats: beatResults,
+      covered_count: coveredCount,
+      total_count: beats.length,
+      coverage_ratio: Math.round(ratio * 10000) / 10000,
+      sufficient: ratio >= 0.5,
+    }
+  }
+
+  function anchorTitleById(anchorId) {
+    const anchor = referenceAnchors().find((item) => Number(item.anchor_id) === Number(anchorId))
+    return anchor ? anchor.title : null
   }
 
   function chapterPlans(novelId = state.activeNovelId) {
@@ -3787,24 +3874,6 @@ function referenceAnchors() {
       reason_codes: ['complete_exchange'],
     }] : []
     return { items, total: items.length, page: 1, size: Number(input?.size ?? 20), total_pages: 1, next_cursor: null, has_more: false, total_estimate: items.length }
-  }
-
-  function generateReferenceMaterializationBlueprintPreview(input = {}) {
-    const anchorIds = Array.isArray(input?.anchor_ids) ? input.anchor_ids.map(Number).filter(Number.isInteger) : []
-    if (anchorIds.length === 0) throw new Error('Active materials are required.')
-    const anchorId = anchorIds[0]
-    const run = getReferenceMaterializationStatus({ anchor_id: anchorId })
-    if (!run?.vector_index_healthy) throw new Error('Active vector index is required.')
-    const count = Math.max(1, Math.min(3, Number(input?.requested_count ?? 1)))
-    const candidates = Array.from({ length: count }, (_, index) => ({
-      blueprint_id: `mock-materialization-blueprint-${index + 1}`,
-      strategy: index === 0 ? '先确认水痕线索，再延迟揭示人物的真实动机。' : '将线索压力前置，用反应差异制造下一章冲突。',
-      beats: [
-        { beat_id: `mock-beat-${index}-1`, beat_index: 1, intent: '让主角发现线索与旧案的关联。', narrative_function: 'information_reveal', materials: [{ material_id: `mock-active-material-${anchorId}`, anchor_id: anchorId, generation_id: run.generation_id, material_type: 'action_reaction', text_preview: '她把杯底半圈水痕压进记忆里。', quality_score: 0.91, vector_score: 0.88, fit_explanation: '用克制反应保留判断空间。' }] },
-        { beat_id: `mock-beat-${index}-2`, beat_index: 2, intent: '在结尾抛出新的不确定性。', narrative_function: 'hook', materials: [{ material_id: `mock-active-material-${anchorId}`, anchor_id: anchorId, generation_id: run.generation_id, material_type: 'action_reaction', text_preview: '她没有急着回头。', quality_score: 0.86, vector_score: 0.83, fit_explanation: '以延迟动作建立未解压力。' }] },
-      ],
-    }))
-    return { session_id: `mock-materialization-preview-${anchorId}`, status: 'active', next_action: 'none', goal: String(input?.goal ?? ''), sources: anchorIds.map((id) => ({ anchor_id: id, generation_id: `mock-generation-${id}`, material_count: 12 })), candidates, stale_anchor_ids: [], created_at: now, updated_at: now }
   }
 
   function findExistingReferenceAnchorForInput(input) {
@@ -5879,34 +5948,6 @@ function referenceAnchors() {
     }
   }
 
-  function adaptReferenceMaterial(input = {}) {
-    const materialId = String(input?.material_id ?? '')
-    const material = state.referenceMaterials.find((item) => item.material_id === materialId)
-    if (!material) throw new Error(`Unknown reference material ${materialId}`)
-    const candidateText = `林岚把雨声和杯底半圈水痕重新放回眼前，只写下门缝里那一下停顿，没有替任何人提前下结论。`
-    const facts = Array.isArray(input?.scene_facts) ? input.scene_facts.map((item) => String(item)) : []
-    const shouldFailAudit = facts.some((item) => item.includes('mock_failed_audit'))
-    return {
-      candidate_id: `mock-adapt-${material.material_id}`,
-      material_id: material.material_id,
-      rewrite_level: String(input?.max_rewrite_level ?? 'L2'),
-      text: candidateText,
-      changed_slots: Array.isArray(input?.slot_values) ? input.slot_values : [],
-      non_slot_edits: [],
-      audit: {
-        audit_id: `mock-audit-${material.material_id}`,
-        status: shouldFailAudit ? 'failed' : 'passed',
-        rewrite_level: String(input?.max_rewrite_level ?? 'L2'),
-        provenance_errors: shouldFailAudit ? ['mock source-leak risk'] : [],
-        unsupported_fact_errors: [],
-        ai_prose_risks: [],
-        non_slot_edits: [],
-        required_fixes: shouldFailAudit ? ['mock_failed_audit requires revision before insertion'] : [],
-        audited_at: now,
-      },
-    }
-  }
-
   function boundedPreview(text, maxLength) {
     const normalized = String(text ?? '').trim().replace(/\s+/g, ' ')
     if (normalized.length <= maxLength) {
@@ -5989,243 +6030,6 @@ function referenceAnchors() {
         feedback_boost: 0.1,
       },
     }
-  }
-
-  function generateReferenceBlueprint(input = {}) {
-    const blueprint = makeReferenceBlueprint(state.nextReferenceBlueprintId++, {
-      chapter_number: input.chapter_number,
-      title: input.title || '10MB 材料绑定验收',
-      known_facts: input.known_facts ?? [],
-      forbidden_facts: input.forbidden_facts ?? [],
-      primary_anchor_id: input.anchor_ids?.[0] ?? options.referenceStress?.anchor.anchor_id ?? 0,
-      status: 'draft',
-      latest_review: null,
-    })
-    state.referenceBlueprints[String(blueprint.blueprint_id)] = blueprint
-    return blueprint
-  }
-
-  function reviewReferenceBlueprint(input = {}) {
-    const blueprint = cloneReferenceBlueprint(input.blueprint_id)
-    blueprint.status = 'reviewed'
-    blueprint.latest_review = makeReferenceReview(blueprint.blueprint_id, `review-${blueprint.blueprint_id}`)
-    blueprint.updated_at = now
-    state.referenceBlueprints[String(blueprint.blueprint_id)] = blueprint
-    return blueprint.latest_review
-  }
-
-  function approveReferenceBlueprint(input = {}) {
-    const blueprint = cloneReferenceBlueprint(input.blueprint_id)
-    blueprint.status = 'approved'
-    blueprint.updated_at = now
-    state.referenceBlueprints[String(blueprint.blueprint_id)] = blueprint
-    return blueprint
-  }
-
-  function bindReferenceBlueprintMaterials(input = {}) {
-    const blueprint = cloneReferenceBlueprint(input.blueprint_id)
-    blueprint.status = 'material_bound'
-    blueprint.updated_at = now
-    state.referenceBlueprints[String(blueprint.blueprint_id)] = blueprint
-    return {
-      blueprint_id: blueprint.blueprint_id,
-      links: [{
-        link_id: `stress-link-${blueprint.blueprint_id}-001`,
-        blueprint_id: blueprint.blueprint_id,
-        beat_id: blueprint.beats[0].beat_id,
-        material_id: 'stress-mat-0001',
-        intended_use: 'source-backed detail from the 10MB segmented reference source',
-        max_rewrite_level: 'L1',
-        selected: true,
-        score: 0.96,
-        score_components: {
-          lexical: 0.97,
-          function: 0.92,
-          prose_duty: 0.9,
-        },
-        fit_explanation: 'Uses generated material with stable source segment and hash provenance.',
-        created_at: now,
-      }],
-    }
-  }
-
-  function startReferenceOrchestrationRun(input = {}) {
-    const runId = `mock-orch-${String(state.nextReferenceOrchestrationRunId++).padStart(3, '0')}`
-    const chapterNumber = Number(input?.chapter_number ?? 1)
-    const run = {
-      run_id: runId,
-      novel_id: Number(input?.novel_id ?? state.activeNovelId),
-      chapter_number: chapterNumber,
-      status: 'waiting_for_user',
-      stage: 'source_confirmation',
-      chapter_goal: String(input?.chapter_goal ?? ''),
-      known_facts: Array.isArray(input?.known_facts) ? input.known_facts : [],
-      forbidden_facts: Array.isArray(input?.forbidden_facts) ? input.forbidden_facts : [],
-      anchor_ids: Array.isArray(input?.anchor_ids) ? input.anchor_ids : [],
-      corpus_search_policy: input?.corpus_search_policy ?? {
-        mode: 'story_context',
-        max_results_per_beat: 3,
-        license_statuses: ['user_provided'],
-        include_anchor_ids: [],
-        exclude_anchor_ids: [],
-      },
-      style_policy: input?.style_policy ?? null,
-      blueprint_id: 0,
-      review_id: '',
-      candidate_ids: [],
-      current_decision: {
-        decision_type: 'confirm_source_and_facts',
-        stop_reason: 'source_confirmation_required',
-        summary: '请确认本章来源和事实边界后继续。',
-        required_actions: ['检查推荐素材', '确认禁止事实没有被突破'],
-        approval_summary: {
-          chapter_function: '用共享语料支撑当前章节。',
-          pov: 'close',
-          fact_boundary_changes: [],
-          emotional_trajectory: 'restrained -> pressure',
-          material_use_plan: '按章节上下文检索共享素材，不要求手动选择 anchor。',
-          rewrite_budget: 'L0-L2',
-          high_risk_findings: [],
-        },
-        proposed_blueprint_revision: null,
-      },
-      last_stop_reason: 'source_confirmation_required',
-      error_message: '',
-      created_at: now,
-      updated_at: now,
-    }
-    state.referenceOrchestrationRuns = [run, ...state.referenceOrchestrationRuns]
-    return run
-  }
-
-  function resumeReferenceOrchestrationRun(input = {}) {
-    const run = referenceOrchestrationRun(input?.run_id)
-    if (!run) throw new Error(`Unknown reference orchestration run ${input?.run_id}`)
-    const decisionType = String(input?.decision_type ?? '')
-    if (run.current_decision?.decision_type !== decisionType) {
-      throw new Error(`Decision type does not match pending decision ${run.current_decision?.decision_type ?? ''}`)
-    }
-
-    let updated
-    if (decisionType === 'confirm_source_and_facts') {
-      updated = {
-        ...run,
-        status: 'waiting_for_user',
-        stage: 'blueprint_approval',
-        blueprint_id: run.blueprint_id || 701,
-        review_id: run.review_id || 'review-mock-001',
-        current_decision: {
-          decision_type: 'approve_blueprint',
-          stop_reason: 'blueprint_approval_required',
-          summary: '来源和事实边界已确认，请审批自动蓝图。',
-          required_actions: ['检查章节功能', '确认事实边界'],
-          approval_summary: {
-            chapter_function: '用共享语料支撑雨夜线索。',
-            pov: 'close',
-            fact_boundary_changes: ['known: 杯底半圈水痕', 'forbidden: 门外身份'],
-            emotional_trajectory: 'restrained -> pressure',
-            material_use_plan: '继续使用自动推荐素材，不要求手动绑定 anchor。',
-            rewrite_budget: 'L0-L2',
-            high_risk_findings: [],
-          },
-          proposed_blueprint_revision: null,
-        },
-        last_stop_reason: 'blueprint_approval_required',
-        updated_at: now,
-      }
-    } else if (decisionType === 'approve_blueprint') {
-      updated = {
-        ...run,
-        status: 'waiting_for_user',
-        stage: 'final_insertion',
-        candidate_ids: ['mock-candidate-001'],
-        current_decision: {
-          decision_type: 'approve_final_insertion',
-          stop_reason: 'final_insertion_required',
-          summary: '候选已通过审计，请在正文中显式插入。',
-          required_actions: ['预览候选', '选择插入方式'],
-          approval_summary: {
-            chapter_function: '保留受限视角并承接雨夜线索。',
-            pov: 'close',
-            fact_boundary_changes: [],
-            emotional_trajectory: 'pressure -> restraint',
-            material_use_plan: '候选已改写并通过素材来源审计。',
-            rewrite_budget: 'L0-L2',
-            high_risk_findings: [],
-          },
-          proposed_blueprint_revision: null,
-        },
-        last_stop_reason: 'final_insertion_required',
-        updated_at: now,
-      }
-    } else {
-      updated = {
-        ...run,
-        status: 'waiting_for_user',
-        updated_at: now,
-      }
-    }
-
-    state.referenceOrchestrationRuns = state.referenceOrchestrationRuns.map((item) =>
-      item.run_id === run.run_id ? updated : item)
-    return updated
-  }
-
-  function getReferenceDraftCandidates(input = {}) {
-    const blueprintId = Number(input?.blueprint_id ?? 701)
-    const candidateIds = Array.isArray(input?.candidate_ids) ? input.candidate_ids : []
-    return candidateIds.map((candidateId, index) => ({
-      candidate_id: String(candidateId),
-      blueprint_id: blueprintId,
-      beat_id: `beat-${index + 1}`,
-      material_id: 'material-global-rain',
-      rewrite_level: 'L2',
-      text: referenceCandidateText,
-      changed_slots: [
-        { slot_name: 'sensory_anchor', value: '杯底半圈水痕' },
-      ],
-      non_slot_edits: ['压缩直述，保留近距离视角。'],
-      audit_status: 'passed',
-      created_at: now,
-      style_attempts: [
-        {
-          style_profile_ids: [],
-          style_dimensions: ['sensory_ratio', 'inner_monologue_ratio'],
-          imitation_intensity: 'moderate',
-          min_style_fit: 0.8,
-          allowed_closeness: 'moderate',
-          required_evidence_types: ['sensory_anchor'],
-          forbidden_style_risks: ['source_leak'],
-          selected_material_style_fit: 0.91,
-          selected_material_low_confidence: false,
-          status: 'attempted',
-        },
-      ],
-    }))
-  }
-
-  function getReferenceAnchoredDraftAudits(input = {}) {
-    const blueprintId = Number(input?.blueprint_id ?? 701)
-    const candidateIds = Array.isArray(input?.candidate_ids) ? input.candidate_ids.map(String) : ['mock-candidate-001']
-    return [{
-      audit_id: 'draft-audit-mock-001',
-      blueprint_id: blueprintId,
-      status: 'passed',
-      rewrite_level: 'L2',
-      provenance_errors: [],
-      blueprint_errors: [],
-      unsupported_fact_errors: [],
-      pov_errors: [],
-      ai_prose_risks: [],
-      required_fixes: [],
-      audited_at: now,
-      candidate_ids: candidateIds,
-      readable_report: {
-        summary: `Draft audit passed for ${candidateIds.length} candidate(s) at rewrite level L2.`,
-        candidate_ids: candidateIds,
-        findings: [],
-      },
-    }]
   }
 
   function startReferenceCorpusFeatureAnalysis(input = {}) {
@@ -6650,312 +6454,12 @@ function listReferenceCorpusTechniqueSpecimens(input = {}) {
     return confidence
   }
 
-  function generateReferenceCorpusBlueprintCandidates(input = {}) {
-    const chapterContext = input?.chapter_context ?? {}
-    const novelId = Number(chapterContext.novel_id ?? 42)
-    const libraryIds = Array.isArray(input?.scope?.library_ids) ? input.scope.library_ids : []
-    const defaultProjectLibraryId = `project:${novelId}:default`
-    const effectiveLibraryIds = libraryIds.length > 0
-      ? libraryIds
-      : [defaultProjectLibraryId, 'global:workspace']
-    const feedback = input?.feedback ?? null
-    const feedbackApplied = hasCorpusBlueprintFeedback(feedback)
-    const problemTags = Array.isArray(feedback?.problem_tags)
-      ? feedback.problem_tags.map((tag) => String(tag))
-      : []
-    const sourceRepetitionFeedback = feedbackApplied && problemTags.includes('source_repetition')
-    const fallbackReasonCodes = sourceRepetitionFeedback
-      ? ['feedback_filters_no_matches', 'fallback_to_base_filters']
-      : []
-    const feedbackSummary = describeCorpusBlueprintFeedback(feedback, fallbackReasonCodes)
-    const count = Math.max(2, Math.min(5, Number(input?.requested_count ?? 2) || 2))
-    const primaryLibraryId = feedbackApplied && feedback?.avoid_library_ids?.includes(effectiveLibraryIds[0])
-      ? effectiveLibraryIds[1] ?? 'global:workspace'
-      : effectiveLibraryIds[0] ?? defaultProjectLibraryId
-    const secondaryLibraryId = feedbackApplied
-      ? 'project:42:contrast'
-      : effectiveLibraryIds[1] ?? 'global:workspace'
-    const primaryAnchorId = feedbackApplied && feedback?.avoid_anchor_ids?.includes(101) ? 104 : 101
-    const secondaryAnchorId = feedbackApplied ? 108 : 104
-    const candidateSeeds = [{
-      id: feedbackApplied ? 'mock-corpus-blueprint-alt-001' : 'mock-corpus-blueprint-001',
-      strategy: sourceRepetitionFeedback
-        ? 'source_repetition_diversity_m1'
-        : feedbackApplied
-        ? '避开已拒绝水痕节点，改用钟楼回声材料制造压力递进'
-        : '先用杯底水痕建立线索压力，再以受限视角延迟判断',
-      nodeIds: sourceRepetitionFeedback
-        ? ['mock-node-clock-001', 'mock-node-restart-001', 'mock-node-pause-002']
-        : feedbackApplied ? ['mock-node-clock-001', 'mock-node-pause-002'] : ['mock-node-rain-001', 'mock-node-pause-001'],
-      libraryId: primaryLibraryId,
-      anchorId: primaryAnchorId,
-      coverage: feedbackApplied ? 0.84 : 0.91,
-      sourceDistribution: sourceRepetitionFeedback
-        ? [{
-          library_id: primaryLibraryId,
-          anchor_id: primaryAnchorId,
-          node_count: 1,
-        }, {
-          library_id: secondaryLibraryId,
-          anchor_id: secondaryAnchorId,
-          node_count: 2,
-        }]
-        : null,
-      feedbackReason: sourceRepetitionFeedback
-        ? feedbackSummary
-        : feedbackApplied ? '已避开上一轮拒绝的蓝图、节点或来源。' : '',
-      gapReasons: sourceRepetitionFeedback
-        ? fallbackReasonCodes
-        : feedbackApplied ? ['水痕节点被反馈排除，改用相邻压力材料补位。'] : [],
-      gapPositions: sourceRepetitionFeedback
-        ? [{
-          beatIndex: 0,
-          coveredDimensions: ['emotion'],
-          missingDimensions: ['rhythm', 'narrative', 'technique'],
-          gapReasons: ['missing_rhythm_evidence', 'missing_narrative_evidence', 'missing_technique_coverage'],
-        }]
-        : [],
-    }, {
-      id: feedbackApplied ? 'mock-corpus-blueprint-alt-002' : 'mock-corpus-blueprint-002',
-      strategy: feedbackApplied
-        ? '改走外部环境压迫路线，降低同一语料库节点占比'
-        : '从门缝停顿切入，补充环境细节后回扣水痕线索',
-      nodeIds: feedbackApplied ? ['mock-node-restart-001', 'mock-node-slot-001', 'mock-node-recovery-001'] : ['mock-node-door-001', 'mock-node-rain-002'],
-      libraryId: secondaryLibraryId,
-      anchorId: secondaryAnchorId,
-      coverage: feedbackApplied ? 0.79 : 0.86,
-      feedbackReason: feedbackApplied ? '根据 avoid/rejected 反馈切换来源分布。' : '',
-      gapReasons: feedbackApplied ? ['可用来源变窄，覆盖率略低。'] : ['缺少更强的角色内心节点。'],
-      gapPositions: feedbackApplied
-        ? [{
-          beatIndex: 1,
-          coveredDimensions: ['rhythm'],
-          missingDimensions: ['emotion', 'technique'],
-          gapReasons: ['missing_emotion_evidence', 'missing_technique_coverage'],
-        }]
-        : [],
-    }]
-    const candidates = Array.from({ length: count }, (_, index) => {
-      const seed = candidateSeeds[index] ?? {
-        ...candidateSeeds[index % candidateSeeds.length],
-        id: `mock-corpus-blueprint-extra-${index + 1}`,
-        coverage: Math.max(0.6, candidateSeeds[index % candidateSeeds.length].coverage - (index * 0.03)),
-      }
-const blueprint = makeCorpusInsertionBlueprint(seed.id, seed.strategy, seed.nodeIds)
- const closest = candidateSeeds[(index + 1) % candidateSeeds.length]
-return {
-        blueprint,
-        source_distribution: seed.sourceDistribution ?? [{
-          library_id: seed.libraryId,
-          anchor_id: seed.anchorId,
-          node_count: seed.nodeIds.length,
-        }],
-        coverage_score: seed.coverage,
-        gap_reasons: seed.gapReasons,
-        feedback_reason: seed.feedbackReason,
-gap_positions: makeCorpusBlueprintGapPositions(blueprint, seed.gapPositions ?? []),
- difference_audit: {
- passed: true,
- node_set_hash: `mock-node-set-${index + 1}`,
- minimum_node_difference_ratio: 0.34,
- closest_blueprint_id: closest?.id ?? null,
- closest_node_difference_ratio: index === 0 ? 0.67 : 0.5,
- source_distribution_differs: true,
- strategy_differs: true,
- diagnostics: [],
- },
-      }
-    })
-
-    return {
-      query_context: {
-        scene_type: 'rain_threshold',
-        emotion_target: 'restrained_pressure',
-        pacing_target: feedbackApplied ? 'varied' : 'tight',
-        narrative_position: 'chapter_insert',
-        commercial_mechanic: 'clue_hook',
-        character_states: ['current_chapter_focus'],
-        required_narrative_functions: ['clue_pressure'],
-        chapter_context: chapterContext,
-        scope: input?.scope ?? {
-          library_ids: libraryIds,
-          reuse_policies: ['verbatim_ok', 'adapted_only'],
-          include_anchor_ids: [],
-          exclude_anchor_ids: [],
-          session_id: `project:${novelId}:default`,
-        },
-      },
-      candidates,
-feedback_applied: feedbackApplied,
-feedback_summary: feedbackSummary,
- iteration: {
- iteration: feedbackApplied ? 2 : 1,
- state: feedbackApplied ? 'feedback_applied' : 'awaiting_selection',
- feedback_applied: feedbackApplied,
- candidate_count: candidates.length,
- distinct_candidate_count: candidates.length,
- rejected_blueprint_ids: feedback?.rejected_blueprint_ids ?? [],
- can_iterate: candidates.length > 0,
- can_select: candidates.length > 0,
- },
-    }
-  }
-
   function corpusBlueprintSessionKey(novelId, chapterNumber, sessionId) {
     return `${novelId}:${chapterNumber}:${sessionId}`
   }
 
   function copyCorpusBlueprintSession(session) {
     return session ? JSON.parse(JSON.stringify(session)) : null
-  }
-
-  function getReferenceCorpusBlueprintSession(input = {}) {
-    const novelId = Number(input?.novel_id ?? 0)
-    const chapterNumber = Number(input?.chapter_number ?? 0)
-    const sessionId = String(input?.session_id ?? '').trim()
-    if (!Number.isInteger(novelId) || novelId <= 0 || !Number.isInteger(chapterNumber) || chapterNumber <= 0 || !sessionId) {
-      throw new Error('novel_id, chapter_number, and session_id are required.')
-    }
-
-    return copyCorpusBlueprintSession(state.referenceCorpusBlueprintSessions[
-      corpusBlueprintSessionKey(novelId, chapterNumber, sessionId)
-    ])
-  }
-
-  function advanceReferenceCorpusBlueprintSession(input = {}) {
-    const sessionId = String(input?.session_id ?? '').trim()
-    const requestId = String(input?.request_id ?? '').trim()
-    const action = String(input?.action ?? '').trim()
-    const generationInput = input?.generation_input && typeof input.generation_input === 'object'
-      ? input.generation_input
-      : null
-    if (!sessionId || !requestId || !['generate', 'select', 'revise', 'accept'].includes(action)) {
-      throw new Error('session_id, request_id, and action are required.')
-    }
-
-    const chapterContext = generationInput?.chapter_context ?? {}
-    let novelId = Number(chapterContext.novel_id ?? 0)
-    let chapterNumber = Number(chapterContext.chapter_number ?? 0)
-    let key = ''
-    let current = null
-    if (generationInput) {
-      if (!Number.isInteger(novelId) || novelId <= 0 || !Number.isInteger(chapterNumber) || chapterNumber <= 0) {
-        throw new Error('generation_input must include a valid chapter context.')
-      }
-      key = corpusBlueprintSessionKey(novelId, chapterNumber, sessionId)
-      current = state.referenceCorpusBlueprintSessions[key] ?? null
-    } else {
-      const entries = Object.entries(state.referenceCorpusBlueprintSessions)
-      const found = entries.find(([, session]) => session.session_id === sessionId)
-      if (!found) throw new Error('Blueprint session does not exist.')
-      key = found[0]
-      current = found[1]
-      novelId = current.novel_id
-      chapterNumber = current.chapter_number
-    }
-
-    if (current?.status === 'accepted') {
-      throw new Error('Accepted blueprint sessions are terminal.')
-    }
-
-    let next
-    if (action === 'generate') {
-      if (current) throw new Error('Use revise for an existing blueprint session.')
-      if (!generationInput) throw new Error('generation_input is required for generate.')
-      const candidates = generateReferenceCorpusBlueprintCandidates({ ...generationInput, feedback: null })
-      next = {
-        session_id: sessionId,
-        novel_id: novelId,
-        chapter_number: chapterNumber,
-        natural_language_goal: String(generationInput.natural_language_goal ?? ''),
-        status: 'awaiting_feedback',
-        iteration: 1,
-        selected_blueprint_id: '',
-        accepted_blueprint_id: '',
-        checklist: [],
-        strategy_coverage: candidates.candidates.map((candidate) => candidate.blueprint.strategy),
-        candidates: {
-          ...candidates,
-          iteration: {
-            ...(candidates.iteration ?? {}),
-            iteration: 1,
-            state: 'awaiting_feedback',
-            feedback_applied: false,
-            rejected_blueprint_ids: [],
-          },
-        },
-        updated_at: new Date().toISOString(),
-      }
-    } else if (action === 'select') {
-      const selectedBlueprintId = String(input?.selected_blueprint_id ?? '').trim()
-      const selected = current?.candidates?.candidates?.find((candidate) => candidate.blueprint?.blueprint_id === selectedBlueprintId)
-      if (!selected) throw new Error('Selected blueprint is not part of the current session iteration.')
-      next = {
-        ...current,
-        selected_blueprint_id: selectedBlueprintId,
-        updated_at: new Date().toISOString(),
-      }
-    } else if (action === 'revise') {
-      if (!generationInput) throw new Error('generation_input is required for revise.')
-      const selectedBlueprintId = String(input?.selected_blueprint_id ?? '').trim()
-      const selected = current?.candidates?.candidates?.find((candidate) => candidate.blueprint?.blueprint_id === selectedBlueprintId)
-      if (!selected) throw new Error('Selected blueprint is not part of the current session iteration.')
-      const checklist = Array.isArray(input?.checklist) ? input.checklist : []
-      const revisedDimensions = checklist
-        .filter((item) => item?.decision === 'revise')
-        .map((item) => String(item.dimension ?? ''))
-        .filter(Boolean)
-      if (revisedDimensions.length === 0) throw new Error('Revision requires at least one revise decision.')
-      const feedback = {
-        rejected_blueprint_ids: [selectedBlueprintId],
-        rejected_node_ids: selected.blueprint?.beats?.flatMap((beat) => beat.node_ids ?? []) ?? [],
-        avoid_library_ids: selected.source_distribution?.map((source) => source.library_id) ?? [],
-        avoid_anchor_ids: selected.source_distribution?.map((source) => source.anchor_id) ?? [],
-        problem_tags: [...new Set([
-          ...checklist.flatMap((item) => item?.decision === 'revise' ? item.problem_tags ?? [] : []),
-          ...revisedDimensions.map((dimension) => `checklist:${dimension}`),
-        ])],
-        notes: checklist.map((item) => item?.notes).filter(Boolean).join(' | '),
-      }
-      const candidates = generateReferenceCorpusBlueprintCandidates({ ...generationInput, feedback })
-      next = {
-        ...current,
-        natural_language_goal: String(generationInput.natural_language_goal ?? current.natural_language_goal ?? ''),
-        iteration: Number(current.iteration ?? 1) + 1,
-        selected_blueprint_id: '',
-        checklist,
-        strategy_coverage: candidates.candidates.map((candidate) => candidate.blueprint.strategy),
-        candidates: {
-          ...candidates,
-          iteration: {
-            ...(candidates.iteration ?? {}),
-            iteration: Number(current.iteration ?? 1) + 1,
-            state: 'awaiting_feedback',
-            feedback_applied: true,
-            rejected_blueprint_ids: [selectedBlueprintId],
-          },
-        },
-        updated_at: new Date().toISOString(),
-      }
-    } else {
-      const selectedBlueprintId = String(input?.selected_blueprint_id ?? '').trim()
-      const selected = current?.candidates?.candidates?.find((candidate) => candidate.blueprint?.blueprint_id === selectedBlueprintId)
-      const checklist = Array.isArray(input?.checklist) ? input.checklist : []
-      if (!selected || checklist.length === 0 || checklist.some((item) => item?.decision !== 'accepted')) {
-        throw new Error('Accept requires the selected blueprint and an accepted checklist.')
-      }
-      next = {
-        ...current,
-        status: 'accepted',
-        selected_blueprint_id: selectedBlueprintId,
-        accepted_blueprint_id: selectedBlueprintId,
-        checklist,
-        updated_at: new Date().toISOString(),
-      }
-    }
-
-    state.referenceCorpusBlueprintSessions[key] = next
-    return copyCorpusBlueprintSession(next)
   }
 
   function hasCorpusBlueprintFeedback(feedback) {
@@ -6994,593 +6498,6 @@ feedback_summary: feedbackSummary,
     return parts.length > 0 ? parts.join(';') : 'feedback_present'
   }
 
-  function makeCorpusInsertionBlueprint(blueprintId, strategy, nodeIds) {
-    return {
-      blueprint_id: blueprintId,
-      query_context_hash: `mock-query-context-hash-${blueprintId}`,
-      strategy,
-      beats: nodeIds.map((nodeId, index) => ({
-        beat_id: `${blueprintId}-beat-${index + 1}`,
-        beat_index: index,
-        role_in_beat: index === 0 ? 'establish_clue_pressure' : 'deepen_restrained_reaction',
-        narrative_function: index === 0 ? 'clue_pressure' : 'emotional_pressure',
-        node_ids: [nodeId],
-      })),
-    }
-  }
-
-  function makeCorpusBlueprintGapPositions(blueprint, seeds) {
-    return seeds
-      .map((seed) => {
-        const beatIndex = Number(seed.beatIndex ?? 0)
-        const beat = blueprint.beats?.[beatIndex]
-        if (!beat) return null
-        return {
-          beat_id: beat.beat_id,
-          beat_index: beat.beat_index,
-          role_in_beat: beat.role_in_beat,
-          narrative_function: beat.narrative_function,
-          node_ids: beat.node_ids,
-          covered_dimensions: seed.coveredDimensions ?? [],
-          missing_dimensions: seed.missingDimensions ?? [],
-          gap_reasons: seed.gapReasons ?? [],
-        }
-      })
-      .filter(Boolean)
-  }
-
-  function generateReferenceCorpusInsertionDraft(input = {}) {
-    const chapterContext = input?.chapter_context ?? {}
-    const currentDraft = String(chapterContext.current_draft_text ?? '')
-    const requestedOffset = Number(chapterContext.insertion_offset ?? currentDraft.length)
-    const insertionOffset = Number.isFinite(requestedOffset)
-      ? Math.max(0, Math.min(currentDraft.length, requestedOffset))
-      : currentDraft.length
-    const prefix = currentDraft.length === 0
-      ? ''
-      : currentDraft.slice(0, insertionOffset).endsWith('\n') ? '\n' : '\n\n'
-    const assembledText = '林岚把杯底半圈水痕压进记忆里，没有急着回头。'
-    const chapterTextAfterInsertion = `${currentDraft.slice(0, insertionOffset)}${prefix}${assembledText}${currentDraft.slice(insertionOffset)}`
-    const libraryIds = Array.isArray(input?.scope?.library_ids) ? input.scope.library_ids : []
-    const novelId = Number(chapterContext.novel_id ?? 42)
-    const defaultProjectLibraryId = `project:${novelId}:default`
-    const effectiveLibraryIds = libraryIds.length > 0
-      ? libraryIds
-      : [defaultProjectLibraryId, 'global:workspace']
-    const selectedBlueprint = input?.selected_blueprint && typeof input.selected_blueprint === 'object'
-      ? input.selected_blueprint
-      : null
-
-    return {
-      query_context: {
-        scene_type: 'rain_threshold',
-        emotion_target: 'restrained_pressure',
-        pacing_target: 'tight',
-        narrative_position: 'chapter_insert',
-        commercial_mechanic: 'clue_hook',
-        character_states: ['current_chapter_focus'],
-        required_narrative_functions: ['clue_pressure'],
-        chapter_context: chapterContext,
-        scope: input?.scope ?? {
-          library_ids: libraryIds,
-          reuse_policies: ['verbatim_ok', 'adapted_only'],
-          include_anchor_ids: [],
-          exclude_anchor_ids: [],
-          session_id: `project:${novelId}:default`,
-        },
-      },
-      blueprint: selectedBlueprint ?? {
-        blueprint_id: 'mock-corpus-blueprint-001',
-        query_context_hash: 'mock-query-context-hash-001',
-        strategy: '自动检索共享语料并迁移为当前章节插入片段',
-        beats: [{
-          beat_id: 'mock-corpus-beat-001',
-          beat_index: 0,
-          role_in_beat: 'insert_clue_pressure',
-          narrative_function: 'clue_pressure',
-          node_ids: ['mock-node-rain-001'],
-        }],
-      },
-      pieces: [{
-        piece_id: 'mock-corpus-piece-001',
-        beat_id: 'mock-corpus-beat-001',
-        candidate_id: 'mock-corpus-candidate-001',
-        node_id: 'mock-node-rain-001',
-        anchor_id: 101,
-        library_id: effectiveLibraryIds[0] ?? 'global:workspace',
-        text_hash: 'hash-mock-node-rain-001',
-        reuse_policy: 'adapted_only',
-        license_state: 'authorized',
-        output_text: assembledText,
-        preserved_text_hash: 'hash-preserved-mock-corpus-001',
-        preserved_hash_matches: true,
-        preserved_spans: [{
-          span_id: 'mock-preserved-span-001',
-          source_start: 1,
-          source_end: 10,
-          output_start: 2,
-          output_end: 11,
-          source_text_hash: 'hash-preserved-span-mock-corpus-001',
-          output_text_hash: 'hash-preserved-span-mock-corpus-001',
-          matches: true,
-        }],
-        locked_spans: [],
-        slot_replacements: [{
-          slot_name: 'character',
-          source_value: '她',
-          replacement_value: '林岚',
-          source_start: 0,
-          source_end: 1,
-          output_start: 0,
-          output_end: 2,
-        }],
-      }],
-      slot_replacements: [{
-        slot_name: 'character',
-        source_value: '她',
-        replacement_value: '林岚',
-        source_start: 0,
-        source_end: 1,
-        output_start: 0,
-        output_end: 2,
-      }],
-      transitions: [],
-      assembled_text: assembledText,
-      chapter_text_after_insertion: chapterTextAfterInsertion,
-      ready_for_insertion: true,
-      gate: {
-        passed: true,
-        status: 'passed',
-        errors: [],
-        pieces: [{
-          piece_id: 'mock-corpus-piece-001',
-          node_id: 'mock-node-rain-001',
-          should_block: false,
-          four_gram_containment_ratio: 0.08,
-          longest_common_substring_ratio: 0.11,
-          violations: [],
-        }],
-      },
-      audit: {
-        passed: true,
-        status: 'passed',
-        errors: [],
-        pieces: [{
-          piece_id: 'mock-corpus-piece-001',
-          node_id: 'mock-node-rain-001',
-          passed: true,
-          preserved_span_count: 1,
-          mismatched_span_count: 0,
-          violations: [],
-        }],
-        transitions: [],
-      },
-    }
-  }
-
-  function generateReferenceCorpusInsertionDraftCandidates(input = {}) {
-    const selectedBlueprint = input?.selected_blueprint && typeof input.selected_blueprint === 'object'
-      ? input.selected_blueprint
-      : makeCorpusInsertionBlueprint(
-        'mock-corpus-blueprint-001',
-        '自动检索共享语料并迁移为当前章节插入片段',
-        ['mock-node-rain-001'])
-    const requestedSlotVariants = Array.isArray(input?.slot_value_variants)
-      ? input.slot_value_variants.filter((variant) => variant && typeof variant === 'object')
-      : []
-    if (requestedSlotVariants.length > 0) {
-      return buildMockCorpusSlotValueDraftCandidates(input, selectedBlueprint, requestedSlotVariants)
-    }
-
-    const count = Math.max(2, Math.min(4, Number(input?.requested_count ?? 2) || 2))
-    const firstBeat = selectedBlueprint.beats?.[0] ?? {
-      beat_id: 'mock-corpus-beat-001',
-      node_ids: ['mock-node-rain-001'],
-    }
-    const secondBeat = selectedBlueprint.beats?.[1] ?? firstBeat
-    const variants = [{
-      candidate_id: 'mock-corpus-draft-candidate-001',
-      strategy: 'source_variant_1',
-      explanation: '保留选中蓝图首选节点，但审计发现保留片段不一致，必须阻断。',
-      text: '林岚把杯底半圈水痕压进记忆里，没有急着回头。',
-      piece_id: 'mock-corpus-piece-001',
-      beat_id: firstBeat.beat_id,
-      node_id: firstBeat.node_ids?.[0] ?? 'mock-node-rain-001',
-      auditBlocked: true,
-    }, {
-      candidate_id: 'mock-corpus-draft-candidate-002',
-      strategy: 'transition_repair',
-      explanation: '转场分析要求换用选中蓝图同一节拍内的备选语料，重组后重新通过审计。',
-      text: '林岚把门外的雨声留在身后，指尖仍压着那枚钥匙。',
-      transitionText: '门外的雨声把沉默往前推了一寸。',
-      secondText: '她没有立刻开口，只让视线落回那道水痕。',
-      piece_id: 'mock-corpus-piece-002',
-      second_piece_id: 'mock-corpus-piece-002b',
-      beat_id: secondBeat.beat_id,
-      node_id: secondBeat.node_ids?.[0] ?? firstBeat.node_ids?.[1] ?? 'mock-node-door-001',
-      second_node_id: firstBeat.node_ids?.[1] ?? 'mock-node-pause-001',
-    }, {
-      candidate_id: 'mock-corpus-draft-candidate-003',
-      strategy: 'source_variant_3',
-      explanation: '转场分析要求换源，但替代节点不在选中蓝图节拍内，必须回到蓝图重组。',
-      text: '林岚没有回头，只把钥匙扣在掌心。',
-      secondText: '雨声贴着门缝往里挤。',
-      piece_id: 'mock-corpus-piece-003',
-      second_piece_id: 'mock-corpus-piece-003b',
-      beat_id: firstBeat.beat_id,
-      node_id: firstBeat.node_ids?.[1] ?? firstBeat.node_ids?.[0] ?? 'mock-node-pause-001',
-      second_node_id: secondBeat.node_ids?.[0] ?? 'mock-node-door-001',
-      replacePieceBlocked: true,
-      replacement_node_id: 'mock-node-outside-selected-blueprint',
-    }]
-    const drafts = variants.slice(0, count).map((variant) => {
-      const draft = buildMockCorpusInsertionDraft(input, selectedBlueprint, variant)
-      const nextAction = buildMockCorpusDraftCandidateNextAction(selectedBlueprint, variant)
-      return {
-        candidate_id: variant.candidate_id,
-        strategy: variant.strategy,
-        explanation: variant.explanation,
-        draft,
-        ...(nextAction ? { next_action: nextAction } : {}),
-      }
-    })
-
-return {
-query_context: drafts[0]?.draft?.query_context ?? generateReferenceCorpusInsertionDraft(input).query_context,
-selected_blueprint: selectedBlueprint,
-candidates: drafts,
- candidate_set_audit: buildMockCorpusCandidateSetAudit(drafts),
-}
-
-function listReferenceCorpusAnalysisJobs(input = {}) {
-const pageSize = Math.max(1, Number(input?.page_request?.page_size ?? 20))
- const novelId = Number(input?.page_request?.filters?.novel_id ?? 0)
- const matching = state.referenceCorpusAnalysisJobs.filter((job) => !novelId || job.novel_id === novelId)
- const items = matching.slice(0, pageSize)
- return { items, total: matching.length, page: 1, size: pageSize, total_pages: 1, next_cursor: null, has_more: false, total_estimate: matching.length }
-}
-
- function allowedReferenceCorpusJobActions(status) {
- if (status === 'running' || status === 'queued') return ['pause', 'cancel', 'reprioritize']
- if (status === 'paused' || status === 'retry_wait') return ['resume', 'cancel', 'reprioritize']
- if (status === 'budget_exhausted') return ['resume', 'cancel']
- return []
- }
-
- function updateReferenceCorpusAnalysisJob(input = {}, status) {
- const job = state.referenceCorpusAnalysisJobs.find((item) => item.job_id === input?.job_id)
- if (!job) throw new Error('Reference corpus analysis job was not found.')
- if (Number(input?.expected_version) !== job.version) throw new Error('Reference corpus analysis job version conflict.')
- Object.assign(job, { status, version: job.version + 1, updated_at: now, allowed_actions: allowedReferenceCorpusJobActions(status) })
- return { ...job }
- }
-
- function reprioritizeReferenceCorpusAnalysisJob(input = {}) {
- const job = updateReferenceCorpusAnalysisJob(input, state.referenceCorpusAnalysisJobs.find((item) => item.job_id === input?.job_id)?.status)
- Object.assign(job, { priority_class: input?.priority_class, priority_value: Number(input?.priority_value ?? 0) })
- Object.assign(state.referenceCorpusAnalysisJobs.find((item) => item.job_id === job.job_id), job)
- return job
- }
-  }
-
-  function buildMockCorpusSlotValueDraftCandidates(input, selectedBlueprint, requestedSlotVariants) {
-    const count = Math.max(1, Math.min(
-      requestedSlotVariants.length,
-      Number(input?.requested_count ?? requestedSlotVariants.length) || requestedSlotVariants.length))
-    const firstBeat = selectedBlueprint.beats?.[0] ?? {
-      beat_id: 'mock-corpus-beat-001',
-      node_ids: ['mock-node-rain-001'],
-    }
-    const nodeId = firstBeat.node_ids?.[0] ?? 'mock-node-rain-001'
-    const drafts = requestedSlotVariants.slice(0, count).map((slotVariant, index) => {
-      const suffix = index + 1
-      const slotValues = {
-        ...(input?.slot_values && typeof input.slot_values === 'object' && !Array.isArray(input.slot_values)
-          ? input.slot_values
-          : {}),
-        ...(slotVariant.slot_values && typeof slotVariant.slot_values === 'object' && !Array.isArray(slotVariant.slot_values)
-          ? slotVariant.slot_values
-          : {}),
-      }
-      const transferred = buildMockCorpusTransferredSlotSentence(slotValues)
-      const variant = {
-        candidate_id: `mock-corpus-slot-draft-candidate-${suffix}`,
-        strategy: `slot_variant_${suffix}`,
-        explanation: `复用同一选中蓝图和同一语料节点，仅按槽位映射生成正文候选：${String(slotVariant.label ?? slotVariant.variant_id ?? suffix)}`,
-        text: transferred.text,
-        piece_id: `mock-corpus-slot-piece-${suffix}`,
-        beat_id: firstBeat.beat_id,
-        node_id: nodeId,
-        slot_replacements: transferred.slotReplacements,
-      }
-      const draft = buildMockCorpusInsertionDraft(
-        { ...input, slot_values: slotValues },
-        selectedBlueprint,
-        variant)
-      return {
-        candidate_id: variant.candidate_id,
-        strategy: variant.strategy,
-        explanation: variant.explanation,
-        draft,
-      }
-    })
-
-return {
-query_context: drafts[0]?.draft?.query_context ?? generateReferenceCorpusInsertionDraft(input).query_context,
-selected_blueprint: selectedBlueprint,
-candidates: drafts,
- candidate_set_audit: buildMockCorpusCandidateSetAudit(drafts),
-}
-}
-
- function buildMockCorpusCandidateSetAudit(drafts) {
- const ready = drafts.filter((candidate) => candidate.draft?.ready_for_insertion)
- return {
- passed: ready.length > 0,
- candidate_count: drafts.length,
- ready_candidate_count: ready.length,
- distinct_text_count: new Set(drafts.map((candidate) => candidate.draft?.assembled_text ?? '')).size,
- differences: drafts.map((candidate, index) => ({
- candidate_id: candidate.candidate_id,
- baseline_candidate_id: ready[0]?.candidate_id ?? drafts[0]?.candidate_id ?? '',
- same_blueprint_node_set: true,
- same_piece_outputs: index === 0,
- slot_difference_count: candidate.draft?.slot_replacements?.length ?? 0,
- transition_difference_count: candidate.draft?.transitions?.length ?? 0,
- only_allowed_differences: candidate.draft?.audit?.passed === true,
- duplicate_text: false,
- diagnostics: [],
- })),
- errors: [],
- }
- }
-
-  function buildMockCorpusTransferredSlotSentence(slotValues) {
-    const sourceText = '她在旧市集门口没有立刻开口，只叫了一声师兄，把钥匙扣在掌心，《旧市集门口师兄钥匙案》没有改。'
-    const character = readMockSlotValue(slotValues, ['character:她', '角色:她', '她', 'character'], '林岚')
-    const place = readMockSlotValue(slotValues, ['place:旧市集门口', '地点:旧市集门口', '旧市集门口', 'place'], '雨廊门口')
-    const honorific = readMockSlotValue(slotValues, ['honorific:师兄', '称谓:师兄', '师兄', 'honorific'], '师兄')
-    const plotObject = readMockSlotValue(slotValues, ['plot_object:钥匙', '道具:钥匙', '钥匙', 'plot_object'], '钥匙')
-    const outputText = `${character}在${place}没有立刻开口，只叫了一声${honorific}，把${plotObject}扣在掌心，《旧市集门口师兄钥匙案》没有改。`
-    const slotReplacements = [
-      makeMockSlotReplacement('character', '她', character, sourceText, outputText),
-      makeMockSlotReplacement('place', '旧市集门口', place, sourceText, outputText),
-      makeMockSlotReplacement('honorific', '师兄', honorific, sourceText, outputText),
-      makeMockSlotReplacement('plot_object', '钥匙', plotObject, sourceText, outputText),
-    ].filter(Boolean)
-    return { text: outputText, slotReplacements }
-  }
-
-  function readMockSlotValue(slotValues, keys, fallback) {
-    for (const key of keys) {
-      const value = slotValues?.[key]
-      if (typeof value === 'string' && value.trim().length > 0) {
-        return value.trim()
-      }
-    }
-
-    return fallback
-  }
-
-  function makeMockSlotReplacement(slotName, sourceValue, replacementValue, sourceText, outputText) {
-    const sourceStart = sourceText.indexOf(sourceValue)
-    const outputStart = outputText.indexOf(replacementValue)
-    if (sourceStart < 0 || outputStart < 0) return null
-    return {
-      slot_name: slotName,
-      source_value: sourceValue,
-      replacement_value: replacementValue,
-      source_start: sourceStart,
-      source_end: sourceStart + sourceValue.length,
-      output_start: outputStart,
-      output_end: outputStart + replacementValue.length,
-    }
-  }
-
-  function buildMockCorpusDraftCandidateNextAction(selectedBlueprint, variant) {
-    if (variant.replacePieceBlocked !== true) return null
-
-    const transitionId = `mock-transition-${variant.candidate_id}`
-    const rejectedNodeId = String(variant.node_id ?? '')
-    const replacementNodeId = String(variant.replacement_node_id ?? '')
-
-    return {
-      action: 'regenerate_blueprint',
-      reason_code: 'transition_replacement_outside_selected_blueprint',
-      message: '替代节点不在当前选中蓝图节拍内，请回到共享语料库重新组合蓝图。',
-      transition_id: transitionId,
-      rejected_piece_id: variant.piece_id,
-      rejected_node_id: rejectedNodeId,
-      replacement_node_id: replacementNodeId,
-      feedback: {
-        rejected_blueprint_ids: [selectedBlueprint.blueprint_id],
-        rejected_node_ids: rejectedNodeId ? [rejectedNodeId] : [],
-        avoid_library_ids: [],
-        avoid_anchor_ids: [],
-        problem_tags: [
-          'transition_replacement_required',
-          'transition_replacement_outside_selected_blueprint',
-        ],
-        notes: `正文候选 ${variant.candidate_id} 的转场要求替换为 ${replacementNodeId || 'unknown'}，但该节点不在选中蓝图节拍内。请重新检索可闭合的蓝图。`,
-      },
-    }
-  }
-
-  function buildMockCorpusInsertionDraft(input, selectedBlueprint, variant) {
-    const base = generateReferenceCorpusInsertionDraft({
-      ...input,
-      selected_blueprint: selectedBlueprint,
-    })
-    const auditBlocked = variant.auditBlocked === true
-    const replacementBlocked = variant.replacePieceBlocked === true
-    const transitionBlocked = variant.transitionBlocked === true || replacementBlocked
-    const hasTransitionText = typeof variant.transitionText === 'string' && variant.transitionText.length > 0
-    const hasTransition = hasTransitionText || replacementBlocked
-    const assembledText = hasTransitionText
-      ? `${variant.text}\n${variant.transitionText}\n${variant.secondText}`
-      : replacementBlocked
-        ? `${variant.text}\n${variant.secondText}`
-      : variant.text
-    const chapterTextAfterInsertion = buildMockCorpusChapterTextAfterInsertion(
-      input?.chapter_context ?? {},
-      assembledText)
-    const blockedViolation = {
-      violation_id: `mock-draft-audit-violation-${variant.piece_id}`,
-      code: 'preserved_text_hash_mismatch',
-      severity: 'error',
-      piece_id: variant.piece_id,
-      node_id: variant.node_id,
-      span_id: `mock-preserved-span-${variant.piece_id}`,
-      message: '保留片段 hash 与输出不一致，不能插入。',
-      transition_id: null,
-    }
-    const blockedAuditErrors = [`preserved_text_hash_mismatch:${variant.node_id}:${blockedViolation.span_id}`]
-    const transitionId = `mock-transition-${variant.candidate_id}`
-    const transitionText = replacementBlocked ? '' : variant.transitionText
-    const transitionOutputStart = replacementBlocked ? variant.text.length : variant.text.length + 1
-    const transition = hasTransition
-      ? {
-          transition_id: transitionId,
-          gap_id: `mock-transition-gap-${variant.candidate_id}`,
-          after_piece_id: variant.piece_id,
-          before_piece_id: variant.second_piece_id,
-          decision: replacementBlocked ? 'replace_piece' : 'insert_transition',
-          strategy: replacementBlocked ? 'replace_piece' : 'bridge_sentence',
-          text: transitionText,
-          text_hash: `hash-${transitionId}`,
-          output_start: transitionOutputStart,
-          output_end: transitionOutputStart + transitionText.length,
-          approved: !transitionBlocked,
-          reason: replacementBlocked
-            ? 'mock transition requested a source replacement outside selected blueprint'
-            : transitionBlocked ? 'mock transition rejected by audit' : 'mock bridge transition between selected blueprint pieces',
-          replacement_piece_id: replacementBlocked ? variant.piece_id : null,
-          replacement_node_id: replacementBlocked ? variant.replacement_node_id : null,
-        }
-      : null
-    const transitionViolation = transitionBlocked && transition
-      ? {
-          violation_id: `mock-draft-audit-violation-${transition.transition_id}`,
-          code: replacementBlocked ? 'transition_piece_replacement_required' : 'transition_not_approved',
-          severity: 'error',
-          piece_id: variant.piece_id,
-          node_id: variant.node_id,
-          span_id: null,
-          message: replacementBlocked
-            ? '替代节点不在选中蓝图节拍内，需要回到蓝图重组。'
-            : '过渡句未通过 transition resolver 审批，不能插入。',
-          transition_id: transition.transition_id,
-        }
-      : null
-    const transitionAuditErrors = transitionViolation
-      ? [`${transitionViolation.code}:${variant.node_id}:${transitionId}`]
-      : []
-    const secondPiece = hasTransition
-      ? {
-          ...base.pieces[0],
-          piece_id: variant.second_piece_id,
-          beat_id: variant.beat_id,
-          candidate_id: variant.candidate_id,
-          node_id: variant.second_node_id,
-          output_text: variant.secondText,
-          preserved_hash_matches: true,
-          preserved_spans: [{
-            span_id: `mock-preserved-span-${variant.second_piece_id}`,
-            source_start: 0,
-            source_end: variant.secondText.length,
-            output_start: 0,
-            output_end: variant.secondText.length,
-            source_text_hash: `hash-preserved-span-${variant.second_piece_id}`,
-            output_text_hash: `hash-preserved-span-${variant.second_piece_id}`,
-            matches: true,
-          }],
-          locked_spans: [],
-          slot_replacements: [],
-        }
-      : null
-    const firstAuditPiece = {
-      ...base.audit.pieces[0],
-      piece_id: variant.piece_id,
-      node_id: variant.node_id,
-      passed: !auditBlocked,
-      mismatched_span_count: auditBlocked ? 1 : 0,
-      violations: auditBlocked ? [blockedViolation] : [],
-    }
-    const secondAuditPiece = secondPiece
-      ? {
-          ...base.audit.pieces[0],
-          piece_id: secondPiece.piece_id,
-          node_id: secondPiece.node_id,
-          passed: true,
-          preserved_span_count: 1,
-          mismatched_span_count: 0,
-          violations: [],
-        }
-      : null
-
-    return {
-      ...base,
-      blueprint: selectedBlueprint,
-      pieces: [{
-        ...base.pieces[0],
-        piece_id: variant.piece_id,
-        beat_id: variant.beat_id,
-        candidate_id: variant.candidate_id,
-        node_id: variant.node_id,
-        output_text: variant.text,
-        preserved_hash_matches: !auditBlocked,
-        preserved_spans: [{
-          ...base.pieces[0].preserved_spans[0],
-          span_id: `mock-preserved-span-${variant.piece_id}`,
-          matches: !auditBlocked,
-          output_text_hash: auditBlocked ? `hash-mismatch-${variant.piece_id}` : base.pieces[0].preserved_spans[0].output_text_hash,
-        }],
-        locked_spans: [],
-        slot_replacements: variant.slot_replacements ?? base.pieces[0].slot_replacements,
-      }, ...(secondPiece ? [secondPiece] : [])],
-      slot_replacements: variant.slot_replacements ?? base.slot_replacements,
-      transitions: transition ? [transition] : [],
-      assembled_text: assembledText,
-      chapter_text_after_insertion: (auditBlocked || transitionBlocked)
-        ? String(input?.chapter_context?.current_draft_text ?? '')
-        : chapterTextAfterInsertion,
-      ready_for_insertion: !auditBlocked && !transitionBlocked,
-      gate: {
-        ...base.gate,
-        pieces: [{
-          ...base.gate.pieces[0],
-          piece_id: variant.piece_id,
-          node_id: variant.node_id,
-        }, ...(secondPiece ? [{
-          ...base.gate.pieces[0],
-          piece_id: secondPiece.piece_id,
-          node_id: secondPiece.node_id,
-        }] : [])],
-      },
-      audit: {
-        ...base.audit,
-        passed: !auditBlocked && !transitionBlocked,
-        status: (auditBlocked || transitionBlocked) ? 'blocked' : 'passed',
-        errors: [
-          ...(auditBlocked ? blockedAuditErrors : []),
-          ...transitionAuditErrors,
-        ],
-        pieces: [firstAuditPiece, ...(secondAuditPiece ? [secondAuditPiece] : [])],
-        transitions: transition
-          ? [{
-              transition_id: transition.transition_id,
-              gap_id: transition.gap_id,
-              after_piece_id: transition.after_piece_id,
-              before_piece_id: transition.before_piece_id,
-              decision: transition.decision,
-              passed: !transitionBlocked,
-              violations: transitionViolation ? [transitionViolation] : [],
-            }]
-          : [],
-      },
-    }
-  }
-
   function buildMockCorpusChapterTextAfterInsertion(chapterContext, assembledText) {
     const currentDraft = String(chapterContext.current_draft_text ?? '')
     const requestedOffset = Number(chapterContext.insertion_offset ?? currentDraft.length)
@@ -7591,51 +6508,6 @@ candidates: drafts,
       ? ''
       : currentDraft.slice(0, insertionOffset).endsWith('\n') ? '\n' : '\n\n'
     return `${currentDraft.slice(0, insertionOffset)}${prefix}${assembledText}${currentDraft.slice(insertionOffset)}`
-  }
-
-  function cancelReferenceOrchestrationRun(input = {}) {
-    const run = referenceOrchestrationRun(input?.run_id)
-    if (!run) throw new Error(`Unknown reference orchestration run ${input?.run_id}`)
-    const updated = {
-      ...run,
-      status: 'cancelled',
-      current_decision: null,
-      last_stop_reason: 'cancelled',
-      error_message: String(input?.reason ?? 'cancelled'),
-      updated_at: now,
-    }
-    state.referenceOrchestrationRuns = state.referenceOrchestrationRuns.map((item) =>
-      item.run_id === run.run_id ? updated : item)
-    return updated
-  }
-
-  function referenceOrchestrationRuns(novelId, chapterNumber) {
-    return state.referenceOrchestrationRuns.filter((run) => {
-      if (Number(run.novel_id) !== Number(novelId ?? state.activeNovelId)) return false
-      if (chapterNumber == null) return true
-      return Number(run.chapter_number) === Number(chapterNumber)
-    })
-  }
-
-  function referenceOrchestrationRun(runId) {
-    return state.referenceOrchestrationRuns.find((run) => run.run_id === String(runId ?? '')) ?? null
-  }
-
-  function referenceOrchestrationRunEvents(runId) {
-    const run = referenceOrchestrationRun(runId)
-    if (!run) return []
-    return [{
-      event_id: 1,
-      run_id: run.run_id,
-      novel_id: run.novel_id,
-      event_type: 'run_started',
-      stage: run.stage,
-      status: run.status,
-      stop_reason: run.last_stop_reason,
-      decision_type: run.current_decision?.decision_type ?? '',
-      summary: run.current_decision?.summary ?? '参考流程已启动。',
-      created_at: run.created_at,
-    }]
   }
 
   function makeReferenceBlueprint(blueprintId, overrides = {}) {

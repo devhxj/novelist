@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from 'react'
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { flushSync } from 'react-dom'
 import { useApp } from '@/hooks/useApp'
 import type { novel, chapter, search } from '@/hooks/useApp'
@@ -14,10 +14,7 @@ import ArcListView from '@/components/storyarc/ArcListView'
 import TimelineView from '@/components/timeline/TimelineView'
 import ReaderView from '@/components/reader/ReaderView'
 import PreferenceView from '@/components/preference/PreferenceView'
-import ReferenceCorpusWorkspace from '@/components/reference-anchor/ReferenceCorpusWorkspace'
-import BlueprintPreviewPanel from '@/components/reference-anchor/BlueprintPreviewPanel'
-import StyleSampleLibraryView from '@/components/style/StyleSampleLibraryView'
-import NarrativePatternView from '@/components/pattern/NarrativePatternView'
+import CorpusAreaView from '@/components/reference-anchor/CorpusAreaView'
 import GitHistoryView from '@/components/git/GitHistoryView'
 import BookshelfView from '@/components/novel/BookshelfView'
 import NovelImportDialog from '@/components/novel/NovelImportDialog'
@@ -210,6 +207,10 @@ export default function WorkspaceView({ initialNovelId, initialShowHelp, startup
   }, [app, novels, activeNovelId])
 
   function handleActivitySelect(id: string) {
+    if (id === 'settings') {
+      setShowSettings(true)
+      return
+    }
     if (id === 'search') {
       setSidebarPanel('search')
     } else {
@@ -352,6 +353,10 @@ export default function WorkspaceView({ initialNovelId, initialShowHelp, startup
   }
 
   const activeNovel = novels.find(n => n.id === activeNovelId)
+  const activeChapterNumber = useMemo(() => {
+    const match = tabTarget?.path.match(/^chapters\/(\d+)\.md$/)
+    return match ? Number(match[1]) : null
+  }, [tabTarget?.path])
 
   const handleReferenceAnchorsChange = useCallback((anchors: reference.Anchor[]) => {
     const validIds = new Set(anchors.map((anchor) => anchor.anchor_id))
@@ -438,7 +443,11 @@ export default function WorkspaceView({ initialNovelId, initialShowHelp, startup
       <StartupImportRecoveryBanner recovery={startupRecovery} />
 
       <div className="flex-1 flex min-h-0 overflow-hidden">
-        <ActivityBar activeId={sidebarPanel ?? activePanel} onSelect={handleActivitySelect} />
+        <ActivityBar
+          activeId={sidebarPanel ?? activePanel}
+          bookToolsVisible={!!activeNovel}
+          onSelect={handleActivitySelect}
+        />
 
         {(sidebarPanel ?? activePanel) !== 'git-history' && (
           <SidePanel
@@ -502,7 +511,7 @@ export default function WorkspaceView({ initialNovelId, initialShowHelp, startup
             onCancelNovelImportSelection={novelImportController.markSelectionCancelled}
             onStartNovelImportFromPath={novelImportController.startFromPath}
           />
-        ) : activePanel !== 'characters' && activePanel !== 'locations' && activePanel !== 'storyarcs' && activePanel !== 'timeline' && activePanel !== 'reader' && activePanel !== 'preferences' && activePanel !== 'reference' && activePanel !== 'style-samples' && activePanel !== 'patterns' && activePanel !== 'git-history' && activePanel !== 'profile' && (
+        ) : activePanel !== 'characters' && activePanel !== 'locations' && activePanel !== 'storyarcs' && activePanel !== 'timeline' && activePanel !== 'reader' && activePanel !== 'preferences' && activePanel !== 'reference' && activePanel !== 'git-history' && activePanel !== 'profile' && (
           <ContentPanel
             ref={contentRef}
             novelId={activeNovelId}
@@ -525,7 +534,7 @@ export default function WorkspaceView({ initialNovelId, initialShowHelp, startup
         ) : activePanel === 'preferences' ? (
           <PreferenceView novelId={activeNovelId} focusId={preferenceFocusId} />
         ) : activePanel === 'reference' ? (
-          <ReferenceCorpusWorkspace
+          <CorpusAreaView
             key={activeNovelId}
             novelId={activeNovelId}
             refreshKey={referenceRefreshKey}
@@ -533,32 +542,19 @@ export default function WorkspaceView({ initialNovelId, initialShowHelp, startup
             selectedAnchorIds={selectedReferenceAnchorIds}
             onMaterializationChange={handleReferenceMutation}
           />
-        ) : activePanel === 'style-samples' ? (
-          <StyleSampleLibraryView novelId={activeNovelId} />
-        ) : activePanel === 'patterns' ? (
-          <NarrativePatternView novelId={activeNovelId} />
         ) : activePanel === 'git-history' ? (
           <GitHistoryView novelId={activeNovelId} />
         ) : activePanel === 'profile' ? (
           <ProfileView />
         ) : null}
 
-        {activePanel === 'reference' ? (
-          <BlueprintPreviewPanel
-            width={layout.chat_panel_width}
-            onWidthChange={setChatPanelWidth}
-            onWidthCommit={(width) => { void commitLayout({ chat_panel_width: width }) }}
-            novelId={activeNovelId}
-            anchors={referenceAnchors}
-            selectedAnchorIds={selectedReferenceAnchorIds}
-            refreshKey={referenceRefreshKey}
-          />
-        ) : activePanel !== 'profile' && (
+        {activePanel !== 'profile' && (
           <ChatPanel
             width={layout.chat_panel_width}
             onWidthChange={setChatPanelWidth}
             onWidthCommit={(width) => { void commitLayout({ chat_panel_width: width }) }}
             novelId={activeNovelId}
+            chapterNumber={activeChapterNumber}
             onApprove={handleApprove}
             onReject={handleReject}
             onApprovalFileEdit={handleApprovalFileEdit}

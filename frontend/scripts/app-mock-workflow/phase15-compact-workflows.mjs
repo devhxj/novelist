@@ -42,8 +42,6 @@ export async function verifyPhase15CompactMatrixWorkflow(browser, url, consoleEr
 
   await verifyCompactImport(page, importFixture)
   await selectDefaultNovel(page)
-  await verifyCompactStyleLibrary(page)
-  await verifyCompactPatternProgress(page)
   await verifyCompactGitHistory(page)
   await verifyCompactSettings(page)
   await assertNoImplicitChapterSavesOrExternalOpens(page, 'Phase 15 compact matrix workflow')
@@ -90,29 +88,6 @@ async function selectDefaultNovel(page) {
   await page.waitForFunction(() => window.__appMockState.activeNovelId === 42, null, { timeout: 12_000 })
   const activeNovelId = await page.evaluate(() => window.__appMockState.activeNovelId)
   assert.equal(activeNovelId, 42, 'Phase 15 compact matrix must return to the six-chapter fixture novel.')
-}
-
-async function verifyCompactStyleLibrary(page) {
-  await clickActivity(page, '风格素材')
-  await expectVisible(page.getByRole('heading', { name: /风格素材/ }), 'compact style library heading')
-  await expectVisible(page.getByText('全局雨夜节奏').first(), 'compact style library card')
-  await page.screenshot({ path: path.join(outputDir, 'phase15-compact-style-library.png'), fullPage: true })
-}
-
-async function verifyCompactPatternProgress(page) {
-  await clickActivity(page, '叙事模式')
-  await expectVisible(page.getByRole('heading', { name: '叙事模式' }), 'compact narrative pattern heading')
-  await expectVisible(page.getByRole('heading', { name: '进度时间线' }), 'compact narrative pattern progress panel')
-
-  await page.evaluate(() => { window.__appMockState.nextNarrativePatternDelayMs = 900 })
-  await page.getByLabel('技能名称').fill('紧凑视口叙事技能')
-  await page.getByRole('button', { name: '开始抽取' }).click()
-  await expectVisible(page.getByRole('progressbar'), 'compact narrative pattern progressbar')
-  await expectVisible(
-    page.getByText(/正在加载并校验章节。|正在识别叙事边界。|章节摘要已完成。|正在压缩叙事阶段/).first(),
-    'compact narrative pattern progress message',
-  )
-  await expectVisible(page.getByRole('heading', { name: '技能预览' }), 'compact narrative pattern preview after progress')
 }
 
 async function verifyCompactGitHistory(page) {

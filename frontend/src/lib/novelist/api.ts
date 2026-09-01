@@ -78,21 +78,14 @@ export interface SearchStoryMemoryResult {
 }
 
 export interface NovelistAppApi {
-  AdvanceReferenceCorpusBlueprintSession: AppMethod<[reference.AdvanceCorpusBlueprintSessionInput], reference.CorpusBlueprintSession>
   ApproveTool: AppMethod<[string, boolean, string], void>
-  AdaptReferenceMaterial: AppMethod<[reference.AdaptMaterialInput], reference.AdaptMaterialResult>
   AnalyzeReferenceChapterSplit: AppMethod<[reference.AnalyzeChapterSplitInput], reference.ChapterSplitProfile>
-  ApproveReferenceChapterBlueprint: AppMethod<[reference.ApproveChapterBlueprintInput], reference.ChapterBlueprint>
   ArchiveReferenceStyleProfile: AppMethod<[reference.ArchiveStyleProfileInput], reference.StyleProfile>
-  AuditReferenceAnchoredDraft: AppMethod<[reference.AuditAnchoredDraftInput], reference.AnchoredDraftAudit>
-  AuditReferenceReuse: AppMethod<[reference.AuditReuseInput], reference.ReuseAudit>
   BackfillReferenceCorpusTechniqueVectorIndex: AppMethod<[reference.BackfillCorpusTechniqueVectorIndexInput], reference.CorpusTechniqueVectorIndexBackfill>
-  BindReferenceBlueprintMaterials: AppMethod<[reference.BindBlueprintMaterialsInput], reference.BlueprintMaterialBindingResult>
   BuildReferenceStyleProfile: AppMethod<[reference.BuildStyleProfileInput], reference.StyleProfile>
   CancelNovelImport: AppMethod<[novelImport.CancelNovelImportInput], novelImport.ImportRun>
   CancelChat: AppMethod<[string], void>
   CancelNarrativePatternExtraction: AppMethod<[pattern.CancelNarrativePatternExtractionInput], pattern.NarrativePatternRun>
- CancelReferenceOrchestrationRun: AppMethod<[reference.CancelOrchestrationRunInput], reference.OrchestrationRun>
  CancelReferenceCorpusAnalysisJob: AppMethod<[{ job_id: string; expected_version: number }], reference.CorpusAnalysisJob>
   CancelReferenceStyleProfileBuild: AppMethod<[reference.CancelStyleProfileBuildInput], reference.StyleProfileBuildStatus>
   CancelStyleSkillExtraction: AppMethod<[styleSample.CancelStyleSkillExtractionInput], styleSample.StyleSkillExtractionRun>
@@ -133,12 +126,6 @@ export interface NovelistAppApi {
   ExportNovel: AppMethod<[number, string], void>
   ExtractStyleSkillFromSamples: AppMethod<[styleSample.StartStyleSkillExtractionInput], styleSample.StyleSkillExtractionRun>
   ExtractStyle: AppMethod<[app.ExtractStyleInput], app.ExtractStyleResult>
-  GenerateReferenceAnchoredDraft: AppMethod<[reference.GenerateAnchoredDraftInput], reference.AnchoredDraft>
-  GenerateReferenceChapterBlueprint: AppMethod<[reference.GenerateChapterBlueprintInput], reference.ChapterBlueprint>
-  GenerateReferenceCorpusBlueprintCandidates: AppMethod<[reference.GenerateCorpusBlueprintCandidatesInput], reference.CorpusBlueprintCandidates>
-  GenerateReferenceCorpusInsertionDraft: AppMethod<[reference.GenerateCorpusInsertionDraftInput], reference.CorpusInsertionDraft>
- GenerateReferenceCorpusInsertionDraftCandidates: AppMethod<[reference.GenerateCorpusInsertionDraftCandidatesInput], reference.CorpusInsertionDraftCandidates>
- GetReferenceCorpusBlueprintSession: AppMethod<[reference.GetCorpusBlueprintSessionInput], reference.CorpusBlueprintSession | null>
  GetReferenceCorpusCascadeImpact: AppMethod<[reference.GetCorpusCascadeImpactInput], reference.CorpusCascadeImpact>
  GetReferenceCorpusGovernance: AppMethod<[{ session_id?: string | null }], reference.CorpusGovernance>
  GetReferenceCorpusNodeWindow: AppMethod<[{ anchor_id: number; node_id: string; previous_chapter_count?: number; next_chapter_count?: number; include_scene_siblings?: boolean; max_nodes?: number }], reference.CorpusNodeWindow | null>
@@ -146,7 +133,6 @@ export interface NovelistAppApi {
  UpdateReferenceCorpusLibraryMember: AppMethod<[{ library_id: string; anchor_id: number; enabled: boolean; source_quality?: string | null; disabled_reason?: string | null }], reference.CorpusGovernance>
  UpdateReferenceCorpusLicense: AppMethod<[{ anchor_id: number; license_state: string; authorization_evidence?: string | null; reuse_policy: string; max_verbatim_ratio?: number | null; cleared_for_insertion: boolean }], reference.CorpusGovernance>
  RebuildReferenceCorpusDedupGroups: AppMethod<[{ library_id?: string | null }], { members_scanned: number; groups_assigned: number }>
- RecordReferenceCorpusInsertionAudit: AppMethod<[{ audit_id: string; session_id: string; novel_id: number; chapter_number: number; candidate_id: string; draft: reference.CorpusInsertionDraft }], boolean>
  BuildReferenceCorpusAggregates: AppMethod<[{ library_ids: string[]; run_id?: string | null }], reference.CorpusAggregate[]>
  ListReferenceCorpusAggregates: AppMethod<[{ aggregate_type?: string | null }], reference.CorpusAggregate[]>
  RefreshReferenceCorpusReviewQueue: AppMethod<[{ confidence_threshold: number }], number>
@@ -165,8 +151,6 @@ export interface NovelistAppApi {
  ReviewReferenceMaterializationCandidate: AppMethod<[reference.ReviewMaterializationCandidateInput], reference.MaterializationCandidateReviewResult>
  ListActiveReferenceMaterializationMaterials: AppMethod<[reference.ListActiveMaterializationMaterialsInput], storage.PageResult_reference_MaterializationMaterial_>
  SearchActiveReferenceMaterializationMaterials: AppMethod<[reference.SearchActiveMaterializationMaterialsInput], reference.MaterializationSemanticSearchHit[]>
- GenerateReferenceMaterializationBlueprintPreview: AppMethod<[reference.GenerateMaterializationBlueprintPreviewInput], reference.MaterializationBlueprintPreview>
- GetReferenceMaterializationBlueprintPreview: AppMethod<[reference.GetMaterializationBlueprintPreviewInput], reference.MaterializationBlueprintPreview | null>
  PauseReferenceCorpusAnalysisJob: AppMethod<[{ job_id: string; expected_version: number }], reference.CorpusAnalysisJob>
  ResumeReferenceCorpusAnalysisJob: AppMethod<[{ job_id: string; expected_version: number; new_token_budget?: number | null }], reference.CorpusAnalysisJob>
  ReprioritizeReferenceCorpusAnalysisJob: AppMethod<[{ job_id: string; expected_version: number; priority_class: string; priority_value: number }], reference.CorpusAnalysisJob>
@@ -203,20 +187,13 @@ export interface NovelistAppApi {
   GetReaderPerspectives: AppMethod<[number], reader.ReaderPerspective[]>
   GetReferenceAnchorBuildStatus: AppMethod<[number, number], reference.BuildStatus | null>
   GetReferenceAnchors: AppMethod<[number], reference.Anchor[]>
-  GetReferenceAnchoredDraftAudits: AppMethod<[reference.GetAnchoredDraftAuditsInput], reference.AnchoredDraftAudit[]>
-  GetReferenceChapterBlueprint: AppMethod<[number, number], reference.ChapterBlueprint | null>
-  GetReferenceChapterBlueprints: AppMethod<[number, number | null], reference.ChapterBlueprintSummary[]>
-  GetReferenceDraftCandidates: AppMethod<[reference.GetDraftCandidatesInput], reference.DraftParagraphCandidate[]>
   GetReferenceMaterialDetail: AppMethod<[reference.GetMaterialDetailInput], reference.MaterialDetail | null>
   GetReferenceMaterialCoverage: AppMethod<[reference.GetMaterialCoverageInput], reference.MaterialCoverage>
+  GetChapterCorpusCoverage: AppMethod<[reference.GetChapterCorpusCoverageInput], reference.ChapterCorpusCoverage>
   GetReferenceMaterializationStatus: AppMethod<[reference.GetMaterializationStatusInput], reference.MaterializationStatus | null>
   GetReferenceMaterialTagReviewQueue: AppMethod<[reference.GetMaterialTagReviewQueueInput], storage.PageResult_reference_MaterialTagReviewItem_>
   GetReferenceSourceSegmentDetail: AppMethod<[reference.GetSourceSegmentDetailInput], reference.SourceSegmentDetail | null>
-  GetReferenceOrchestrationRun: AppMethod<[number, string], reference.OrchestrationRun | null>
-  GetReferenceOrchestrationRunEvents: AppMethod<[number, string], reference.OrchestrationRunEvent[]>
-  GetReferenceOrchestrationRuns: AppMethod<[number, number | null], reference.OrchestrationRun[]>
   GetReferenceSourceProcessingDetail: AppMethod<[reference.GetSourceProcessingDetailInput], reference.SourceProcessingDetail | null>
-  GetReferenceStyleAuditFindings: AppMethod<[reference.GetStyleAuditFindingsInput], reference.StyleAuditFinding[]>
   GetReferenceStyleProfileBuildStatus: AppMethod<[reference.GetStyleProfileBuildStatusInput], reference.StyleProfileBuildStatus | null>
   GetReferenceStyleProfile: AppMethod<[number, number], reference.StyleProfile | null>
   GetReferenceStyleProfiles: AppMethod<[reference.GetStyleProfilesInput], reference.StyleProfileSummary[]>
@@ -247,11 +224,8 @@ export interface NovelistAppApi {
   RebuildNovelIndex: AppMethod<[number], void>
   ReconcileNovelImportRuns: AppMethod<[], novelImport.ImportReconciliationResult>
   RecordReferenceUserFeedback: AppMethod<[reference.RecordUserFeedbackInput], reference.UserFeedback>
-  ResumeReferenceOrchestrationRun: AppMethod<[reference.ResumeOrchestrationRunInput], reference.OrchestrationRun>
   RestoreReferenceMaterials: AppMethod<[reference.RestoreMaterialsInput], void>
   RestoreReferenceStyleProfile: AppMethod<[reference.RestoreStyleProfileInput], reference.StyleProfile>
-  ReviseReferenceChapterBlueprint: AppMethod<[reference.ReviseChapterBlueprintInput], reference.ChapterBlueprint>
-  ReviewReferenceChapterBlueprint: AppMethod<[reference.ReviewChapterBlueprintInput], reference.ChapterBlueprintReview>
   SaveAvatar: AppMethod<[number[]], void>
   SaveContent: AppMethod<[app.SaveContentInput], void>
   SaveCover: AppMethod<[number, number[]], void>
@@ -276,7 +250,6 @@ export interface NovelistAppApi {
   SetSelectedModel: AppMethod<[string, string], void>
   StartNarrativePatternExtraction: AppMethod<[pattern.StartNarrativePatternExtractionInput], pattern.NarrativePatternRun>
   StartNovelImport: AppMethod<[novelImport.StartNovelImportInput], novelImport.ImportRun>
-  StartReferenceOrchestrationRun: AppMethod<[reference.StartOrchestrationRunInput], reference.OrchestrationRun>
   UpdateStyleSample: AppMethod<[styleSample.UpdateStyleSampleInput], styleSample.StyleSample>
   TestEmbeddingConnection: AppMethod<[EmbeddingConfigView], void>
   TestConnection: AppMethod<[app.TestConnectionInput], void>
@@ -323,21 +296,14 @@ export function toArgsPayload(args: AppMethodArgs): unknown {
 }
 
 export const appApi: NovelistAppApi = {
-  AdvanceReferenceCorpusBlueprintSession: appMethod<NovelistAppApi['AdvanceReferenceCorpusBlueprintSession']>('AdvanceReferenceCorpusBlueprintSession'),
   ApproveTool: appMethod<NovelistAppApi['ApproveTool']>('ApproveTool'),
-  AdaptReferenceMaterial: appMethod<NovelistAppApi['AdaptReferenceMaterial']>('AdaptReferenceMaterial'),
   AnalyzeReferenceChapterSplit: ((...args) => invokeAppArgs('AnalyzeReferenceChapterSplit', args, { timeoutMs: null })) as NovelistAppApi['AnalyzeReferenceChapterSplit'],
-  ApproveReferenceChapterBlueprint: appMethod<NovelistAppApi['ApproveReferenceChapterBlueprint']>('ApproveReferenceChapterBlueprint'),
   ArchiveReferenceStyleProfile: appMethod<NovelistAppApi['ArchiveReferenceStyleProfile']>('ArchiveReferenceStyleProfile'),
-  AuditReferenceAnchoredDraft: appMethod<NovelistAppApi['AuditReferenceAnchoredDraft']>('AuditReferenceAnchoredDraft'),
-  AuditReferenceReuse: appMethod<NovelistAppApi['AuditReferenceReuse']>('AuditReferenceReuse'),
   BackfillReferenceCorpusTechniqueVectorIndex: ((...args) => invokeAppArgs('BackfillReferenceCorpusTechniqueVectorIndex', args, { timeoutMs: null })) as NovelistAppApi['BackfillReferenceCorpusTechniqueVectorIndex'],
-  BindReferenceBlueprintMaterials: appMethod<NovelistAppApi['BindReferenceBlueprintMaterials']>('BindReferenceBlueprintMaterials'),
   BuildReferenceStyleProfile: ((...args) => invokeAppArgs('BuildReferenceStyleProfile', args, { timeoutMs: null })) as NovelistAppApi['BuildReferenceStyleProfile'],
   CancelNovelImport: appMethod<NovelistAppApi['CancelNovelImport']>('CancelNovelImport'),
   CancelChat: appMethod<NovelistAppApi['CancelChat']>('CancelChat'),
   CancelNarrativePatternExtraction: appMethod<NovelistAppApi['CancelNarrativePatternExtraction']>('CancelNarrativePatternExtraction'),
-CancelReferenceOrchestrationRun: appMethod<NovelistAppApi['CancelReferenceOrchestrationRun']>('CancelReferenceOrchestrationRun'),
  CancelReferenceCorpusAnalysisJob: appMethod<NovelistAppApi['CancelReferenceCorpusAnalysisJob']>('CancelReferenceCorpusAnalysisJob'),
   CancelReferenceStyleProfileBuild: appMethod<NovelistAppApi['CancelReferenceStyleProfileBuild']>('CancelReferenceStyleProfileBuild'),
   CancelStyleSkillExtraction: appMethod<NovelistAppApi['CancelStyleSkillExtraction']>('CancelStyleSkillExtraction'),
@@ -378,12 +344,6 @@ CancelReferenceOrchestrationRun: appMethod<NovelistAppApi['CancelReferenceOrches
   ExportNovel: appMethod<NovelistAppApi['ExportNovel']>('ExportNovel'),
   ExtractStyleSkillFromSamples: ((...args) => invokeAppArgs('ExtractStyleSkillFromSamples', args, { timeoutMs: null })) as NovelistAppApi['ExtractStyleSkillFromSamples'],
   ExtractStyle: appMethod<NovelistAppApi['ExtractStyle']>('ExtractStyle'),
-  GenerateReferenceAnchoredDraft: appMethod<NovelistAppApi['GenerateReferenceAnchoredDraft']>('GenerateReferenceAnchoredDraft'),
-  GenerateReferenceChapterBlueprint: appMethod<NovelistAppApi['GenerateReferenceChapterBlueprint']>('GenerateReferenceChapterBlueprint'),
-  GenerateReferenceCorpusBlueprintCandidates: appMethod<NovelistAppApi['GenerateReferenceCorpusBlueprintCandidates']>('GenerateReferenceCorpusBlueprintCandidates'),
-  GenerateReferenceCorpusInsertionDraft: appMethod<NovelistAppApi['GenerateReferenceCorpusInsertionDraft']>('GenerateReferenceCorpusInsertionDraft'),
-GenerateReferenceCorpusInsertionDraftCandidates: appMethod<NovelistAppApi['GenerateReferenceCorpusInsertionDraftCandidates']>('GenerateReferenceCorpusInsertionDraftCandidates'),
- GetReferenceCorpusBlueprintSession: appMethod<NovelistAppApi['GetReferenceCorpusBlueprintSession']>('GetReferenceCorpusBlueprintSession'),
  GetReferenceCorpusCascadeImpact: appMethod<NovelistAppApi['GetReferenceCorpusCascadeImpact']>('GetReferenceCorpusCascadeImpact'),
  GetReferenceCorpusGovernance: appMethod<NovelistAppApi['GetReferenceCorpusGovernance']>('GetReferenceCorpusGovernance'),
  GetReferenceCorpusNodeWindow: appMethod<NovelistAppApi['GetReferenceCorpusNodeWindow']>('GetReferenceCorpusNodeWindow'),
@@ -391,7 +351,6 @@ GenerateReferenceCorpusInsertionDraftCandidates: appMethod<NovelistAppApi['Gener
  UpdateReferenceCorpusLibraryMember: appMethod<NovelistAppApi['UpdateReferenceCorpusLibraryMember']>('UpdateReferenceCorpusLibraryMember'),
  UpdateReferenceCorpusLicense: appMethod<NovelistAppApi['UpdateReferenceCorpusLicense']>('UpdateReferenceCorpusLicense'),
 RebuildReferenceCorpusDedupGroups: appMethod<NovelistAppApi['RebuildReferenceCorpusDedupGroups']>('RebuildReferenceCorpusDedupGroups'),
- RecordReferenceCorpusInsertionAudit: appMethod<NovelistAppApi['RecordReferenceCorpusInsertionAudit']>('RecordReferenceCorpusInsertionAudit'),
  BuildReferenceCorpusAggregates: appMethod<NovelistAppApi['BuildReferenceCorpusAggregates']>('BuildReferenceCorpusAggregates'),
  ListReferenceCorpusAggregates: appMethod<NovelistAppApi['ListReferenceCorpusAggregates']>('ListReferenceCorpusAggregates'),
  RefreshReferenceCorpusReviewQueue: appMethod<NovelistAppApi['RefreshReferenceCorpusReviewQueue']>('RefreshReferenceCorpusReviewQueue'),
@@ -410,8 +369,6 @@ GetReferenceCorpusFeatureAnalysisRun: appMethod<NovelistAppApi['GetReferenceCorp
  ReviewReferenceMaterializationCandidate: appMethod<NovelistAppApi['ReviewReferenceMaterializationCandidate']>('ReviewReferenceMaterializationCandidate'),
  ListActiveReferenceMaterializationMaterials: appMethod<NovelistAppApi['ListActiveReferenceMaterializationMaterials']>('ListActiveReferenceMaterializationMaterials'),
  SearchActiveReferenceMaterializationMaterials: appMethod<NovelistAppApi['SearchActiveReferenceMaterializationMaterials']>('SearchActiveReferenceMaterializationMaterials'),
-  GenerateReferenceMaterializationBlueprintPreview: ((...args) => invokeAppArgs('GenerateReferenceMaterializationBlueprintPreview', args, { timeoutMs: null })) as NovelistAppApi['GenerateReferenceMaterializationBlueprintPreview'],
- GetReferenceMaterializationBlueprintPreview: appMethod<NovelistAppApi['GetReferenceMaterializationBlueprintPreview']>('GetReferenceMaterializationBlueprintPreview'),
  PauseReferenceCorpusAnalysisJob: appMethod<NovelistAppApi['PauseReferenceCorpusAnalysisJob']>('PauseReferenceCorpusAnalysisJob'),
  ResumeReferenceCorpusAnalysisJob: appMethod<NovelistAppApi['ResumeReferenceCorpusAnalysisJob']>('ResumeReferenceCorpusAnalysisJob'),
  ReprioritizeReferenceCorpusAnalysisJob: appMethod<NovelistAppApi['ReprioritizeReferenceCorpusAnalysisJob']>('ReprioritizeReferenceCorpusAnalysisJob'),
@@ -448,20 +405,13 @@ GetReferenceCorpusFeatureAnalysisRun: appMethod<NovelistAppApi['GetReferenceCorp
   GetReaderPerspectives: appMethod<NovelistAppApi['GetReaderPerspectives']>('GetReaderPerspectives'),
   GetReferenceAnchorBuildStatus: appMethod<NovelistAppApi['GetReferenceAnchorBuildStatus']>('GetReferenceAnchorBuildStatus'),
   GetReferenceAnchors: appMethod<NovelistAppApi['GetReferenceAnchors']>('GetReferenceAnchors'),
-  GetReferenceAnchoredDraftAudits: appMethod<NovelistAppApi['GetReferenceAnchoredDraftAudits']>('GetReferenceAnchoredDraftAudits'),
-  GetReferenceChapterBlueprint: appMethod<NovelistAppApi['GetReferenceChapterBlueprint']>('GetReferenceChapterBlueprint'),
-  GetReferenceChapterBlueprints: appMethod<NovelistAppApi['GetReferenceChapterBlueprints']>('GetReferenceChapterBlueprints'),
-  GetReferenceDraftCandidates: appMethod<NovelistAppApi['GetReferenceDraftCandidates']>('GetReferenceDraftCandidates'),
   GetReferenceMaterialDetail: appMethod<NovelistAppApi['GetReferenceMaterialDetail']>('GetReferenceMaterialDetail'),
   GetReferenceMaterialCoverage: appMethod<NovelistAppApi['GetReferenceMaterialCoverage']>('GetReferenceMaterialCoverage'),
+  GetChapterCorpusCoverage: appMethod<NovelistAppApi['GetChapterCorpusCoverage']>('GetChapterCorpusCoverage'),
   GetReferenceMaterializationStatus: appMethod<NovelistAppApi['GetReferenceMaterializationStatus']>('GetReferenceMaterializationStatus'),
   GetReferenceMaterialTagReviewQueue: appMethod<NovelistAppApi['GetReferenceMaterialTagReviewQueue']>('GetReferenceMaterialTagReviewQueue'),
   GetReferenceSourceSegmentDetail: appMethod<NovelistAppApi['GetReferenceSourceSegmentDetail']>('GetReferenceSourceSegmentDetail'),
-  GetReferenceOrchestrationRun: appMethod<NovelistAppApi['GetReferenceOrchestrationRun']>('GetReferenceOrchestrationRun'),
-  GetReferenceOrchestrationRunEvents: appMethod<NovelistAppApi['GetReferenceOrchestrationRunEvents']>('GetReferenceOrchestrationRunEvents'),
-  GetReferenceOrchestrationRuns: appMethod<NovelistAppApi['GetReferenceOrchestrationRuns']>('GetReferenceOrchestrationRuns'),
   GetReferenceSourceProcessingDetail: appMethod<NovelistAppApi['GetReferenceSourceProcessingDetail']>('GetReferenceSourceProcessingDetail'),
-  GetReferenceStyleAuditFindings: appMethod<NovelistAppApi['GetReferenceStyleAuditFindings']>('GetReferenceStyleAuditFindings'),
   GetReferenceStyleProfileBuildStatus: appMethod<NovelistAppApi['GetReferenceStyleProfileBuildStatus']>('GetReferenceStyleProfileBuildStatus'),
   GetReferenceStyleProfile: appMethod<NovelistAppApi['GetReferenceStyleProfile']>('GetReferenceStyleProfile'),
   GetReferenceStyleProfiles: appMethod<NovelistAppApi['GetReferenceStyleProfiles']>('GetReferenceStyleProfiles'),
@@ -492,11 +442,8 @@ GetReferenceCorpusFeatureAnalysisRun: appMethod<NovelistAppApi['GetReferenceCorp
   RebuildNovelIndex: appMethod<NovelistAppApi['RebuildNovelIndex']>('RebuildNovelIndex'),
   ReconcileNovelImportRuns: appMethod<NovelistAppApi['ReconcileNovelImportRuns']>('ReconcileNovelImportRuns'),
   RecordReferenceUserFeedback: appMethod<NovelistAppApi['RecordReferenceUserFeedback']>('RecordReferenceUserFeedback'),
-  ResumeReferenceOrchestrationRun: appMethod<NovelistAppApi['ResumeReferenceOrchestrationRun']>('ResumeReferenceOrchestrationRun'),
   RestoreReferenceMaterials: appMethod<NovelistAppApi['RestoreReferenceMaterials']>('RestoreReferenceMaterials'),
   RestoreReferenceStyleProfile: appMethod<NovelistAppApi['RestoreReferenceStyleProfile']>('RestoreReferenceStyleProfile'),
-  ReviseReferenceChapterBlueprint: appMethod<NovelistAppApi['ReviseReferenceChapterBlueprint']>('ReviseReferenceChapterBlueprint'),
-  ReviewReferenceChapterBlueprint: appMethod<NovelistAppApi['ReviewReferenceChapterBlueprint']>('ReviewReferenceChapterBlueprint'),
   SaveAvatar: appMethod<NovelistAppApi['SaveAvatar']>('SaveAvatar'),
   SaveContent: appMethod<NovelistAppApi['SaveContent']>('SaveContent'),
   SaveCover: appMethod<NovelistAppApi['SaveCover']>('SaveCover'),
@@ -521,7 +468,6 @@ GetReferenceCorpusFeatureAnalysisRun: appMethod<NovelistAppApi['GetReferenceCorp
   SetSelectedModel: appMethod<NovelistAppApi['SetSelectedModel']>('SetSelectedModel'),
   StartNarrativePatternExtraction: ((...args) => invokeAppArgs('StartNarrativePatternExtraction', args, { timeoutMs: null })) as NovelistAppApi['StartNarrativePatternExtraction'],
   StartNovelImport: ((...args) => invokeAppArgs('StartNovelImport', args, { timeoutMs: null })) as NovelistAppApi['StartNovelImport'],
-  StartReferenceOrchestrationRun: appMethod<NovelistAppApi['StartReferenceOrchestrationRun']>('StartReferenceOrchestrationRun'),
   UpdateStyleSample: appMethod<NovelistAppApi['UpdateStyleSample']>('UpdateStyleSample'),
   TestEmbeddingConnection: appMethod<NovelistAppApi['TestEmbeddingConnection']>('TestEmbeddingConnection'),
   TestConnection: appMethod<NovelistAppApi['TestConnection']>('TestConnection'),
