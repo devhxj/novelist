@@ -123,18 +123,6 @@ public sealed class ReferenceBridgeHandlerRoutingTests
             "delayed_reaction",
             "ui",
             "bulk verified"));
-        await AssertOkAsync(dispatcher, "AdaptReferenceMaterial", new AdaptReferenceMaterialPayload(
-            42,
-            "material-1",
-            [new ReferenceSlotValuePayload("object", "door")],
-            ReferenceRewriteLevels.L2,
-            ["door exists"]));
-        await AssertOkAsync(dispatcher, "AuditReferenceReuse", new AuditReferenceReusePayload(
-            42,
-            "material-1",
-            "candidate text",
-            ReferenceRewriteLevels.L2,
-            ["door exists"]));
         await AssertOkAsync(dispatcher, "RecordReferenceUserFeedback", new RecordReferenceUserFeedbackPayload(
             42,
             ReferenceFeedbackTargetTypes.ReuseCandidate,
@@ -177,8 +165,6 @@ public sealed class ReferenceBridgeHandlerRoutingTests
                 "GetSourceProcessingDetail:42:99",
                 "UpdateMaterialTags:42:material-1:interiority:unease:threshold:close:afterbeat:user:verified",
                 "UpdateMaterialsTags:42:material-2,material-3:object_subtext:contained_tension:rain_threshold:limited_close:delayed_reaction:ui:bulk verified",
-                "AdaptMaterial:42:material-1:object=door:L2:door exists",
-                "AuditCandidate:42:material-1:candidate text:L2:door exists",
                 "RecordUserFeedback:42:reuse_candidate:candidate-1:edited:material-1:candidate-1:501:beat-1:too_ai_flavored:kept pressure image:edited text:user",
                 "GetUserFeedback:42:reuse_candidate:candidate-1:5"
             ],
@@ -353,51 +339,9 @@ public sealed class ReferenceBridgeHandlerRoutingTests
         Assert.DoesNotContain(FullMaterialLeakSentinel, raw, StringComparison.Ordinal);
     }
 
-    [Fact]
-    public async Task AdaptReferenceMaterialReturnsBoundedPreviewWithoutFullMaterialText()
-    {
-        var service = new RecordingReferenceAnchorService
-        {
-            AdaptMaterialResult = UnsafeAdaptMaterialResultPayload("material-unsafe")
-        };
-        var dispatcher = new BridgeDispatcher().RegisterReferenceAnchorHandlers(service);
 
-        using var adapted = await AssertOkJsonAsync(dispatcher, "AdaptReferenceMaterial", new AdaptReferenceMaterialPayload(
-            42,
-            "material-unsafe",
-            [],
-            ReferenceRewriteLevels.L1,
-            []));
 
-        var result = adapted.RootElement.GetProperty("result");
-        var text = result.GetProperty("text").GetString() ?? string.Empty;
-        Assert.Equal("candidate-unsafe", result.GetProperty("candidate_id").GetString());
-        Assert.True(text.Length <= 803, "Adapted bridge text must be a bounded preview.");
-        AssertReferenceDetailDoesNotExposeSensitiveText(result);
-        Assert.DoesNotContain("tail-that-proves-unbounded-text", result.GetRawText(), StringComparison.Ordinal);
-    }
 
-    [Fact]
-    public async Task AuditReferenceReuseReturnsRedactedBoundedDiagnostics()
-    {
-        var service = new RecordingReferenceAnchorService
-        {
-            ReuseAuditResult = UnsafeReuseAuditPayload()
-        };
-        var dispatcher = new BridgeDispatcher().RegisterReferenceAnchorHandlers(service);
-
-        using var audit = await AssertOkJsonAsync(dispatcher, "AuditReferenceReuse", new AuditReferenceReusePayload(
-            42,
-            "material-unsafe",
-            "candidate text",
-            ReferenceRewriteLevels.L1,
-            ["fact"]));
-
-        var result = audit.RootElement.GetProperty("result");
-        Assert.Equal("audit-unsafe", result.GetProperty("audit_id").GetString());
-        AssertReferenceDetailDoesNotExposeSensitiveText(result);
-        Assert.DoesNotContain("tail-that-proves-unbounded-text", result.GetRawText(), StringComparison.Ordinal);
-    }
 
     [Fact]
     public async Task ReferenceDetailHandlersRedactDirtyServiceDiagnostics()
@@ -458,120 +402,9 @@ public sealed class ReferenceBridgeHandlerRoutingTests
         Assert.Equal(2, status.RootElement.GetProperty("result").GetProperty("material_count").GetInt32());
     }
 
-    [Fact]
-    public async Task GetReferenceDraftCandidatesReturnsBoundedRedactedText()
-    {
-        var service = new RecordingReferenceAnchoredDraftService
-        {
-            DraftCandidatesResult = [UnsafeDraftCandidatePayload(501, "candidate-unsafe")]
-        };
-        var dispatcher = new BridgeDispatcher().RegisterReferenceAnchoredDraftHandlers(service);
 
-        using var json = await AssertOkJsonAsync(dispatcher, "GetReferenceDraftCandidates", new GetReferenceDraftCandidatesPayload(
-            42,
-            501,
-            ["candidate-unsafe"]));
-        var candidate = Assert.Single(json.RootElement.GetProperty("result").EnumerateArray());
 
-        Assert.Equal("candidate-unsafe", candidate.GetProperty("candidate_id").GetString());
-        Assert.Equal(501, candidate.GetProperty("blueprint_id").GetInt64());
-        AssertReferenceDetailDoesNotExposeSensitiveText(candidate);
-        Assert.DoesNotContain("tail-that-proves-unbounded-text", candidate.GetRawText(), StringComparison.Ordinal);
-        Assert.False(candidate.TryGetProperty("source_text", out _));
-        Assert.False(candidate.TryGetProperty("candidate_text", out _));
-        Assert.False(candidate.TryGetProperty("prompt", out _));
-        Assert.False(candidate.TryGetProperty("source_path", out _));
-        Assert.False(candidate.TryGetProperty("path", out _));
-    }
 
-    [Fact]
-    public async Task ReferenceAnchoredDraftHandlersRouteEveryMethodToServiceOperations()
-    {
-        var service = new RecordingReferenceAnchoredDraftService();
-        var dispatcher = new BridgeDispatcher().RegisterReferenceAnchoredDraftHandlers(service);
-
-        await AssertOkAsync(dispatcher, "GenerateReferenceChapterBlueprint", new GenerateReferenceChapterBlueprintPayload(
-            42,
-            7,
-            "Blueprint",
-            "tighten the reveal",
-            [99],
-            ["known clue"],
-            ["culprit identity"]));
-        await AssertOkAsync(dispatcher, "GetReferenceChapterBlueprints", 42L, null);
-        await AssertOkAsync(dispatcher, "GetReferenceChapterBlueprint", 42L, 501L);
-        await AssertOkAsync(dispatcher, "ReviewReferenceChapterBlueprint", new ReviewReferenceChapterBlueprintPayload(42, 501));
-        await AssertOkAsync(dispatcher, "ReviseReferenceChapterBlueprint", new ReviseReferenceChapterBlueprintPayload(
-            42,
-            501,
-            [new ReferenceBlueprintRevisionChangePayload("beat:beat-1:paragraph_intention", "linger on the threshold")],
-            "user",
-            "tighten execution"));
-        await AssertOkAsync(dispatcher, "ApproveReferenceChapterBlueprint", new ApproveReferenceChapterBlueprintPayload(42, 501, "review-1"));
-        await AssertOkAsync(dispatcher, "BindReferenceBlueprintMaterials", new BindReferenceBlueprintMaterialsPayload(42, 501, 3, SelectTopCandidate: true));
-        await AssertOkAsync(dispatcher, "GenerateReferenceAnchoredDraft", new GenerateReferenceAnchoredDraftPayload(42, 501, ["beat-1", "beat-2"]));
-        await AssertOkAsync(dispatcher, "GetReferenceDraftCandidates", new GetReferenceDraftCandidatesPayload(42, 501, ["candidate-1"]));
-        await AssertOkAsync(dispatcher, "AuditReferenceAnchoredDraft", new AuditReferenceAnchoredDraftPayload(42, 501, ["candidate-1"]));
-        await AssertOkAsync(dispatcher, "GetReferenceAnchoredDraftAudits", new GetReferenceAnchoredDraftAuditsPayload(42, 501, ["candidate-1"], 10));
-        await AssertOkAsync(dispatcher, "GetReferenceStyleAuditFindings", new GetReferenceStyleAuditFindingsPayload(
-            42,
-            501,
-            ["candidate-1"],
-            ["source_leak"],
-            10));
-        await AssertOkAsync(dispatcher, "StartReferenceOrchestrationRun", new StartReferenceOrchestrationRunPayload(
-            42,
-            7,
-            "tighten the reveal",
-            ["known clue"],
-            ["culprit identity"],
-            null,
-            new ReferenceCorpusSearchPolicyPayload("story_context", 3, ["user_provided"], [99], []),
-            SourceConfirmed: false,
-            StylePolicy: new ReferenceOrchestrationStylePolicyPayload(
-                [301],
-                ["dialogue_ratio", "sensory_ratio"],
-                ReferenceStyleImitationIntensities.Strong,
-                0.8,
-                "moderate",
-                ["dialogue_exchange"],
-                ["source_leak", "style_distance"])));
-        await AssertOkAsync(dispatcher, "GetReferenceOrchestrationRuns", 42L, 7);
-        await AssertOkAsync(dispatcher, "GetReferenceOrchestrationRun", 42L, "run-1");
-        await AssertOkAsync(dispatcher, "GetReferenceOrchestrationRunEvents", 42L, "run-1");
-        await AssertOkAsync(dispatcher, "ResumeReferenceOrchestrationRun", new ResumeReferenceOrchestrationRunPayload(
-            42,
-            "run-1",
-            ReferenceOrchestrationDecisionTypes.ApproveBlueprint,
-            "review-1"));
-        await AssertOkAsync(dispatcher, "CancelReferenceOrchestrationRun", new CancelReferenceOrchestrationRunPayload(
-            42,
-            "run-1",
-            "user cancelled"));
-
-        Assert.Equal(
-            [
-                "GenerateChapterBlueprint:42:7:Blueprint:tighten the reveal:99:known clue:culprit identity",
-                "GetChapterBlueprints:42:<null>",
-                "GetChapterBlueprint:42:501",
-                "ReviewChapterBlueprint:42:501",
-                "ReviseChapterBlueprint:42:501:beat:beat-1:paragraph_intention=linger on the threshold:user:tighten execution",
-                "ApproveChapterBlueprint:42:501:review-1",
-                "BindBlueprintMaterials:42:501:3:True",
-                "GenerateDraftFromBlueprint:42:501:beat-1,beat-2",
-                "GetDraftCandidates:42:501:candidate-1",
-                "AuditDraftAgainstBlueprint:42:501:candidate-1",
-                "GetDraftAudits:42:501:candidate-1:10",
-                "GetStyleAuditFindings:42:501:candidate-1:source_leak:10",
-                "StartOrchestrationRun:42:7:tighten the reveal:known clue:culprit identity:<null>:story_context:3:user_provided:99::<false>:301:dialogue_ratio,sensory_ratio:strong:0.8:moderate:dialogue_exchange:source_leak,style_distance",
-                "GetOrchestrationRuns:42:7",
-                "GetOrchestrationRun:42:run-1",
-                "GetOrchestrationRunEvents:42:run-1",
-                "ResumeOrchestrationRun:42:run-1:approve_blueprint:review-1",
-                "CancelOrchestrationRun:42:run-1:user cancelled"
-            ],
-            service.Calls);
-    }
 
     [Fact]
     public async Task ReferenceStyleProfileHandlersRouteEveryMethodToServiceOperations()
@@ -939,71 +772,11 @@ public sealed class ReferenceBridgeHandlerRoutingTests
             UpdatedAt: DateTimeOffset.UtcNow);
     }
 
-    private static AdaptReferenceMaterialResultPayload UnsafeAdaptMaterialResultPayload(string materialId)
-    {
-        var unsafeText = UnsafeDiagnosticText() + new string('长', 2_000) + "tail-that-proves-unbounded-text";
-        return new AdaptReferenceMaterialResultPayload(
-            "candidate-unsafe",
-            materialId,
-            ReferenceRewriteLevels.L1,
-            unsafeText,
-            [new ReferenceSlotValuePayload("object", unsafeText)],
-            [unsafeText],
-            new ReferenceReuseAuditPayload(
-                "audit-unsafe",
-                "passed",
-                ReferenceRewriteLevels.L1,
-                [unsafeText],
-                [unsafeText],
-                [unsafeText],
-                [unsafeText],
-                [unsafeText],
-                DateTimeOffset.UtcNow));
-    }
 
-    private static ReferenceReuseAuditPayload UnsafeReuseAuditPayload()
-    {
-        var unsafeText = UnsafeDiagnosticText() + new string('审', 2_000) + "tail-that-proves-unbounded-text";
-        return new ReferenceReuseAuditPayload(
-            "audit-unsafe",
-            "failed",
-            ReferenceRewriteLevels.L1,
-            [unsafeText],
-            [unsafeText],
-            [unsafeText],
-            [unsafeText],
-            [unsafeText],
-            DateTimeOffset.UtcNow);
-    }
 
-    private static ReferenceDraftParagraphCandidatePayload UnsafeDraftCandidatePayload(long blueprintId, string candidateId)
-    {
-        var unsafeText = UnsafeDiagnosticText() + new string('候', 5_000) + "tail-that-proves-unbounded-text";
-        return new ReferenceDraftParagraphCandidatePayload(
-            candidateId,
-            blueprintId,
-            "beat-unsafe",
-            "material-unsafe",
-            ReferenceRewriteLevels.L1,
-            unsafeText,
-            [new ReferenceSlotValuePayload("object", unsafeText)],
-            [unsafeText],
-            "passed",
-            DateTimeOffset.UtcNow,
-            [
-                new ReferenceDraftStyleAttemptPayload(
-                    [301],
-                    ["dialogue_ratio"],
-                    ReferenceStyleImitationIntensities.Moderate,
-                    0.8,
-                    "moderate",
-                    ["dialogue_exchange"],
-                    ["source_leak"],
-                    0.9,
-                    SelectedMaterialLowConfidence: false,
-                    "attempted")
-            ]);
-    }
+
+
+
 
     private static string UnsafeDiagnosticText()
     {
@@ -1052,9 +825,6 @@ public sealed class ReferenceBridgeHandlerRoutingTests
         public ReferenceSourceProcessingDetailPayload? SourceProcessingDetailResult { get; set; }
         public ReferenceAnchorBuildStatusPayload? RebuildStatusResult { get; set; }
         public ReferenceAnchorBuildStatusPayload? BuildStatusResult { get; set; }
-        public AdaptReferenceMaterialResultPayload? AdaptMaterialResult { get; set; }
-
-        public ReferenceReuseAuditPayload? ReuseAuditResult { get; set; }
 
         private static ReferenceAnchorPayload CreateAnchorPayload(
             long anchorId,
@@ -1485,32 +1255,9 @@ return ValueTask.FromResult<ReferenceAnchorBuildStatusPayload?>(BuildStatusResul
                 input.MaterialIds.Select(CreateMaterialPayload).ToArray());
         }
 
-        public ValueTask<AdaptReferenceMaterialResultPayload> AdaptMaterialAsync(
-            AdaptReferenceMaterialPayload input,
-            CancellationToken cancellationToken)
-        {
-            cancellationToken.ThrowIfCancellationRequested();
-            Calls.Add($"AdaptMaterial:{input.NovelId}:{input.MaterialId}:{FormatSlots(input.SlotValues)}:{input.MaxRewriteLevel}:{string.Join(',', input.SceneFacts)}");
-            return ValueTask.FromResult(AdaptMaterialResult!);
-        }
 
-        public ValueTask<ReferenceReuseAuditPayload> AuditCandidateAsync(
-            AuditReferenceReusePayload input,
-            CancellationToken cancellationToken)
-        {
-            cancellationToken.ThrowIfCancellationRequested();
-            Calls.Add($"AuditCandidate:{input.NovelId}:{input.MaterialId}:{input.CandidateText}:{input.MaxRewriteLevel}:{string.Join(',', input.SceneFacts)}");
-            return ValueTask.FromResult(ReuseAuditResult ?? new ReferenceReuseAuditPayload(
-                "audit-1",
-                "passed",
-                ReferenceRewriteLevels.L1,
-                [],
-                [],
-                [],
-                [],
-                [],
-                DateTimeOffset.UtcNow));
-        }
+
+
 
         public ValueTask<ReferenceUserFeedbackPayload> RecordUserFeedbackAsync(
             RecordReferenceUserFeedbackPayload input,
@@ -1611,212 +1358,16 @@ return ValueTask.FromResult<ReferenceAnchorBuildStatusPayload?>(BuildStatusResul
         }
     }
 
-    private sealed class RecordingReferenceAnchoredDraftService : IReferenceAnchoredDraftService
-    {
-        public List<string> Calls { get; } = [];
 
-        public IReadOnlyList<ReferenceDraftParagraphCandidatePayload> DraftCandidatesResult { get; set; } = [];
 
-        public ValueTask<ReferenceChapterBlueprintPayload> GenerateChapterBlueprintAsync(
-            GenerateReferenceChapterBlueprintPayload input,
-            CancellationToken cancellationToken)
-        {
-            cancellationToken.ThrowIfCancellationRequested();
-            Calls.Add($"GenerateChapterBlueprint:{input.NovelId}:{input.ChapterNumber}:{input.Title}:{input.ChapterGoal}:{string.Join(',', input.AnchorIds)}:{string.Join(',', input.KnownFacts)}:{string.Join(',', input.ForbiddenFacts)}");
-            return ValueTask.FromResult<ReferenceChapterBlueprintPayload>(null!);
-        }
 
-        public ValueTask<IReadOnlyList<ReferenceChapterBlueprintSummaryPayload>> GetChapterBlueprintsAsync(
-            long novelId,
-            int? chapterNumber,
-            CancellationToken cancellationToken)
-        {
-            cancellationToken.ThrowIfCancellationRequested();
-            Calls.Add($"GetChapterBlueprints:{novelId}:{chapterNumber?.ToString() ?? "<null>"}");
-            IReadOnlyList<ReferenceChapterBlueprintSummaryPayload> summaries = [];
-            return ValueTask.FromResult(summaries);
-        }
 
-        public ValueTask<ReferenceChapterBlueprintPayload?> GetChapterBlueprintAsync(
-            long novelId,
-            long blueprintId,
-            CancellationToken cancellationToken)
-        {
-            cancellationToken.ThrowIfCancellationRequested();
-            Calls.Add($"GetChapterBlueprint:{novelId}:{blueprintId}");
-            return ValueTask.FromResult<ReferenceChapterBlueprintPayload?>(null);
-        }
 
-        public ValueTask<ReferenceChapterBlueprintReviewPayload> ReviewChapterBlueprintAsync(
-            ReviewReferenceChapterBlueprintPayload input,
-            CancellationToken cancellationToken)
-        {
-            cancellationToken.ThrowIfCancellationRequested();
-            Calls.Add($"ReviewChapterBlueprint:{input.NovelId}:{input.BlueprintId}");
-            return ValueTask.FromResult<ReferenceChapterBlueprintReviewPayload>(null!);
-        }
-
-        public ValueTask<ReferenceChapterBlueprintPayload> ReviseChapterBlueprintAsync(
-            ReviseReferenceChapterBlueprintPayload input,
-            CancellationToken cancellationToken)
-        {
-            cancellationToken.ThrowIfCancellationRequested();
-            Calls.Add($"ReviseChapterBlueprint:{input.NovelId}:{input.BlueprintId}:{FormatRevisionChanges(input.Changes)}:{input.Origin}:{input.RevisionReason}");
-            return ValueTask.FromResult<ReferenceChapterBlueprintPayload>(null!);
-        }
-
-        public ValueTask<ReferenceChapterBlueprintPayload> ApproveChapterBlueprintAsync(
-            ApproveReferenceChapterBlueprintPayload input,
-            CancellationToken cancellationToken)
-        {
-            cancellationToken.ThrowIfCancellationRequested();
-            Calls.Add($"ApproveChapterBlueprint:{input.NovelId}:{input.BlueprintId}:{input.ReviewId}");
-            return ValueTask.FromResult<ReferenceChapterBlueprintPayload>(null!);
-        }
-
-        public ValueTask<ReferenceBlueprintMaterialBindingResultPayload> BindBlueprintMaterialsAsync(
-            BindReferenceBlueprintMaterialsPayload input,
-            CancellationToken cancellationToken)
-        {
-            cancellationToken.ThrowIfCancellationRequested();
-            Calls.Add($"BindBlueprintMaterials:{input.NovelId}:{input.BlueprintId}:{input.MaxResultsPerBeat}:{input.SelectTopCandidate}");
-            return ValueTask.FromResult<ReferenceBlueprintMaterialBindingResultPayload>(null!);
-        }
-
-        public ValueTask<ReferenceAnchoredDraftPayload> GenerateDraftFromBlueprintAsync(
-            GenerateReferenceAnchoredDraftPayload input,
-            CancellationToken cancellationToken)
-        {
-            cancellationToken.ThrowIfCancellationRequested();
-            Calls.Add($"GenerateDraftFromBlueprint:{input.NovelId}:{input.BlueprintId}:{string.Join(',', input.BeatIds)}");
-            return ValueTask.FromResult<ReferenceAnchoredDraftPayload>(null!);
-        }
-
-        public ValueTask<IReadOnlyList<ReferenceDraftParagraphCandidatePayload>> GetDraftCandidatesAsync(
-            GetReferenceDraftCandidatesPayload input,
-            CancellationToken cancellationToken)
-        {
-            cancellationToken.ThrowIfCancellationRequested();
-            Calls.Add($"GetDraftCandidates:{input.NovelId}:{input.BlueprintId}:{string.Join(',', input.CandidateIds)}");
-            return ValueTask.FromResult(DraftCandidatesResult);
-        }
-
-        public ValueTask<ReferenceAnchoredDraftAuditPayload> AuditDraftAgainstBlueprintAsync(
-            AuditReferenceAnchoredDraftPayload input,
-            CancellationToken cancellationToken)
-        {
-            cancellationToken.ThrowIfCancellationRequested();
-            Calls.Add($"AuditDraftAgainstBlueprint:{input.NovelId}:{input.BlueprintId}:{string.Join(',', input.CandidateIds)}");
-            return ValueTask.FromResult<ReferenceAnchoredDraftAuditPayload>(null!);
-        }
-
-        public ValueTask<IReadOnlyList<ReferenceAnchoredDraftAuditPayload>> GetDraftAuditsAsync(
-            GetReferenceAnchoredDraftAuditsPayload input,
-            CancellationToken cancellationToken)
-        {
-            cancellationToken.ThrowIfCancellationRequested();
-            Calls.Add($"GetDraftAudits:{input.NovelId}:{input.BlueprintId}:{string.Join(',', input.CandidateIds ?? [])}:{input.Limit}");
-            IReadOnlyList<ReferenceAnchoredDraftAuditPayload> audits = [];
-            return ValueTask.FromResult(audits);
-        }
-
-        public ValueTask<IReadOnlyList<ReferenceStyleAuditFindingPayload>> GetStyleAuditFindingsAsync(
-            GetReferenceStyleAuditFindingsPayload input,
-            CancellationToken cancellationToken)
-        {
-            cancellationToken.ThrowIfCancellationRequested();
-            Calls.Add($"GetStyleAuditFindings:{input.NovelId}:{input.BlueprintId}:{string.Join(',', input.CandidateIds ?? [])}:{string.Join(',', input.RiskTypes ?? [])}:{input.Limit}");
-            IReadOnlyList<ReferenceStyleAuditFindingPayload> findings = [];
-            return ValueTask.FromResult(findings);
-        }
-
-        public ValueTask<ReferenceOrchestrationRunPayload> StartOrchestrationRunAsync(
-            StartReferenceOrchestrationRunPayload input,
-            CancellationToken cancellationToken)
-        {
-            cancellationToken.ThrowIfCancellationRequested();
-            Calls.Add(
-                $"StartOrchestrationRun:{input.NovelId}:{input.ChapterNumber}:{input.ChapterGoal}:{string.Join(',', input.KnownFacts)}:{string.Join(',', input.ForbiddenFacts)}:{FormatNullableLongs(input.AnchorIds)}:{input.CorpusSearchPolicy.Mode}:{input.CorpusSearchPolicy.MaxResultsPerBeat}:{string.Join(',', input.CorpusSearchPolicy.LicenseStatuses)}:{string.Join(',', input.CorpusSearchPolicy.IncludeAnchorIds)}:{string.Join(',', input.CorpusSearchPolicy.ExcludeAnchorIds)}:<{input.SourceConfirmed.ToString().ToLowerInvariant()}>:{FormatStylePolicy(input.StylePolicy)}");
-            return ValueTask.FromResult<ReferenceOrchestrationRunPayload>(null!);
-        }
-
-        public ValueTask<IReadOnlyList<ReferenceOrchestrationRunPayload>> GetOrchestrationRunsAsync(
-            long novelId,
-            int? chapterNumber,
-            CancellationToken cancellationToken)
-        {
-            cancellationToken.ThrowIfCancellationRequested();
-            Calls.Add($"GetOrchestrationRuns:{novelId}:{chapterNumber?.ToString() ?? "<null>"}");
-            IReadOnlyList<ReferenceOrchestrationRunPayload> runs = [];
-            return ValueTask.FromResult(runs);
-        }
-
-        public ValueTask<ReferenceOrchestrationRunPayload?> GetOrchestrationRunAsync(
-            long novelId,
-            string runId,
-            CancellationToken cancellationToken)
-        {
-            cancellationToken.ThrowIfCancellationRequested();
-            Calls.Add($"GetOrchestrationRun:{novelId}:{runId}");
-            return ValueTask.FromResult<ReferenceOrchestrationRunPayload?>(null);
-        }
-
-        public ValueTask<IReadOnlyList<ReferenceOrchestrationRunEventPayload>> GetOrchestrationRunEventsAsync(
-            long novelId,
-            string runId,
-            CancellationToken cancellationToken)
-        {
-            cancellationToken.ThrowIfCancellationRequested();
-            Calls.Add($"GetOrchestrationRunEvents:{novelId}:{runId}");
-            IReadOnlyList<ReferenceOrchestrationRunEventPayload> events = [];
-            return ValueTask.FromResult(events);
-        }
-
-        public ValueTask<ReferenceOrchestrationRunPayload> ResumeOrchestrationRunAsync(
-            ResumeReferenceOrchestrationRunPayload input,
-            CancellationToken cancellationToken)
-        {
-            cancellationToken.ThrowIfCancellationRequested();
-            Calls.Add($"ResumeOrchestrationRun:{input.NovelId}:{input.RunId}:{input.DecisionType}:{input.DecisionPayload}");
-            return ValueTask.FromResult<ReferenceOrchestrationRunPayload>(null!);
-        }
-
-        public ValueTask<ReferenceOrchestrationRunPayload> CancelOrchestrationRunAsync(
-            CancelReferenceOrchestrationRunPayload input,
-            CancellationToken cancellationToken)
-        {
-            cancellationToken.ThrowIfCancellationRequested();
-            Calls.Add($"CancelOrchestrationRun:{input.NovelId}:{input.RunId}:{input.Reason}");
-            return ValueTask.FromResult<ReferenceOrchestrationRunPayload>(null!);
-        }
-    }
-
-    private static string FormatSlots(IReadOnlyList<ReferenceSlotValuePayload> slots)
-    {
-        return string.Join(',', slots.Select(slot => $"{slot.SlotName}={slot.Value}"));
-    }
-
-    private static string FormatRevisionChanges(IReadOnlyList<ReferenceBlueprintRevisionChangePayload> changes)
-    {
-        return string.Join(',', changes.Select(change => $"{change.FieldPath}={change.NewValue}"));
-    }
 
     private static string FormatNullableLongs(IReadOnlyList<long>? values)
     {
         return values is null ? "<null>" : string.Join(',', values);
     }
 
-    private static string FormatStylePolicy(ReferenceOrchestrationStylePolicyPayload? stylePolicy)
-    {
-        return stylePolicy is null
-            ? "<null>"
-            : string.Join(':',
-                string.Join(',', stylePolicy.StyleProfileIds),
-                string.Join(',', stylePolicy.StyleDimensions),
-                stylePolicy.ImitationIntensity,
-                stylePolicy.MinStyleFit.ToString("0.####", System.Globalization.CultureInfo.InvariantCulture),
-                stylePolicy.AllowedCloseness,
-                string.Join(',', stylePolicy.RequiredEvidenceTypes),
-                string.Join(',', stylePolicy.ForbiddenStyleRisks));
-    }
+
 }

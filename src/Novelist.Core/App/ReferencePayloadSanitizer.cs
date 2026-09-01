@@ -146,99 +146,13 @@ public static class ReferencePayloadSanitizer
         };
     }
 
-    public static AdaptReferenceMaterialResultPayload? SanitizeAdaptMaterialResult(
-        AdaptReferenceMaterialResultPayload? result)
-    {
-        if (result is null)
-        {
-            return null;
-        }
 
-        return result with
-        {
-            CandidateId = RedactAndBoundText(result.CandidateId, MetadataMaxChars),
-            MaterialId = RedactAndBoundText(result.MaterialId, MetadataMaxChars),
-            RewriteLevel = RedactAndBoundText(result.RewriteLevel, MetadataMaxChars),
-            Text = RedactAndBoundText(result.Text, AdaptedTextPreviewMaxChars),
-            ChangedSlots = (result.ChangedSlots ?? Array.Empty<ReferenceSlotValuePayload>())
-                .Select(SanitizeSlotValue)
-                .ToArray(),
-            NonSlotEdits = (result.NonSlotEdits ?? Array.Empty<string>())
-                .Select(edit => RedactAndBoundText(edit, DiagnosticMaxChars))
-                .ToArray(),
-            Audit = SanitizeReuseAudit(result.Audit)
-        };
-    }
 
-    public static IReadOnlyList<ReferenceDraftParagraphCandidatePayload> SanitizeDraftCandidates(
-        IReadOnlyList<ReferenceDraftParagraphCandidatePayload>? candidates)
-    {
-        return (candidates ?? Array.Empty<ReferenceDraftParagraphCandidatePayload>())
-            .Select(SanitizeDraftCandidate)
-            .ToArray();
-    }
 
-    public static ReferenceDraftParagraphCandidatePayload SanitizeDraftCandidate(
-        ReferenceDraftParagraphCandidatePayload candidate)
-    {
-        return candidate with
-        {
-            CandidateId = RedactAndBoundText(candidate.CandidateId, MetadataMaxChars),
-            BeatId = RedactAndBoundText(candidate.BeatId, MetadataMaxChars),
-            MaterialId = RedactAndBoundText(candidate.MaterialId, MetadataMaxChars),
-            RewriteLevel = RedactAndBoundText(candidate.RewriteLevel, MetadataMaxChars),
-            Text = RedactAndBoundText(candidate.Text, DraftCandidateTextMaxChars),
-            ChangedSlots = (candidate.ChangedSlots ?? Array.Empty<ReferenceSlotValuePayload>())
-                .Select(SanitizeSlotValue)
-                .ToArray(),
-            NonSlotEdits = (candidate.NonSlotEdits ?? Array.Empty<string>())
-                .Select(edit => RedactAndBoundText(edit, DiagnosticMaxChars))
-                .ToArray(),
-            AuditStatus = RedactAndBoundText(candidate.AuditStatus, MetadataMaxChars),
-            StyleAttempts = candidate.StyleAttempts is null
-                ? null
-                : candidate.StyleAttempts.Select(SanitizeDraftStyleAttempt).ToArray()
-        };
-    }
 
-    public static ReferenceReuseAuditPayload SanitizeReuseAudit(ReferenceReuseAuditPayload? audit)
-    {
-        if (audit is null)
-        {
-            return new ReferenceReuseAuditPayload(
-                string.Empty,
-                "unknown",
-                string.Empty,
-                [],
-                [],
-                [],
-                [],
-                [],
-                DateTimeOffset.UnixEpoch);
-        }
 
-        return audit with
-        {
-            AuditId = RedactAndBoundText(audit.AuditId, MetadataMaxChars),
-            Status = RedactAndBoundText(audit.Status, MetadataMaxChars),
-            RewriteLevel = RedactAndBoundText(audit.RewriteLevel, MetadataMaxChars),
-            ProvenanceErrors = (audit.ProvenanceErrors ?? Array.Empty<string>())
-                .Select(error => RedactAndBoundText(error, DiagnosticMaxChars))
-                .ToArray(),
-            UnsupportedFactErrors = (audit.UnsupportedFactErrors ?? Array.Empty<string>())
-                .Select(error => RedactAndBoundText(error, DiagnosticMaxChars))
-                .ToArray(),
-            AiProseRisks = (audit.AiProseRisks ?? Array.Empty<string>())
-                .Select(risk => RedactAndBoundText(risk, DiagnosticMaxChars))
-                .ToArray(),
-            NonSlotEdits = (audit.NonSlotEdits ?? Array.Empty<string>())
-                .Select(edit => RedactAndBoundText(edit, DiagnosticMaxChars))
-                .ToArray(),
-            RequiredFixes = (audit.RequiredFixes ?? Array.Empty<string>())
-                .Select(fix => RedactAndBoundText(fix, DiagnosticMaxChars))
-                .ToArray()
-        };
-    }
+
+
 
     public static ReferenceMaterialDetailPayload? SanitizeMaterialDetail(ReferenceMaterialDetailPayload? detail)
     {
@@ -445,34 +359,9 @@ public static class ReferencePayloadSanitizer
         };
     }
 
-    private static ReferenceSlotValuePayload SanitizeSlotValue(ReferenceSlotValuePayload slotValue)
-    {
-        return slotValue with
-        {
-            SlotName = RedactAndBoundText(slotValue.SlotName, MetadataMaxChars),
-            Value = RedactAndBoundText(slotValue.Value, MetadataMaxChars)
-        };
-    }
 
-    private static ReferenceDraftStyleAttemptPayload SanitizeDraftStyleAttempt(
-        ReferenceDraftStyleAttemptPayload attempt)
-    {
-        return attempt with
-        {
-            StyleDimensions = (attempt.StyleDimensions ?? Array.Empty<string>())
-                .Select(value => RedactAndBoundText(value, MetadataMaxChars))
-                .ToArray(),
-            ImitationIntensity = RedactAndBoundText(attempt.ImitationIntensity, MetadataMaxChars),
-            AllowedCloseness = RedactAndBoundText(attempt.AllowedCloseness, MetadataMaxChars),
-            RequiredEvidenceTypes = (attempt.RequiredEvidenceTypes ?? Array.Empty<string>())
-                .Select(value => RedactAndBoundText(value, MetadataMaxChars))
-                .ToArray(),
-            ForbiddenStyleRisks = (attempt.ForbiddenStyleRisks ?? Array.Empty<string>())
-                .Select(value => RedactAndBoundText(value, MetadataMaxChars))
-                .ToArray(),
-            Status = RedactAndBoundText(attempt.Status, MetadataMaxChars)
-        };
-    }
+
+
 
     private static TextPreview BoundPreview(string? value, int maxChars)
     {

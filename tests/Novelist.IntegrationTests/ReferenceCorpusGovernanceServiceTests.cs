@@ -113,23 +113,7 @@ Assert.True(page.HasMore);
  Assert.DoesNotContain(next.Items, queued => queued.QueueId == item.QueueId);
  }
 
- [Fact]
- public async Task RecomputesInsertionAuditAndRejectsUnlicensedSources()
- {
- var (options, service) = await CreateServiceAsync();
- await SeedAsync(options);
- await SeedInsertionNodeAsync(options);
- await service.SetSessionLibraryBindingAsync(new("project:7:default", "library-project", true), CancellationToken.None);
- await service.UpdateLicenseAsync(new(1, "authorized", "contract", "adapted_only", 0.95, true), CancellationToken.None);
 
- var input = BuildInsertionAudit("audit-valid", "他推门进屋，外面的雨声跟着涌了进来。");
- Assert.True(await service.RecordInsertionAuditAsync(input, CancellationToken.None));
- Assert.True(await service.RecordInsertionAuditAsync(input, CancellationToken.None));
-
- await service.UpdateLicenseAsync(new(1, "forbidden", null, "forbidden", null, false), CancellationToken.None);
- await Assert.ThrowsAsync<InvalidOperationException>(async () =>
- await service.RecordInsertionAuditAsync(BuildInsertionAudit("audit-forbidden", "他推门进屋，外面的雨声跟着涌了进来。"), CancellationToken.None));
- }
 
  private async ValueTask<(AppInitializationOptions Options, SqliteReferenceCorpusGovernanceService Service)> CreateServiceAsync()
  {
@@ -202,18 +186,7 @@ command.Parameters.AddWithValue("$text", text);
 await command.ExecuteNonQueryAsync();
 }
 
-private static RecordReferenceCorpusInsertionAuditPayload BuildInsertionAudit(string auditId, string output)
-{
-const string source = "他推开门，雨声一下灌进屋里。";
-var sourceHash = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(source))).ToLowerInvariant();
-var piece = new ReferenceCorpusInsertionPiecePayload("piece-1", "beat-1", "source-1", "node-1", 1, "library-project", sourceHash, "adapted_only", "authorized", output, "hash", true, [], [], []);
-var chapterContext = new CurrentChapterContextPayload(7, 1, output, output.Length, null, []);
-var scope = new ReferenceCorpusScopePayload(["library-project"], ["adapted_only"], [1], [], "project:7:default");
-var query = new ReferenceCorpusQueryContextPayload("scene", "goal", "pacing", "opening", "hook", [], [], chapterContext, scope);
-var blueprint = new ReferenceCorpusInsertionBlueprintPayload("blueprint-1", "query-hash", "strategy", []);
-var draft = new ReferenceCorpusInsertionDraftPayload(query, blueprint, [piece], [], [], output, output, true, new(true, "passed", [], []), new(true, "passed", [], [], []));
-return new RecordReferenceCorpusInsertionAuditPayload(auditId, "project:7:default", 7, 1, "candidate-1", draft);
-}
+
 
  public void Dispose() { if (Directory.Exists(_root)) Directory.Delete(_root, true); }
 }

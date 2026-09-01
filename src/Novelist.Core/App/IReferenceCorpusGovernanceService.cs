@@ -23,7 +23,6 @@ public interface IReferenceCorpusGovernanceService
 ValueTask<ReferenceCorpusDedupResultPayload> RebuildDedupGroupsAsync(
 RebuildReferenceCorpusDedupGroupsPayload input,
 CancellationToken cancellationToken);
- ValueTask<bool> RecordInsertionAuditAsync(RecordReferenceCorpusInsertionAuditPayload input, CancellationToken cancellationToken);
  ValueTask<IReadOnlyList<ReferenceCorpusAggregatePayload>> BuildAggregatesAsync(BuildReferenceCorpusAggregatesPayload input, CancellationToken cancellationToken);
  ValueTask<IReadOnlyList<ReferenceCorpusAggregatePayload>> ListAggregatesAsync(ListReferenceCorpusAggregatesPayload input, CancellationToken cancellationToken);
  ValueTask<int> RefreshReviewQueueAsync(RefreshReferenceCorpusReviewQueuePayload input, CancellationToken cancellationToken);

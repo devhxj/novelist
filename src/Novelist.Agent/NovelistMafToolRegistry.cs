@@ -32,7 +32,6 @@ public sealed partial class NovelistMafToolRegistry
     private readonly IWebFetchService? _webFetch;
     private readonly IWebSearchService? _webSearch;
     private readonly IReferenceAnchorService? _referenceAnchors;
-    private readonly IReferenceAnchoredDraftService? _referenceDrafts;
     private readonly IReferenceStyleProfileService? _referenceStyleProfiles;
     private readonly JsonSerializerOptions _serializerOptions;
 
@@ -51,7 +50,6 @@ public sealed partial class NovelistMafToolRegistry
             webFetch: null,
             webSearch: null,
             referenceAnchors: null,
-            referenceDrafts: null,
             serializerOptions: serializerOptions,
             referenceStyleProfiles: null)
     {
@@ -69,7 +67,6 @@ public sealed partial class NovelistMafToolRegistry
         IWebFetchService? webFetch = null,
         IWebSearchService? webSearch = null,
         IReferenceAnchorService? referenceAnchors = null,
-        IReferenceAnchoredDraftService? referenceDrafts = null,
         JsonSerializerOptions? serializerOptions = null,
         IReferenceStyleProfileService? referenceStyleProfiles = null)
     {
@@ -84,7 +81,6 @@ public sealed partial class NovelistMafToolRegistry
         _webFetch = webFetch;
         _webSearch = webSearch;
         _referenceAnchors = referenceAnchors;
-        _referenceDrafts = referenceDrafts;
         _referenceStyleProfiles = referenceStyleProfiles;
         _serializerOptions = EnsureTypeInfoResolver(serializerOptions ?? DefaultSerializerOptions);
     }

@@ -161,18 +161,6 @@ public static class ReferenceAnchorBridgeHandlers
             .Select(ToMaterialSummary)
             .ToArray());
 
-        dispatcher.Register("AdaptReferenceMaterial", async (context, cancellationToken) =>
-            ReferencePayloadSanitizer.SanitizeAdaptMaterialResult(
-                await service.AdaptMaterialAsync(
-                    ReadObjectArg<AdaptReferenceMaterialPayload>(context.Payload, 0, "input"),
-                    cancellationToken)));
-
-        dispatcher.Register("AuditReferenceReuse", async (context, cancellationToken) =>
-            ReferencePayloadSanitizer.SanitizeReuseAudit(
-                await service.AuditCandidateAsync(
-                    ReadObjectArg<AuditReferenceReusePayload>(context.Payload, 0, "input"),
-                    cancellationToken)));
-
         dispatcher.Register("RecordReferenceUserFeedback", async (context, cancellationToken) =>
             await service.RecordUserFeedbackAsync(
                 ReadObjectArg<RecordReferenceUserFeedbackPayload>(context.Payload, 0, "input"),

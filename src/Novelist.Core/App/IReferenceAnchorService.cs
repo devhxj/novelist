@@ -70,14 +70,6 @@ CancellationToken cancellationToken);
         UpdateReferenceMaterialsTagsPayload input,
         CancellationToken cancellationToken);
 
-    ValueTask<AdaptReferenceMaterialResultPayload> AdaptMaterialAsync(
-        AdaptReferenceMaterialPayload input,
-        CancellationToken cancellationToken);
-
-    ValueTask<ReferenceReuseAuditPayload> AuditCandidateAsync(
-        AuditReferenceReusePayload input,
-        CancellationToken cancellationToken);
-
     ValueTask<ReferenceUserFeedbackPayload> RecordUserFeedbackAsync(
         RecordReferenceUserFeedbackPayload input,
         CancellationToken cancellationToken);

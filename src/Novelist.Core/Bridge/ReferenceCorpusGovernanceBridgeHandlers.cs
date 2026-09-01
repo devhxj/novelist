@@ -15,7 +15,6 @@ public static class ReferenceCorpusGovernanceBridgeHandlers
  Register<UpdateReferenceCorpusLibraryMemberPayload, ReferenceCorpusGovernancePayload>(dispatcher, "UpdateReferenceCorpusLibraryMember", service.UpdateLibraryMemberAsync);
  Register<UpdateReferenceCorpusLicensePayload, ReferenceCorpusGovernancePayload>(dispatcher, "UpdateReferenceCorpusLicense", service.UpdateLicenseAsync);
 Register<RebuildReferenceCorpusDedupGroupsPayload, ReferenceCorpusDedupResultPayload>(dispatcher, "RebuildReferenceCorpusDedupGroups", service.RebuildDedupGroupsAsync);
- Register<RecordReferenceCorpusInsertionAuditPayload, bool>(dispatcher, "RecordReferenceCorpusInsertionAudit", service.RecordInsertionAuditAsync);
  Register<BuildReferenceCorpusAggregatesPayload, IReadOnlyList<ReferenceCorpusAggregatePayload>>(dispatcher, "BuildReferenceCorpusAggregates", service.BuildAggregatesAsync);
  Register<ListReferenceCorpusAggregatesPayload, IReadOnlyList<ReferenceCorpusAggregatePayload>>(dispatcher, "ListReferenceCorpusAggregates", service.ListAggregatesAsync);
  Register<RefreshReferenceCorpusReviewQueuePayload, int>(dispatcher, "RefreshReferenceCorpusReviewQueue", service.RefreshReviewQueueAsync);

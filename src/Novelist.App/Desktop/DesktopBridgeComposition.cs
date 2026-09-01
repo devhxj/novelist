@@ -115,10 +115,6 @@ public static PhotinoWebMessageBridge CreateBridge(
             new ReferenceChapterSplitChatCompletionAnalyzer(settingsService, chatCompletionClient),
             materializationDatabasePathResolver,
             semanticSearch: referenceMaterializationSemanticSearch);
-        var referenceMaterializationBlueprintPreviewService = new SqliteReferenceMaterializationBlueprintPreviewService(
-            options,
-            referenceMaterializationService,
-            materializationDatabasePathResolver);
         var referenceMaterializationWorker = new ReferenceMaterializationWorker(
             materializationDatabasePathResolver,
             new ReferenceMaterializationChatCompletionQualifier(chatCompletionClient),
@@ -130,13 +126,6 @@ public static PhotinoWebMessageBridge CreateBridge(
             embeddingClient,
             sqliteVecProvider,
             sqliteVecProvider);
-var referenceCorpusWritingService = new SqliteReferenceCorpusWritingService(
-            options,
-            referenceCorpusService,
-chapterContentService);
- var referenceCorpusBlueprintIterationCoordinator = new SqliteReferenceCorpusBlueprintIterationCoordinator(
- referenceCorpusWritingService,
- options);
 var referenceCorpusAnalysisService = new SqliteReferenceCorpusAnalysisService(
 options,
 settingsService,
@@ -163,12 +152,6 @@ referenceCorpusService);
             options,
             novelService,
             new ReferenceStyleChatCompletionLlmAnalyzer(settingsService, chatCompletionClient));
-        var referenceAnchoredDraftService = new SqliteReferenceAnchoredDraftService(
-            options,
-            novelService,
-            planningService,
-            referenceAnchorService,
-            new AiReferenceBlueprintRevisionProposalProvider(settingsService, chatCompletionClient));
         var webFetchService = new HttpWebFetchService();
         var webSearchService = new DeepSeekWebSearchService(llmService);
         var subagentRunner = new DeferredSubagentRunner();
@@ -184,7 +167,6 @@ referenceCorpusService);
             webFetchService,
             webSearchService,
             referenceAnchorService,
-            referenceAnchoredDraftService,
             referenceStyleProfiles: referenceStyleProfileService));
         var chatService = new FileSystemChatSessionService(
             options,
@@ -196,7 +178,12 @@ referenceCorpusService);
             approvalCoordinator,
             chatToolExecutor,
             chapterContentService,
-            versionControl);
+            versionControl,
+            referenceAnchors: referenceAnchorService,
+            planning: planningService);
+        var chapterCorpusCoverageService = new ChapterCorpusCoverageService(
+            referenceAnchorService,
+            planningService);
         subagentRunner.SetTarget(chatService);
         var exportService = new FileSystemNovelExportService(
             novelService,
@@ -235,16 +222,14 @@ referenceCorpusService);
             .RegisterGitHistoryHandlers(versionControl)
             .RegisterReferenceAnchorHandlers(referenceAnchorService)
             .RegisterReferenceMaterializationHandlers(referenceMaterializationService)
-            .RegisterReferenceMaterializationBlueprintPreviewHandlers(referenceMaterializationBlueprintPreviewService)
             .RegisterReferenceCorpusHandlers(referenceCorpusService)
 .RegisterReferenceCorpusAnalysisHandlers(referenceCorpusAnalysisService)
 .RegisterReferenceCorpusAnalysisJobHandlers(referenceCorpusAnalysisScheduler)
-.RegisterReferenceCorpusWritingHandlers(referenceCorpusWritingService, referenceCorpusBlueprintIterationCoordinator)
  .RegisterReferenceCorpusGovernanceHandlers(referenceCorpusGovernanceService)
             .RegisterReferenceStyleProfileHandlers(referenceStyleProfileService)
-            .RegisterReferenceAnchoredDraftHandlers(referenceAnchoredDraftService)
             .RegisterApprovalHandlers(approvalCoordinator)
-            .RegisterChatSessionHandlers(chatService);
+            .RegisterChatSessionHandlers(chatService)
+            .RegisterChapterCorpusHandlers(chapterCorpusCoverageService);
 return new DesktopBridgeRuntime(
 new PhotinoWebMessageBridge(dispatcher, window),
  referenceCorpusAnalysisWorker,

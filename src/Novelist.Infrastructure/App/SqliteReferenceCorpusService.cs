@@ -1,5 +1,6 @@
 using System.Security.Cryptography;
 using System.Diagnostics;
+using System.Globalization;
 using System.Text;
 using System.Text.Json;
 using Microsoft.Data.Sqlite;
@@ -4118,12 +4119,58 @@ Evidence: candidate.Observations
         terms.Add(value.Trim());
     }
 
+    private const char ComparisonPunctuationPlaceholder = '#';
+
+    private static string NormalizeTextForComparison(string? value)
+    {
+        if (string.IsNullOrEmpty(value))
+        {
+            return string.Empty;
+        }
+
+        var builder = new StringBuilder(value.Length);
+        foreach (var rune in value.Normalize(NormalizationForm.FormKC).EnumerateRunes())
+        {
+            var category = Rune.GetUnicodeCategory(rune);
+            if (category is UnicodeCategory.SpaceSeparator or UnicodeCategory.LineSeparator or UnicodeCategory.ParagraphSeparator or UnicodeCategory.Control)
+            {
+                continue;
+            }
+
+            if (IsChineseCodePoint(rune.Value) || category is UnicodeCategory.DecimalDigitNumber)
+            {
+                builder.Append(rune);
+                continue;
+            }
+
+            if (category is UnicodeCategory.ConnectorPunctuation or UnicodeCategory.DashPunctuation or UnicodeCategory.OpenPunctuation or UnicodeCategory.ClosePunctuation or UnicodeCategory.InitialQuotePunctuation or UnicodeCategory.FinalQuotePunctuation or UnicodeCategory.OtherPunctuation)
+            {
+                builder.Append(ComparisonPunctuationPlaceholder);
+            }
+        }
+
+        return builder.ToString();
+    }
+
+    private static bool IsChineseCodePoint(int value)
+    {
+        return value is >= 0x3400 and <= 0x4DBF
+            or >= 0x4E00 and <= 0x9FFF
+            or >= 0xF900 and <= 0xFAFF
+            or >= 0x20000 and <= 0x2A6DF
+            or >= 0x2A700 and <= 0x2B73F
+            or >= 0x2B740 and <= 0x2B81F
+            or >= 0x2B820 and <= 0x2CEAF
+            or >= 0x2CEB0 and <= 0x2EBEF
+            or >= 0x30000 and <= 0x3134F;
+    }
+
     private static double PositionFitScore(
         CorpusCandidateNode candidate,
         CurrentChapterContextPayload chapterContext)
     {
-        var draft = ReferenceCorpusSimilarityGate.NormalizeForComparison(chapterContext.CurrentDraftText);
-        var node = ReferenceCorpusSimilarityGate.NormalizeForComparison(candidate.Text);
+        var draft = NormalizeTextForComparison(chapterContext.CurrentDraftText);
+        var node = NormalizeTextForComparison(candidate.Text);
         if (draft.Length == 0 || node.Length == 0)
         {
             return 0;

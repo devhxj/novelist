@@ -118,53 +118,10 @@ public sealed class PhotinoReferenceWorkflowSmokeTests : IDisposable
         Assert.False(string.IsNullOrWhiteSpace(material.GetProperty("source_segment_id").GetString()));
         Assert.False(string.IsNullOrWhiteSpace(material.GetProperty("source_hash").GetString()));
 
-        var blueprint = await SendAsync(bridge, window, "GenerateReferenceChapterBlueprint", new
-        {
-            novel_id = novelId,
-            chapter_number = 1,
-            title = "第一章蓝图",
-            chapter_goal = "雨声压低了整条街的呼吸",
-            anchor_ids = new[] { anchorId },
-            known_facts = new[] { "雨声压低了整条街的呼吸", "林岚在雨夜门口" },
-            forbidden_facts = Array.Empty<string>()
-        });
-        var blueprintId = blueprint.GetProperty("blueprint_id").GetInt64();
-        var review = await SendAsync(bridge, window, "ReviewReferenceChapterBlueprint", new
-        {
-            novel_id = novelId,
-            blueprint_id = blueprintId
-        });
-        Assert.Equal("passed", review.GetProperty("status").GetString());
-
-        var reviewId = review.GetProperty("review_id").GetString() ?? throw new InvalidOperationException("Review id is missing.");
-        await SendAsync(bridge, window, "ApproveReferenceChapterBlueprint", new
-        {
-            novel_id = novelId,
-            blueprint_id = blueprintId,
-            review_id = reviewId,
-            approver_origin = "smoke_test"
-        });
-        var binding = await SendAsync(bridge, window, "BindReferenceBlueprintMaterials", new
-        {
-            novel_id = novelId,
-            blueprint_id = blueprintId,
-            max_results_per_beat = 2,
-            select_top_candidate = true
-        });
-        Assert.Contains(binding.GetProperty("links").EnumerateArray(), link => link.GetProperty("selected").GetBoolean());
-        Assert.Contains(
-            binding.GetProperty("links").EnumerateArray(),
-            link => string.Equals(link.GetProperty("material_id").GetString(), materialId, StringComparison.Ordinal));
-
-        var draft = await SendAsync(bridge, window, "GenerateReferenceAnchoredDraft", new
-        {
-            novel_id = novelId,
-            blueprint_id = blueprintId,
-            beat_ids = Array.Empty<string>()
-        });
-        Assert.True(draft.GetProperty("candidates").GetArrayLength() > 0);
-        Assert.True(draft.TryGetProperty("audit", out var audit));
-        Assert.NotEqual(JsonValueKind.Null, audit.ValueKind);
+        // 拼装线已随轻量化聚焦退役：蓝图/拼装/编排方法不再注册，语料召回仍可用。
+        await AssertMethodNotRegisteredAsync(bridge, window, "GenerateReferenceChapterBlueprint");
+        await AssertMethodNotRegisteredAsync(bridge, window, "GenerateReferenceAnchoredDraft");
+        await AssertMethodNotRegisteredAsync(bridge, window, "StartReferenceOrchestrationRun");
 
         var chapterContent = await SendAsync(bridge, window, "GetContent", novelId, chapterPath);
         Assert.Equal(string.Empty, chapterContent.GetString());
@@ -288,6 +245,28 @@ public sealed class PhotinoReferenceWorkflowSmokeTests : IDisposable
                 ? error.GetRawText()
                 : message);
         return response.RootElement.GetProperty("result").Clone();
+    }
+
+    private static async ValueTask AssertMethodNotRegisteredAsync(PhotinoWebMessageBridge bridge, RecordingWindow window, string method)
+    {
+        var requestId = "req_" + method + "_" + Guid.NewGuid().ToString("N");
+        await bridge.ReceiveAsync(JsonSerializer.Serialize(
+            new
+            {
+                kind = "request",
+                id = requestId,
+                method,
+                payload = new { args = Array.Empty<object>() }
+            },
+            BridgeJson.SerializerOptions));
+        Assert.NotEmpty(window.SentMessages);
+        var message = window.SentMessages[^1];
+        using var response = JsonDocument.Parse(message);
+        Assert.Equal(requestId, response.RootElement.GetProperty("id").GetString());
+        Assert.False(response.RootElement.GetProperty("ok").GetBoolean(), $"{method} should be retired with the assembly line.");
+        Assert.Equal(
+            "METHOD_NOT_FOUND",
+            response.RootElement.GetProperty("error").GetProperty("code").GetString());
     }
 
     private static async ValueTask<IReadOnlyList<PersistedStyleAnalysisRun>> ReadStyleAnalysisRunsAsync(

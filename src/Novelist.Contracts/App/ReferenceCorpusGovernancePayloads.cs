@@ -66,14 +66,6 @@ public sealed record RebuildReferenceCorpusDedupGroupsPayload([property: JsonPro
 public sealed record ReferenceCorpusDedupResultPayload(
 [property: JsonPropertyName("members_scanned")] int MembersScanned,
 [property: JsonPropertyName("groups_assigned")] int GroupsAssigned);
-public sealed record RecordReferenceCorpusInsertionAuditPayload(
- [property: JsonPropertyName("audit_id")] string AuditId,
- [property: JsonPropertyName("session_id")] string SessionId,
- [property: JsonPropertyName("novel_id")] long NovelId,
- [property: JsonPropertyName("chapter_number")] int ChapterNumber,
- [property: JsonPropertyName("candidate_id")] string CandidateId,
- [property: JsonPropertyName("draft")] ReferenceCorpusInsertionDraftPayload Draft);
-
 public sealed record BuildReferenceCorpusAggregatesPayload(
  [property: JsonPropertyName("library_ids")] IReadOnlyList<string> LibraryIds,
  [property: JsonPropertyName("run_id")] string? RunId);

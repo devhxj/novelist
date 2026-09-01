@@ -37,7 +37,6 @@ public sealed partial class SqliteReferenceAnchorService : IReferenceAnchorServi
     private const int SqliteConstraintErrorCode = 19;
     private static readonly Regex MarkdownHeadingPattern = new(@"^\s{0,3}#{1,6}\s+(.+?)\s*$", RegexOptions.Compiled | RegexOptions.CultureInvariant);
     private static readonly Regex BlankLinePattern = new(@"\n\s*\n", RegexOptions.Compiled | RegexOptions.CultureInvariant);
-    private static readonly Regex RiskTokenPattern = new(@"[A-Za-z][A-Za-z0-9_]{1,}|\d+(?:\.\d+)?", RegexOptions.Compiled | RegexOptions.CultureInvariant);
     private static readonly Regex SecretPattern = new(@"\b(?:sk-[A-Za-z0-9_-]{12,}|Bearer\s+[A-Za-z0-9._~+/=-]{8,})\b", RegexOptions.Compiled | RegexOptions.CultureInvariant | RegexOptions.IgnoreCase);
     private static readonly Regex FileUriPattern = new(@"\bfile://[^\s;'""]+", RegexOptions.Compiled | RegexOptions.CultureInvariant | RegexOptions.IgnoreCase);
     private static readonly Regex UncPathPattern = new(@"\\\\[^\\/:*?""<>|\r\n;]+\\[^\\/:*?""<>|\r\n;]+(?:\\[^\\/:*?""<>|\r\n;]+)*", RegexOptions.Compiled | RegexOptions.CultureInvariant);
@@ -58,7 +57,6 @@ public sealed partial class SqliteReferenceAnchorService : IReferenceAnchorServi
     private static readonly string[] LimitedPovMarkers = ["看不见", "没看见", "不知道", "并不知道", "没有察觉", "未曾发现", "无从知道", "背对着", "背对", "没有回头", "没回头", "未回头"];
     private static readonly string[] AfterbeatMarkers = ["移开目光", "垂下眼", "停了一下", "停住", "顿了顿", "沉默了一下", "攥紧", "松开"];
     private static readonly string[] ActionAfterbeatEvidenceMarkers = [.. AfterbeatMarkers, .. EmotionEvidenceMarkers];
-    private static readonly string[] AiRiskPhrases = ["无法言喻", "复杂的情绪", "某种意义上", "仿佛有什么", "命运的齿轮", "心中涌起"];
     private static readonly HashSet<string> UnknownMaterialTags = new(StringComparer.OrdinalIgnoreCase)
     {
         string.Empty,
@@ -1983,95 +1981,9 @@ public sealed partial class SqliteReferenceAnchorService : IReferenceAnchorServi
         }
     }
 
-    public async ValueTask<AdaptReferenceMaterialResultPayload> AdaptMaterialAsync(
-        AdaptReferenceMaterialPayload input,
-        CancellationToken cancellationToken)
-    {
-        ArgumentNullException.ThrowIfNull(input);
-        ValidateNovelId(input.NovelId);
-        var materialId = NormalizeRequiredText(input.MaterialId, nameof(input.MaterialId), maxLength: 256);
-        ValidateRewriteLevel(input.MaxRewriteLevel);
 
-        await _mutex.WaitAsync(cancellationToken);
-        try
-        {
-            var databasePath = await DatabasePathAsync(cancellationToken);
-            await EnsureSchemaAsync(databasePath, cancellationToken);
-            await using var connection = await OpenConnectionAsync(databasePath, cancellationToken);
-            var material = await ReadMaterialAsync(connection, input.NovelId, materialId, cancellationToken)
-                ?? throw new ArgumentException("Reference material does not exist.", nameof(input));
-            var declaredSlots = await ReadMaterialSlotsAsync(connection, material.MaterialId, cancellationToken);
-            var adapted = ApplySlotValues(material.Text, declaredSlots, input.SlotValues);
-            var rewriteLevel = ReferenceRewriteLevelClassifier.Classify(
-                material.Text,
-                adapted.Text,
-                adapted.ChangedSlots);
-            var nonSlotEdits = ReferenceNonSlotEditReporter.Report(
-                material.Text,
-                adapted.Text,
-                adapted.ChangedSlots);
-            var audit = BuildReuseAudit(
-                material,
-                adapted.Text,
-                input.MaxRewriteLevel,
-                input.SceneFacts,
-                rewriteLevel,
-                nonSlotEdits,
-                DateTimeOffset.UtcNow);
-            var candidateId = "candidate-" + Guid.NewGuid().ToString("N");
-            var result = new AdaptReferenceMaterialResultPayload(
-                candidateId,
-                material.MaterialId,
-                rewriteLevel,
-                adapted.Text,
-                adapted.ChangedSlots,
-                nonSlotEdits,
-                audit);
-            await PersistReuseCandidateAsync(connection, result, cancellationToken);
-            return result;
-        }
-        finally
-        {
-            _mutex.Release();
-        }
-    }
 
-    public async ValueTask<ReferenceReuseAuditPayload> AuditCandidateAsync(
-        AuditReferenceReusePayload input,
-        CancellationToken cancellationToken)
-    {
-        ArgumentNullException.ThrowIfNull(input);
-        ValidateNovelId(input.NovelId);
-        var materialId = NormalizeRequiredText(input.MaterialId, nameof(input.MaterialId), maxLength: 256);
-        var candidateText = NormalizeRequiredText(input.CandidateText, nameof(input.CandidateText), maxLength: 20_000);
-        ValidateRewriteLevel(input.MaxRewriteLevel);
 
-        await _mutex.WaitAsync(cancellationToken);
-        try
-        {
-            var databasePath = await DatabasePathAsync(cancellationToken);
-            await EnsureSchemaAsync(databasePath, cancellationToken);
-            await using var connection = await OpenConnectionAsync(databasePath, cancellationToken);
-            var material = await ReadMaterialAsync(connection, input.NovelId, materialId, cancellationToken)
-                ?? throw new ArgumentException("Reference material does not exist.", nameof(input));
-            var rewriteLevel = ReferenceRewriteLevelClassifier.Classify(material.Text, candidateText);
-            var nonSlotEdits = ReferenceNonSlotEditReporter.Report(material.Text, candidateText);
-            var audit = BuildReuseAudit(
-                material,
-                candidateText,
-                input.MaxRewriteLevel,
-                input.SceneFacts,
-                rewriteLevel,
-                nonSlotEdits,
-                DateTimeOffset.UtcNow);
-            await PersistReuseAuditAsync(connection, candidateId: string.Empty, material.MaterialId, audit, cancellationToken);
-            return audit;
-        }
-        finally
-        {
-            _mutex.Release();
-        }
-    }
 
     public async ValueTask<ReferenceUserFeedbackPayload> RecordUserFeedbackAsync(
         RecordReferenceUserFeedbackPayload input,
@@ -5007,34 +4919,7 @@ CancellationToken cancellationToken)
         }
     }
 
-    private static async ValueTask<IReadOnlyList<ReferenceMaterialSlot>> ReadMaterialSlotsAsync(
-        SqliteConnection connection,
-        string materialId,
-        CancellationToken cancellationToken)
-    {
-        await using var command = connection.CreateCommand();
-        command.CommandText = """
-            SELECT slot_id, material_id, slot_name, placeholder, start_offset, end_offset
-            FROM reference_material_slots
-            WHERE material_id = $material_id
-            ORDER BY start_offset ASC, slot_name ASC;
-            """;
-        command.Parameters.AddWithValue("$material_id", materialId);
-        var slots = new List<ReferenceMaterialSlot>();
-        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
-        while (await reader.ReadAsync(cancellationToken))
-        {
-            slots.Add(new ReferenceMaterialSlot(
-                reader.GetString(0),
-                reader.GetString(1),
-                reader.GetString(2),
-                reader.GetString(3),
-                reader.GetInt32(4),
-                reader.GetInt32(5)));
-        }
 
-        return slots;
-    }
 
     private static async ValueTask<IReadOnlyList<ReferenceMaterialSlotPreviewPayload>> ReadMaterialDetailSlotsAsync(
         SqliteConnection connection,
@@ -5422,86 +5307,11 @@ CancellationToken cancellationToken)
         return await reader.ReadAsync(cancellationToken) ? ReadBuildStatus(reader) : null;
     }
 
-    private static async ValueTask PersistReuseCandidateAsync(
-        SqliteConnection connection,
-        AdaptReferenceMaterialResultPayload result,
-        CancellationToken cancellationToken)
-    {
-        await using var transaction = (SqliteTransaction)await connection.BeginTransactionAsync(cancellationToken);
-        await using (var candidate = connection.CreateCommand())
-        {
-            candidate.Transaction = transaction;
-            candidate.CommandText = """
-                INSERT INTO reference_reuse_candidates
-                  (candidate_id, material_id, rewrite_level, text, changed_slots_json,
-                   non_slot_edits_json, audit_status, created_at)
-                VALUES
-                  ($candidate_id, $material_id, $rewrite_level, $text, $changed_slots_json,
-                   $non_slot_edits_json, $audit_status, $created_at);
-                """;
-            candidate.Parameters.AddWithValue("$candidate_id", result.CandidateId);
-            candidate.Parameters.AddWithValue("$material_id", result.MaterialId);
-            candidate.Parameters.AddWithValue("$rewrite_level", result.RewriteLevel);
-            candidate.Parameters.AddWithValue("$text", result.Text);
-            candidate.Parameters.AddWithValue("$changed_slots_json", JsonSerializer.Serialize(result.ChangedSlots, JsonOptions));
-            candidate.Parameters.AddWithValue("$non_slot_edits_json", JsonSerializer.Serialize(result.NonSlotEdits, JsonOptions));
-            candidate.Parameters.AddWithValue("$audit_status", result.Audit.Status);
-            candidate.Parameters.AddWithValue("$created_at", FormatTimestamp(result.Audit.AuditedAt));
-            await candidate.ExecuteNonQueryAsync(cancellationToken);
-        }
 
-        await PersistReuseAuditAsync(
-            connection,
-            result.CandidateId,
-            result.MaterialId,
-            result.Audit,
-            transaction,
-            cancellationToken);
-        await transaction.CommitAsync(cancellationToken);
-    }
 
-    private static async ValueTask PersistReuseAuditAsync(
-        SqliteConnection connection,
-        string candidateId,
-        string materialId,
-        ReferenceReuseAuditPayload audit,
-        CancellationToken cancellationToken)
-    {
-        await using var transaction = (SqliteTransaction)await connection.BeginTransactionAsync(cancellationToken);
-        await PersistReuseAuditAsync(connection, candidateId, materialId, audit, transaction, cancellationToken);
-        await transaction.CommitAsync(cancellationToken);
-    }
 
-    private static async ValueTask PersistReuseAuditAsync(
-        SqliteConnection connection,
-        string candidateId,
-        string materialId,
-        ReferenceReuseAuditPayload audit,
-        SqliteTransaction transaction,
-        CancellationToken cancellationToken)
-    {
-        await using var command = connection.CreateCommand();
-        command.Transaction = transaction;
-        command.CommandText = """
-            INSERT INTO reference_reuse_audits
-              (audit_id, candidate_id, material_id, status, rewrite_level, provenance_errors_json,
-               unsupported_fact_errors_json, ai_prose_risks_json, required_fixes_json, audited_at)
-            VALUES
-              ($audit_id, $candidate_id, $material_id, $status, $rewrite_level, $provenance_errors_json,
-               $unsupported_fact_errors_json, $ai_prose_risks_json, $required_fixes_json, $audited_at);
-            """;
-        command.Parameters.AddWithValue("$audit_id", audit.AuditId);
-        command.Parameters.AddWithValue("$candidate_id", candidateId);
-        command.Parameters.AddWithValue("$material_id", materialId);
-        command.Parameters.AddWithValue("$status", audit.Status);
-        command.Parameters.AddWithValue("$rewrite_level", audit.RewriteLevel);
-        command.Parameters.AddWithValue("$provenance_errors_json", JsonSerializer.Serialize(audit.ProvenanceErrors, JsonOptions));
-        command.Parameters.AddWithValue("$unsupported_fact_errors_json", JsonSerializer.Serialize(audit.UnsupportedFactErrors, JsonOptions));
-        command.Parameters.AddWithValue("$ai_prose_risks_json", JsonSerializer.Serialize(audit.AiProseRisks, JsonOptions));
-        command.Parameters.AddWithValue("$required_fixes_json", JsonSerializer.Serialize(audit.RequiredFixes, JsonOptions));
-        command.Parameters.AddWithValue("$audited_at", FormatTimestamp(audit.AuditedAt));
-        await command.ExecuteNonQueryAsync(cancellationToken);
-    }
+
+
 
     private static async ValueTask InsertUserFeedbackAsync(
         SqliteConnection connection,
@@ -8287,167 +8097,17 @@ EndOffset = baseOffset + sentence.EndOffset
         return Regex.Replace((text ?? string.Empty).Trim(), @"\s+", " ");
     }
 
-    private static AdaptedMaterial ApplySlotValues(
-        string sourceText,
-        IReadOnlyList<ReferenceMaterialSlot> declaredSlots,
-        IReadOnlyList<ReferenceSlotValuePayload>? slotValues)
-    {
-        var text = sourceText;
-        var changed = new List<ReferenceSlotValuePayload>();
-        if (slotValues is null || slotValues.Count == 0)
-        {
-            return new AdaptedMaterial(text, changed);
-        }
 
-        var declared = declaredSlots
-            .Select(slot => slot.SlotName)
-            .ToHashSet(StringComparer.Ordinal);
-        foreach (var slot in slotValues)
-        {
-            var slotName = (slot.SlotName ?? string.Empty).Trim();
-            var value = slot.Value ?? string.Empty;
-            if (slotName.Length == 0)
-            {
-                continue;
-            }
 
-            if (!declared.Contains(slotName))
-            {
-                throw new ArgumentException($"Slot '{slotName}' is not declared by this reference material.", nameof(slotValues));
-            }
 
-            var before = text;
-            text = text.Replace("{{" + slotName + "}}", value, StringComparison.Ordinal);
-            text = text.Replace("{" + slotName + "}", value, StringComparison.Ordinal);
-            if (!string.Equals(before, text, StringComparison.Ordinal))
-            {
-                changed.Add(new ReferenceSlotValuePayload(slotName, value));
-            }
-        }
 
-        return new AdaptedMaterial(text, changed);
-    }
 
-    private static ReferenceReuseAuditPayload BuildReuseAudit(
-        ReferenceMaterialPayload material,
-        string candidateText,
-        string maxRewriteLevel,
-        IReadOnlyList<string>? sceneFacts,
-        string rewriteLevel,
-        IReadOnlyList<string> nonSlotEdits,
-        DateTimeOffset now)
-    {
-        var provenanceErrors = new List<string>();
-        var unsupportedFactErrors = new List<string>();
-        var aiProseRisks = new List<string>();
-        var requiredFixes = new List<string>();
 
-        if (string.IsNullOrWhiteSpace(material.MaterialId) || string.IsNullOrWhiteSpace(material.SourceHash))
-        {
-            provenanceErrors.Add("Reference material provenance is missing.");
-        }
 
-        if (string.IsNullOrWhiteSpace(candidateText))
-        {
-            provenanceErrors.Add("Candidate text is empty.");
-        }
 
-        if (!IsRewriteLevelAllowed(rewriteLevel, maxRewriteLevel))
-        {
-            requiredFixes.Add($"Rewrite level {rewriteLevel} exceeds max rewrite level {maxRewriteLevel}.");
-        }
 
-        foreach (var token in FindUnsupportedRiskTokens(material.Text, candidateText, sceneFacts))
-        {
-            unsupportedFactErrors.Add($"Candidate introduces unsupported token: {token}");
-        }
 
-        foreach (var phrase in AiRiskPhrases.Where(phrase => candidateText.Contains(phrase, StringComparison.Ordinal)))
-        {
-            aiProseRisks.Add($"Candidate contains high-risk AI phrase: {phrase}");
-        }
 
-        var sourceLeak = ReferenceSourceLeakAuditor.Analyze(material.Text, candidateText, rewriteLevel);
-        if (sourceLeak.ShouldFail)
-        {
-            foreach (var finding in sourceLeak.Findings)
-            {
-                requiredFixes.Add($"Source-leak risk: {finding}");
-            }
-        }
-
-        if (string.Equals(rewriteLevel, ReferenceRewriteLevels.L4, StringComparison.Ordinal))
-        {
-            requiredFixes.Add("L4 rewrite cannot pass reference reuse audit.");
-        }
-
-        var status = provenanceErrors.Count == 0 &&
-            unsupportedFactErrors.Count == 0 &&
-            requiredFixes.Count == 0
-                ? "passed"
-                : "failed";
-
-        return new ReferenceReuseAuditPayload(
-            "audit-" + Guid.NewGuid().ToString("N"),
-            status,
-            rewriteLevel,
-            provenanceErrors,
-            unsupportedFactErrors,
-            aiProseRisks,
-            nonSlotEdits,
-            requiredFixes,
-            now);
-    }
-
-    private static IReadOnlyList<string> FindUnsupportedRiskTokens(
-        string sourceText,
-        string candidateText,
-        IReadOnlyList<string>? sceneFacts)
-    {
-        var allowed = new HashSet<string>(RiskTokenPattern.Matches(sourceText).Select(match => match.Value), StringComparer.OrdinalIgnoreCase);
-        if (sceneFacts is not null)
-        {
-            foreach (var fact in sceneFacts)
-            {
-                foreach (Match match in RiskTokenPattern.Matches(fact ?? string.Empty))
-                {
-                    allowed.Add(match.Value);
-                }
-            }
-        }
-
-        return RiskTokenPattern.Matches(candidateText)
-            .Select(match => match.Value)
-            .Where(token => !allowed.Contains(token))
-            .Distinct(StringComparer.OrdinalIgnoreCase)
-            .ToArray();
-    }
-
-    private static bool IsRewriteLevelAllowed(string rewriteLevel, string maxRewriteLevel)
-    {
-        return RewriteLevelRank(rewriteLevel) <= RewriteLevelRank(maxRewriteLevel);
-    }
-
-    private static int RewriteLevelRank(string rewriteLevel)
-    {
-        return rewriteLevel switch
-        {
-            ReferenceRewriteLevels.L0 => 0,
-            ReferenceRewriteLevels.L1 => 1,
-            ReferenceRewriteLevels.L2 => 2,
-            ReferenceRewriteLevels.L3 => 3,
-            ReferenceRewriteLevels.L4 => 4,
-            _ => 99
-        };
-    }
-
-    private static void ValidateRewriteLevel(string? rewriteLevel)
-    {
-        if (!ReferenceRewriteLevels.All.Contains(rewriteLevel ?? string.Empty, StringComparer.Ordinal))
-        {
-            throw new ArgumentException("Unsupported rewrite level.", nameof(rewriteLevel));
-        }
-    }
 
 private static bool IsSentenceTerminator(char value)
 {
@@ -9199,9 +8859,6 @@ private static void ValidateAnchorId(long anchorId)
         string Text,
         bool Truncated);
 
-    private sealed record AdaptedMaterial(
-        string Text,
-        IReadOnlyList<ReferenceSlotValuePayload> ChangedSlots);
 
     private sealed record StyleSearchOptions(
         IReadOnlyList<long> ProfileIds,

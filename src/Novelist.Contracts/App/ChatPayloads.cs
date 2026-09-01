@@ -9,12 +9,25 @@ public sealed record ChatInputPayload(
     [property: JsonPropertyName("message")] string Message,
     [property: JsonPropertyName("provider_name")] string ProviderName,
     [property: JsonPropertyName("model_id")] string ModelId,
-    [property: JsonPropertyName("reasoning_effort")] string ReasoningEffort);
+    [property: JsonPropertyName("reasoning_effort")] string ReasoningEffort,
+    [property: JsonPropertyName("chapter_number")]
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    int? ChapterNumber = null);
+
+public sealed record ChatCorpusUsageItemPayload(
+    [property: JsonPropertyName("material_id")] string MaterialId,
+    [property: JsonPropertyName("anchor_id")] long AnchorId,
+    [property: JsonPropertyName("anchor_title")] string AnchorTitle,
+    [property: JsonPropertyName("text_preview")] string TextPreview,
+    [property: JsonPropertyName("tags")] IReadOnlyList<string> Tags);
 
 public sealed record ChatResultPayload(
     [property: JsonPropertyName("session_id")] string SessionId,
     [property: JsonPropertyName("turn_id")] int TurnId,
-    [property: JsonPropertyName("final_text")] string FinalText);
+    [property: JsonPropertyName("final_text")] string FinalText,
+    [property: JsonPropertyName("corpus_usage")]
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    IReadOnlyList<ChatCorpusUsageItemPayload>? CorpusUsage = null);
 
 public sealed record CompressInputPayload(
     [property: JsonPropertyName("session_id")] string SessionId,

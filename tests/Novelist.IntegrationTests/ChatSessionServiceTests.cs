@@ -231,6 +231,102 @@ public sealed class ChatSessionServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task ChatWithChapterNumberInjectsReferenceCorpusAndReportsUsage()
+    {
+        var options = CreateOptions();
+        await InitializeAsync(options);
+        var settings = new FileSystemAppSettingsService(options);
+        var novelService = new FileSystemNovelService(options, settings);
+        var novel = await novelService.CreateNovelAsync(new CreateNovelPayload("长夜档案", "", ""), CancellationToken.None);
+        var planning = new FileSystemPlanningService(options, novelService);
+        await planning.UpdateChapterPlanAsync(
+            novel.Id,
+            new UpdateChapterPlanPayload(Scope: "next", Content: "林岚在雨夜门口与守门人对峙，确认水痕线索。"),
+            CancellationToken.None);
+
+        var anchors = new RecordingAnchorServiceForCorpus();
+        var events = new RecordingBridgeEventSink();
+        var completion = new ScriptedChatCompletionClient(
+            [new ChatCompletionStreamEvent(ChatCompletionStreamEventKind.Content, "雨声压低了整条街。")],
+            title: "语料注入");
+        var service = CreateService(
+            options,
+            novelService,
+            settings,
+            completion,
+            events,
+            referenceAnchors: anchors,
+            planning: planning);
+
+        var result = await service.ChatAsync(
+            new ChatInputPayload("", novel.Id, "帮我细化本章", "test", "model-a", "", ChapterNumber: 1),
+            CancellationToken.None);
+
+        var request = Assert.Single(completion.Requests);
+        var corpusMessage = Assert.Single(request.Messages, message =>
+            message.Role == "system" &&
+            message.Content.Contains("<reference-corpus>", StringComparison.Ordinal));
+        Assert.Contains("雨声压低了整条街的呼吸", corpusMessage.Content, StringComparison.Ordinal);
+        Assert.Contains("全局雨夜参考", corpusMessage.Content, StringComparison.Ordinal);
+        Assert.Contains("第 1 章", corpusMessage.Content, StringComparison.Ordinal);
+        Assert.Equal("林岚在雨夜门口与守门人对峙，确认水痕线索。", anchors.LastSearchQuery);
+
+        var usage = Assert.Single(result.CorpusUsage ?? []);
+        Assert.Equal("mat-rain-001", usage.MaterialId);
+        Assert.Equal("全局雨夜参考", usage.AnchorTitle);
+        Assert.Contains("delayed_reaction", usage.Tags);
+
+        var injectionEvent = Assert.Single(
+            events.Events,
+            recorded => recorded.Name == $"agent:{result.TurnId}" &&
+                recorded.Payload.ValueKind == JsonValueKind.Object &&
+                recorded.Payload.TryGetProperty("type", out var type) &&
+                type.GetInt32() == 3);
+        Assert.True(injectionEvent.Payload.TryGetProperty("tool_name", out var toolName));
+        Assert.Equal("search_reference_materials", toolName.GetString());
+        Assert.True(injectionEvent.Payload.TryGetProperty("metadata", out var metadata));
+        Assert.True(metadata.GetProperty("automatic").GetBoolean());
+        Assert.Equal(1, metadata.GetProperty("materials").GetArrayLength());
+    }
+
+    [Fact]
+    public async Task ChatWithoutChapterNumberSkipsReferenceCorpusInjection()
+    {
+        var options = CreateOptions();
+        await InitializeAsync(options);
+        var settings = new FileSystemAppSettingsService(options);
+        var novelService = new FileSystemNovelService(options, settings);
+        var novel = await novelService.CreateNovelAsync(new CreateNovelPayload("长夜档案", "", ""), CancellationToken.None);
+        var planning = new FileSystemPlanningService(options, novelService);
+        await planning.UpdateChapterPlanAsync(
+            novel.Id,
+            new UpdateChapterPlanPayload(Scope: "next", Content: "任意计划"),
+            CancellationToken.None);
+
+        var completion = new ScriptedChatCompletionClient(
+            [new ChatCompletionStreamEvent(ChatCompletionStreamEventKind.Content, "普通对话。")],
+            title: "无注入");
+        var service = CreateService(
+            options,
+            novelService,
+            settings,
+            completion,
+            new RecordingBridgeEventSink(),
+            referenceAnchors: new RecordingAnchorServiceForCorpus(),
+            planning: planning);
+
+        var result = await service.ChatAsync(
+            new ChatInputPayload("", novel.Id, "聊聊剧情", "test", "model-a", ""),
+            CancellationToken.None);
+
+        var request = Assert.Single(completion.Requests);
+        Assert.DoesNotContain(request.Messages, message =>
+            message.Role == "system" &&
+            message.Content.Contains("<reference-corpus>", StringComparison.Ordinal));
+        Assert.Null(result.CorpusUsage);
+    }
+
+    [Fact]
     public async Task CompressContextRebuildsActiveVersionAndNextChatUsesSummary()
     {
         var options = CreateOptions();
@@ -1220,7 +1316,9 @@ public sealed class ChatSessionServiceTests : IDisposable
         IChatToolExecutor? tools = null,
         IApprovalCoordinator? approvals = null,
         IChapterContentService? chapterContent = null,
-        IVersionControlService? versionControl = null)
+        IVersionControlService? versionControl = null,
+        IReferenceAnchorService? referenceAnchors = null,
+        IPlanningService? planning = null)
     {
         return new FileSystemChatSessionService(
             options,
@@ -1230,9 +1328,11 @@ public sealed class ChatSessionServiceTests : IDisposable
             completion,
             events,
             approvals,
-            toolExecutor: tools,
-            chapterContent: chapterContent,
-            versionControl: versionControl);
+            tools,
+            chapterContent,
+            versionControl,
+            referenceAnchors: referenceAnchors,
+            planning: planning);
     }
 
     private AppInitializationOptions CreateOptions()
@@ -1676,5 +1776,58 @@ public sealed class ChatSessionServiceTests : IDisposable
             Requests.Add(request);
             return Task.FromResult(_handler(request));
         }
+    }
+
+    private sealed class RecordingAnchorServiceForCorpus : IReferenceAnchorService
+    {
+        public string? LastSearchQuery { get; private set; }
+
+        public ValueTask<IReadOnlyList<ReferenceAnchorPayload>> GetAnchorsAsync(long novelId, CancellationToken cancellationToken)
+        {
+            IReadOnlyList<ReferenceAnchorPayload> anchors =
+            [
+                new ReferenceAnchorPayload(
+                    101, novelId, "全局雨夜参考", "作者", "D:\\books\\a.md", "markdown", "user_provided",
+                    "hash", "v1", ReferenceAnchorBuildStates.Ready,
+                    DateTimeOffset.UtcNow, DateTimeOffset.UtcNow, "private", "user_verified", []),
+            ];
+            return ValueTask.FromResult(anchors);
+        }
+
+        public ValueTask<PageResultPayload<ReferenceMaterialPayload>> SearchMaterialsAsync(SearchReferenceMaterialsPayload input, CancellationToken cancellationToken)
+        {
+            LastSearchQuery = input.Query;
+            ReferenceMaterialPayload material = new(
+                "mat-rain-001", 101, "seg-rain-001", "sentence",
+                "environment", "restrained", "rain_threshold", "close", "delayed_reaction",
+                0.91, 0.88, 0.9,
+                "雨声压低了整条街的呼吸，林岚没有立刻开口。",
+                "hash-mat", "test", true, DateTimeOffset.UtcNow);
+            return ValueTask.FromResult(new PageResultPayload<ReferenceMaterialPayload>([material], 1, 1, 1, 1));
+        }
+
+        public ValueTask<ReferenceAnchorPayload> CreateAnchorAsync(CreateReferenceAnchorPayload input, CancellationToken cancellationToken) => throw new NotSupportedException();
+        public ValueTask<ReferenceAnchorPayload> RegisterMaterializationSourceAsync(CreateReferenceAnchorPayload input, CancellationToken cancellationToken) => throw new NotSupportedException();
+        public ValueTask<IReadOnlyList<ReferenceAnchorPayload>> CreateAnchorsAsync(CreateReferenceAnchorsPayload input, CancellationToken cancellationToken) => throw new NotSupportedException();
+        public ValueTask<CreateReferenceAnchorsResultPayload> CreateAnchorsWithResultAsync(CreateReferenceAnchorsPayload input, CancellationToken cancellationToken) => throw new NotSupportedException();
+        public ValueTask<ReferenceAnchorBuildStatusPayload> RebuildAnchorAsync(long novelId, long anchorId, CancellationToken cancellationToken) => throw new NotSupportedException();
+        public ValueTask<ReferenceAnchorBuildStatusPayload?> GetBuildStatusAsync(long novelId, long anchorId, CancellationToken cancellationToken) => throw new NotSupportedException();
+        public ValueTask<ReferenceMaterialEmbeddingBackfillPayload> BackfillMaterialEmbeddingsAsync(BackfillReferenceMaterialEmbeddingsPayload input, CancellationToken cancellationToken) => throw new NotSupportedException();
+        public ValueTask<ReferenceMaterialCoveragePayload> GetMaterialCoverageAsync(GetReferenceMaterialCoveragePayload input, CancellationToken cancellationToken) => throw new NotSupportedException();
+        public ValueTask<PageResultPayload<ReferenceMaterialTagReviewItemPayload>> GetMaterialTagReviewQueueAsync(GetReferenceMaterialTagReviewQueuePayload input, CancellationToken cancellationToken) => throw new NotSupportedException();
+        public ValueTask<ReferenceMaterialDetailPayload?> GetMaterialDetailAsync(GetReferenceMaterialDetailPayload input, CancellationToken cancellationToken) => throw new NotSupportedException();
+        public ValueTask<ReferenceSourceSegmentDetailPayload?> GetSourceSegmentDetailAsync(GetReferenceSourceSegmentDetailPayload input, CancellationToken cancellationToken) => throw new NotSupportedException();
+        public ValueTask<ReferenceSourceProcessingDetailPayload?> GetSourceProcessingDetailAsync(GetReferenceSourceProcessingDetailPayload input, CancellationToken cancellationToken) => throw new NotSupportedException();
+        public ValueTask<ReferenceMaterialPayload> UpdateMaterialTagsAsync(UpdateReferenceMaterialTagsPayload input, CancellationToken cancellationToken) => throw new NotSupportedException();
+        public ValueTask<IReadOnlyList<ReferenceMaterialPayload>> UpdateMaterialsTagsAsync(UpdateReferenceMaterialsTagsPayload input, CancellationToken cancellationToken) => throw new NotSupportedException();
+        public ValueTask<ReferenceUserFeedbackPayload> RecordUserFeedbackAsync(RecordReferenceUserFeedbackPayload input, CancellationToken cancellationToken) => throw new NotSupportedException();
+        public ValueTask<IReadOnlyList<ReferenceUserFeedbackPayload>> GetUserFeedbackAsync(GetReferenceUserFeedbackPayload input, CancellationToken cancellationToken) => throw new NotSupportedException();
+        public ValueTask DeleteAnchorAsync(long novelId, long anchorId, CancellationToken cancellationToken) => throw new NotSupportedException();
+        public ValueTask DeleteAnchorsAsync(DeleteReferenceAnchorsPayload input, CancellationToken cancellationToken) => throw new NotSupportedException();
+        public ValueTask DeleteMaterialsAsync(DeleteReferenceMaterialsPayload input, CancellationToken cancellationToken) => throw new NotSupportedException();
+        public ValueTask RestoreMaterialsAsync(RestoreReferenceMaterialsPayload input, CancellationToken cancellationToken) => throw new NotSupportedException();
+        public ValueTask<ReferenceAnchorPayload> PromoteAnchorToWorkspaceCorpusAsync(PromoteReferenceAnchorToWorkspaceCorpusPayload input, CancellationToken cancellationToken) => throw new NotSupportedException();
+        public ValueTask<IReadOnlyList<ReferenceAnchorPayload>> PromoteAnchorsToWorkspaceCorpusAsync(PromoteReferenceAnchorsToWorkspaceCorpusPayload input, CancellationToken cancellationToken) => throw new NotSupportedException();
+        public ValueTask<ReferenceAnchorPayload> UpdateAnchorMetadataAsync(UpdateReferenceAnchorMetadataPayload input, CancellationToken cancellationToken) => throw new NotSupportedException();
     }
 }

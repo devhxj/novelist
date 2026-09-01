@@ -634,48 +634,6 @@ public sealed record ReferenceMaterialCoveragePayload(
     [property: JsonPropertyName("material_count")] long MaterialCount,
     [property: JsonPropertyName("source_count")] int SourceCount,
     [property: JsonPropertyName("facets")] IReadOnlyList<ReferenceMaterialFacetPayload> Facets);
-
-public sealed record ReferenceSlotValuePayload(
-    [property: JsonPropertyName("slot_name")] string SlotName,
-    [property: JsonPropertyName("value")] string Value);
-
-public sealed record AdaptReferenceMaterialPayload(
-    [property: JsonPropertyName("novel_id")] long NovelId,
-    [property: JsonPropertyName("material_id")] string MaterialId,
-    [property: JsonPropertyName("slot_values")] IReadOnlyList<ReferenceSlotValuePayload> SlotValues,
-    [property: JsonPropertyName("max_rewrite_level")] string MaxRewriteLevel,
-    [property: JsonPropertyName("scene_facts")] IReadOnlyList<string> SceneFacts,
-    [property: JsonPropertyName("style_context")]
-    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-    ReferenceDraftStyleAttemptPayload? StyleContext = null);
-
-public sealed record AdaptReferenceMaterialResultPayload(
-    [property: JsonPropertyName("candidate_id")] string CandidateId,
-    [property: JsonPropertyName("material_id")] string MaterialId,
-    [property: JsonPropertyName("rewrite_level")] string RewriteLevel,
-    [property: JsonPropertyName("text")] string Text,
-    [property: JsonPropertyName("changed_slots")] IReadOnlyList<ReferenceSlotValuePayload> ChangedSlots,
-    [property: JsonPropertyName("non_slot_edits")] IReadOnlyList<string> NonSlotEdits,
-    [property: JsonPropertyName("audit")] ReferenceReuseAuditPayload Audit);
-
-public sealed record AuditReferenceReusePayload(
-    [property: JsonPropertyName("novel_id")] long NovelId,
-    [property: JsonPropertyName("material_id")] string MaterialId,
-    [property: JsonPropertyName("candidate_text")] string CandidateText,
-    [property: JsonPropertyName("max_rewrite_level")] string MaxRewriteLevel,
-    [property: JsonPropertyName("scene_facts")] IReadOnlyList<string> SceneFacts);
-
-public sealed record ReferenceReuseAuditPayload(
-    [property: JsonPropertyName("audit_id")] string AuditId,
-    [property: JsonPropertyName("status")] string Status,
-    [property: JsonPropertyName("rewrite_level")] string RewriteLevel,
-    [property: JsonPropertyName("provenance_errors")] IReadOnlyList<string> ProvenanceErrors,
-    [property: JsonPropertyName("unsupported_fact_errors")] IReadOnlyList<string> UnsupportedFactErrors,
-    [property: JsonPropertyName("ai_prose_risks")] IReadOnlyList<string> AiProseRisks,
-    [property: JsonPropertyName("non_slot_edits")] IReadOnlyList<string> NonSlotEdits,
-    [property: JsonPropertyName("required_fixes")] IReadOnlyList<string> RequiredFixes,
-    [property: JsonPropertyName("audited_at")] DateTimeOffset AuditedAt);
-
 public sealed record RecordReferenceUserFeedbackPayload(
     [property: JsonPropertyName("novel_id")] long NovelId,
     [property: JsonPropertyName("target_type")] string TargetType,

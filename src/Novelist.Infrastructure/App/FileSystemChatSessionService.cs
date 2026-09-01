@@ -76,6 +76,20 @@ public sealed class FileSystemChatSessionService : IChatSessionService, ISubagen
         - search_story_memory：在已构建的 RAG 记忆中检索章节片段。
         - run_subagent：启动 memory/review 子 Agent，获取专项检索报告或审稿报告。
 
+        【访谈模式与选择题】
+
+        当作者提出想法点而不是完整指令时，进入访谈模式收集信息：
+        - 每轮只问一个问题，并以选择题形式给出选项，在 content 正文中使用如下格式块：
+
+        ```choices
+        {"options": ["选项一（可附一句说明）", "选项二", "都不满意，换个方向"]}
+        ```
+
+        - 选项尽量引用参考语料中的实例（例如“同类冲突：参考书 A 冷处理 / 参考书 B 爆发，走哪种？”），积累越多选项质量越高。
+        - 作者回答后继续追问值得问的问题；没有问题可问（或作者要求收口）时，先给出本章计划摘要，再用 choices 块询问“是否开写？”（选项至少包含“开写”与“继续补充细节”）。
+        - 作者任何时刻主动要求开写时立即开写，跳过剩余访谈。
+        - 每个回合最多一个 choices 块；choices 块之外不要重复罗列选项文字。
+
         【创作流程】
 
         1. 判断意图：用户是在讨论、检索、审稿、规划，还是要求直接创作。
@@ -198,6 +212,8 @@ public sealed class FileSystemChatSessionService : IChatSessionService, ISubagen
     private readonly IChatToolExecutor? _toolExecutor;
     private readonly IChapterContentService? _chapterContent;
     private readonly IVersionControlService _versionControl;
+    private readonly IReferenceAnchorService? _referenceAnchors;
+    private readonly IPlanningService? _planning;
     private readonly TimeProvider _timeProvider;
     private readonly SemaphoreSlim _mutex = new(1, 1);
     private readonly ConcurrentDictionary<string, ActiveChatOperation> _activeChats = new(StringComparer.Ordinal);
@@ -213,6 +229,8 @@ public sealed class FileSystemChatSessionService : IChatSessionService, ISubagen
         IChatToolExecutor? toolExecutor = null,
         IChapterContentService? chapterContent = null,
         IVersionControlService? versionControl = null,
+        IReferenceAnchorService? referenceAnchors = null,
+        IPlanningService? planning = null,
         TimeProvider? timeProvider = null)
     {
         _options = options ?? new AppInitializationOptions();
@@ -225,6 +243,8 @@ public sealed class FileSystemChatSessionService : IChatSessionService, ISubagen
         _toolExecutor = toolExecutor;
         _chapterContent = chapterContent;
         _versionControl = versionControl ?? new GitVersionControlService(_options);
+        _referenceAnchors = referenceAnchors;
+        _planning = planning;
         _timeProvider = timeProvider ?? TimeProvider.System;
     }
 
@@ -333,6 +353,9 @@ public sealed class FileSystemChatSessionService : IChatSessionService, ISubagen
         var model = await GetConfiguredModelAsync(normalized.ProviderName, normalized.ModelId, cancellationToken);
         var initialSystemMessages = await BuildMainInitialSystemMessagesAsync(normalized.NovelId, cancellationToken);
         var slashInjection = await ResolveSlashInjectionAsync(normalized.NovelId, normalized.Message, cancellationToken);
+        var corpusInjection = normalized.ChapterNumber is null || _referenceAnchors is null || _planning is null
+            ? null
+            : await BuildChapterCorpusInjectionAsync(normalized.NovelId, normalized.ChapterNumber.Value, cancellationToken);
 
         ChatSessionDocument session;
         bool isNew;
@@ -404,6 +427,22 @@ public sealed class FileSystemChatSessionService : IChatSessionService, ISubagen
                 eventType: null,
                 agentType: "main"));
 
+            if (corpusInjection is not null)
+            {
+                store.Messages.Add(CreateMessage(
+                    store,
+                    session.SessionId,
+                    turnId,
+                    role: "system",
+                    content: corpusInjection.SystemMessage,
+                    thinkingContent: null,
+                    version: session.ActiveVersion,
+                    toApi: true,
+                    toFrontend: false,
+                    eventType: null,
+                    agentType: "main"));
+            }
+
             apiMessages = store.Messages
                 .Where(message => string.Equals(message.SessionId, session.SessionId, StringComparison.Ordinal) &&
                     message.ToApi &&
@@ -450,6 +489,43 @@ public sealed class FileSystemChatSessionService : IChatSessionService, ISubagen
                 "chat:started",
                 new { session_id = session.SessionId, turn_id = turnId },
                 linkedCancellation.Token);
+
+            if (corpusInjection is not null)
+            {
+                seq = await EmitToolEventAsync(
+                    turnId,
+                    seq,
+                    new ChatToolCall(
+                        Id: $"corpus-injection-{turnId}",
+                        Name: "search_reference_materials",
+                        ArgumentsJson: JsonSerializer.Serialize(new Dictionary<string, object?>
+                        {
+                            ["query"] = corpusInjection.Query,
+                            ["automatic"] = true
+                        }, BridgeJson.SerializerOptions)),
+                    phase: "completed",
+                    args: null,
+                    success: true,
+                    error: null,
+                    display: new ToolDisplay(
+                        $"已注入本章参考语料 {corpusInjection.Usage.Count} 条",
+                        "search",
+                        new Dictionary<string, object?>
+                        {
+                            ["automatic"] = true,
+                            ["chapter_number"] = normalized.ChapterNumber,
+                            ["materials"] = corpusInjection.Usage.Select(item => (object)new Dictionary<string, object?>
+                            {
+                                ["material_id"] = item.MaterialId,
+                                ["anchor_id"] = item.AnchorId,
+                                ["anchor_title"] = item.AnchorTitle,
+                                ["text_preview"] = item.TextPreview,
+                                ["tags"] = item.Tags
+                            }).ToArray()
+                        }),
+                    subTaskId: null,
+                    cancellationToken: linkedCancellation.Token);
+            }
 
             if (ShouldAutoCompress(previousUsage))
             {
@@ -629,7 +705,7 @@ public sealed class FileSystemChatSessionService : IChatSessionService, ISubagen
                 model.ModelName,
                 CancellationToken.None);
 
-            return new ChatResultPayload(session.SessionId, turnId, finalText);
+            return new ChatResultPayload(session.SessionId, turnId, finalText, corpusInjection?.Usage);
         }
         catch (OperationCanceledException) when (linkedCancellation.IsCancellationRequested)
         {
@@ -1904,6 +1980,104 @@ public sealed class FileSystemChatSessionService : IChatSessionService, ISubagen
         return model;
     }
 
+    private const int CorpusInjectionMaxMaterials = 5;
+    private const int CorpusInjectionQueryMaxLength = 160;
+    private const int CorpusInjectionPreviewMaxLength = 160;
+    private const string LineBreak = @"
+";
+    private const string ParagraphBreak = @"
+
+";
+
+    private sealed record ChapterCorpusInjection(
+        string Query,
+        string SystemMessage,
+        IReadOnlyList<ChatCorpusUsageItemPayload> Usage);
+
+    private async ValueTask<ChapterCorpusInjection?> BuildChapterCorpusInjectionAsync(
+        long novelId,
+        int chapterNumber,
+        CancellationToken cancellationToken)
+    {
+        var plans = await _planning!.GetChapterPlansAsync(novelId, cancellationToken);
+        var plan = plans.FirstOrDefault(candidate => string.Equals(candidate.Scope, "next", StringComparison.Ordinal));
+        if (plan is null || string.IsNullOrWhiteSpace(plan.Content))
+        {
+            return null;
+        }
+
+        var anchors = await _referenceAnchors!.GetAnchorsAsync(novelId, cancellationToken);
+        var anchorTitles = anchors
+            .Where(anchor => string.Equals(anchor.Status, ReferenceAnchorBuildStates.Ready, StringComparison.Ordinal))
+            .ToDictionary(anchor => anchor.AnchorId, anchor => anchor.Title);
+        if (anchorTitles.Count == 0)
+        {
+            return null;
+        }
+
+        var query = plan.Content.Replace(LineBreak, " ").Trim();
+        if (query.Length > CorpusInjectionQueryMaxLength)
+        {
+            query = query[..CorpusInjectionQueryMaxLength];
+        }
+
+        var page = await _referenceAnchors.SearchMaterialsAsync(
+            new SearchReferenceMaterialsPayload(
+                novelId,
+                AnchorIds: [],
+                Query: query,
+                MaterialTypes: [],
+                EmotionTags: [],
+                FunctionTags: [],
+                PovTags: [],
+                TechniqueTags: [],
+                Page: 1,
+                Size: CorpusInjectionMaxMaterials),
+            cancellationToken);
+
+        var usage = new List<ChatCorpusUsageItemPayload>();
+        var corpusLines = new List<string>();
+        foreach (var material in page.Items)
+        {
+            if (!anchorTitles.TryGetValue(material.AnchorId, out var anchorTitle))
+            {
+                continue;
+            }
+
+            var preview = material.Text.Length > CorpusInjectionPreviewMaxLength
+                ? material.Text[..CorpusInjectionPreviewMaxLength]
+                : material.Text;
+            var tags = new[]
+            {
+                material.FunctionTag, material.EmotionTag, material.SceneTag, material.PovTag, material.TechniqueTag
+            }
+                .Where(tag => !string.IsNullOrWhiteSpace(tag))
+                .ToArray();
+            usage.Add(new ChatCorpusUsageItemPayload(
+                material.MaterialId,
+                material.AnchorId,
+                anchorTitle,
+                preview,
+                tags));
+            corpusLines.Add($"[{usage.Count}] 《{anchorTitle}》{(tags.Length > 0 ? "（" + string.Join(" / ", tags) + "）" : string.Empty)}{LineBreak}{preview}");
+        }
+
+        if (usage.Count == 0)
+        {
+            return null;
+        }
+
+        var systemMessage = $"""
+            <reference-corpus>
+            以下是为第 {chapterNumber} 章检索到的参考语料（来自已导入参考书，检索词取自本章计划）。
+            写作时借鉴其细节质感、节奏与手法，不要逐句复用原文；可在正文之外向作者说明借鉴了哪些处理方式。
+            {string.Join(ParagraphBreak, corpusLines)}
+            </reference-corpus>
+            """;
+
+        return new ChapterCorpusInjection(query, systemMessage, usage);
+    }
+
     private async ValueTask<int> EmitAgentEventAsync(
         int turnId,
         int currentSeq,
@@ -2526,7 +2700,8 @@ public sealed class FileSystemChatSessionService : IChatSessionService, ISubagen
             Message = NormalizeRequiredText(input.Message, nameof(input.Message), MaxMessageLength, allowLineBreaks: true),
             ProviderName = NormalizeProviderName(input.ProviderName),
             ModelId = NormalizeRequiredText(input.ModelId, nameof(input.ModelId), MaxModelIdLength, allowLineBreaks: false),
-            ReasoningEffort = NormalizeOptionalText(input.ReasoningEffort, nameof(input.ReasoningEffort), MaxReasoningEffortLength)
+            ReasoningEffort = NormalizeOptionalText(input.ReasoningEffort, nameof(input.ReasoningEffort), MaxReasoningEffortLength),
+            ChapterNumber = input.ChapterNumber is null || input.ChapterNumber > 0 ? input.ChapterNumber : null
         };
     }
 
