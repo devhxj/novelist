@@ -201,7 +201,9 @@ private AppInitializationOptions CreateOptions()
         var sourceDirectory = Path.Combine(_root, "sources");
         Directory.CreateDirectory(sourceDirectory);
         var path = Path.Combine(sourceDirectory, fileName);
-        File.WriteAllText(path, content);
+        // 原始字符串字面量会嵌入 .cs 文件本身的换行符（Windows 检出为 CRLF）；
+        // 统一写成 LF，保证文本树 offset 与源文件切片在任何检出环境都一致。
+        File.WriteAllText(path, content.Replace("\r\n", "\n"));
         return path;
     }
 
