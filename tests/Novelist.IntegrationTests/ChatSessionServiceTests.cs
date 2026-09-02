@@ -283,10 +283,133 @@ public sealed class ChatSessionServiceTests : IDisposable
                 recorded.Payload.TryGetProperty("type", out var type) &&
                 type.GetInt32() == 3);
         Assert.True(injectionEvent.Payload.TryGetProperty("tool_name", out var toolName));
-        Assert.Equal("search_reference_materials", toolName.GetString());
+        Assert.Equal("corpus_injection", toolName.GetString());
         Assert.True(injectionEvent.Payload.TryGetProperty("metadata", out var metadata));
         Assert.True(metadata.GetProperty("automatic").GetBoolean());
         Assert.Equal(1, metadata.GetProperty("materials").GetArrayLength());
+
+        // 用量持久化为 corpus_usage 前端事件消息：历史重放可恢复用量卡。
+        var frontendMessages = await service.GetSessionMessagesAsync(result.SessionId, CancellationToken.None);
+        var usageEvent = Assert.Single(frontendMessages, message =>
+            message.EventType == "corpus_usage");
+        Assert.True(usageEvent.ToFrontend);
+        Assert.False(usageEvent.ToApi);
+        using (var usageJson = JsonDocument.Parse(usageEvent.ExtraMetadata ?? throw new InvalidOperationException("corpus_usage metadata missing.")))
+        {
+            Assert.True(usageJson.RootElement.GetProperty("succeeded").GetBoolean());
+            Assert.Equal(1, usageJson.RootElement.GetProperty("materials").GetArrayLength());
+        }
+    }
+
+    [Fact]
+    public async Task ChatInjectionFailureDegradesTurnAndKeepsUserMessage()
+    {
+        var options = CreateOptions();
+        await InitializeAsync(options);
+        var settings = new FileSystemAppSettingsService(options);
+        var novelService = new FileSystemNovelService(options, settings);
+        var novel = await novelService.CreateNovelAsync(new CreateNovelPayload("长夜档案", "", ""), CancellationToken.None);
+        var planning = new FileSystemPlanningService(options, novelService);
+        await planning.UpdateChapterPlanAsync(
+            novel.Id,
+            new UpdateChapterPlanPayload(Scope: "next", Content: "林岚在雨夜门口与守门人对峙。"),
+            CancellationToken.None);
+
+        var anchors = new RecordingAnchorServiceForCorpus
+        {
+            SearchException = new InvalidOperationException("sqlite disk I/O error")
+        };
+        var events = new RecordingBridgeEventSink();
+        var completion = new ScriptedChatCompletionClient(
+            [new ChatCompletionStreamEvent(ChatCompletionStreamEventKind.Content, "先按直写推进本章。")],
+            title: "注入失败降级");
+        var service = CreateService(
+            options,
+            novelService,
+            settings,
+            completion,
+            events,
+            referenceAnchors: anchors,
+            planning: planning);
+
+        // 注入检索抛错不应让整个回合失败：回合正常完成、用户消息落库。
+        var result = await service.ChatAsync(
+            new ChatInputPayload("", novel.Id, "帮我细化本章", "test", "model-a", "", ChapterNumber: 1),
+            CancellationToken.None);
+
+        Assert.Null(result.CorpusUsage);
+        var request = Assert.Single(completion.Requests);
+        Assert.DoesNotContain(request.Messages, message =>
+            message.Role == "system" &&
+            message.Content.Contains("<reference-corpus>", StringComparison.Ordinal));
+        Assert.Contains(request.Messages, message =>
+            message.Role == "user" &&
+            message.Content == "帮我细化本章");
+
+        var injectionEvent = Assert.Single(
+            events.Events,
+            recorded => recorded.Name == $"agent:{result.TurnId}" &&
+                recorded.Payload.ValueKind == JsonValueKind.Object &&
+                recorded.Payload.TryGetProperty("type", out var type) &&
+                type.GetInt32() == 3);
+        Assert.Equal("corpus_injection", injectionEvent.Payload.GetProperty("tool_name").GetString());
+        Assert.Equal("failed", injectionEvent.Payload.GetProperty("phase").GetString());
+        Assert.Contains("sqlite disk I/O error", injectionEvent.Payload.GetProperty("error").GetString(), StringComparison.Ordinal);
+
+        var frontendMessages = await service.GetSessionMessagesAsync(result.SessionId, CancellationToken.None);
+        Assert.Contains(frontendMessages, message => message.Role == "user" && message.Content == "帮我细化本章");
+        var failureEvent = Assert.Single(frontendMessages, message => message.EventType == "corpus_usage");
+        using (var failureJson = JsonDocument.Parse(failureEvent.ExtraMetadata ?? throw new InvalidOperationException("corpus_usage metadata missing.")))
+        {
+            Assert.False(failureJson.RootElement.GetProperty("succeeded").GetBoolean());
+            Assert.Contains("sqlite disk I/O error", failureJson.RootElement.GetProperty("error").GetString(), StringComparison.Ordinal);
+        }
+    }
+
+    [Fact]
+    public async Task ChatInjectionReplacesPreviousCorpusContextWithinSession()
+    {
+        var options = CreateOptions();
+        await InitializeAsync(options);
+        var settings = new FileSystemAppSettingsService(options);
+        var novelService = new FileSystemNovelService(options, settings);
+        var novel = await novelService.CreateNovelAsync(new CreateNovelPayload("长夜档案", "", ""), CancellationToken.None);
+        var planning = new FileSystemPlanningService(options, novelService);
+        await planning.UpdateChapterPlanAsync(
+            novel.Id,
+            new UpdateChapterPlanPayload(Scope: "next", Content: "林岚在雨夜门口与守门人对峙，确认水痕线索。"),
+            CancellationToken.None);
+
+        var completion = new ScriptedChatCompletionClient(
+            [
+                new ChatCompletionStreamEvent(ChatCompletionStreamEventKind.Content, "第一回合。"),
+                new ChatCompletionStreamEvent(ChatCompletionStreamEventKind.Content, "第二回合。"),
+            ],
+            title: "注入不累积");
+        var service = CreateService(
+            options,
+            novelService,
+            settings,
+            completion,
+            new RecordingBridgeEventSink(),
+            referenceAnchors: new RecordingAnchorServiceForCorpus(),
+            planning: planning);
+
+        var first = await service.ChatAsync(
+            new ChatInputPayload("", novel.Id, "细化本章第一回合", "test", "model-a", "", ChapterNumber: 1),
+            CancellationToken.None);
+        await service.ChatAsync(
+            new ChatInputPayload(first.SessionId, novel.Id, "细化本章第二回合", "test", "model-a", "", ChapterNumber: 1),
+            CancellationToken.None);
+
+        Assert.Equal(2, completion.Requests.Count);
+        var secondRequest = completion.Requests[1];
+        // 旧注入停用留档：API 上下文只携带最近一条语料注入消息。
+        var corpusMessages = secondRequest.Messages.Where(message =>
+            message.Role == "system" &&
+            message.Content.Contains("<reference-corpus>", StringComparison.Ordinal)).ToArray();
+        Assert.Single(corpusMessages);
+        Assert.Contains("第二回合", secondRequest.Messages.Last(message => message.Role == "user").Content, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -1782,6 +1905,8 @@ public sealed class ChatSessionServiceTests : IDisposable
     {
         public string? LastSearchQuery { get; private set; }
 
+        public Exception? SearchException { get; init; }
+
         public ValueTask<IReadOnlyList<ReferenceAnchorPayload>> GetAnchorsAsync(long novelId, CancellationToken cancellationToken)
         {
             IReadOnlyList<ReferenceAnchorPayload> anchors =
@@ -1794,9 +1919,26 @@ public sealed class ChatSessionServiceTests : IDisposable
             return ValueTask.FromResult(anchors);
         }
 
+        public async ValueTask<IReadOnlyList<PageResultPayload<ReferenceMaterialPayload>>> SearchMaterialsBatchAsync(
+            IReadOnlyList<SearchReferenceMaterialsPayload> inputs,
+            CancellationToken cancellationToken)
+        {
+            var results = new List<PageResultPayload<ReferenceMaterialPayload>>(inputs.Count);
+            foreach (var input in inputs)
+            {
+                results.Add(await SearchMaterialsAsync(input, cancellationToken));
+            }
+
+            return results;
+        }
+
         public ValueTask<PageResultPayload<ReferenceMaterialPayload>> SearchMaterialsAsync(SearchReferenceMaterialsPayload input, CancellationToken cancellationToken)
         {
             LastSearchQuery = input.Query;
+            if (SearchException is not null)
+            {
+                throw SearchException;
+            }
             ReferenceMaterialPayload material = new(
                 "mat-rain-001", 101, "seg-rain-001", "sentence",
                 "environment", "restrained", "rain_threshold", "close", "delayed_reaction",

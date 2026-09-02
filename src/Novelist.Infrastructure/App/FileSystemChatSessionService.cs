@@ -353,9 +353,25 @@ public sealed class FileSystemChatSessionService : IChatSessionService, ISubagen
         var model = await GetConfiguredModelAsync(normalized.ProviderName, normalized.ModelId, cancellationToken);
         var initialSystemMessages = await BuildMainInitialSystemMessagesAsync(normalized.NovelId, cancellationToken);
         var slashInjection = await ResolveSlashInjectionAsync(normalized.NovelId, normalized.Message, cancellationToken);
-        var corpusInjection = normalized.ChapterNumber is null || _referenceAnchors is null || _planning is null
-            ? null
-            : await BuildChapterCorpusInjectionAsync(normalized.NovelId, normalized.ChapterNumber.Value, cancellationToken);
+        // 语料注入是增强能力而非回合前置条件：检索失败时降级为无语料模式继续回合，绝不吞掉用户输入。
+        ChapterCorpusInjection? corpusInjection = null;
+        string? corpusInjectionError = null;
+        if (normalized.ChapterNumber is not null && _referenceAnchors is not null && _planning is not null)
+        {
+            try
+            {
+                corpusInjection = await BuildChapterCorpusInjectionAsync(normalized.NovelId, normalized.ChapterNumber.Value, cancellationToken);
+            }
+            catch (OperationCanceledException)
+            {
+                throw;
+            }
+            catch (Exception exception)
+            {
+                corpusInjection = null;
+                corpusInjectionError = $"参考语料注入失败，本章按无语料模式继续：{exception.Message}";
+            }
+        }
 
         ChatSessionDocument session;
         bool isNew;
@@ -429,6 +445,15 @@ public sealed class FileSystemChatSessionService : IChatSessionService, ISubagen
 
             if (corpusInjection is not null)
             {
+                // 只保留最近一条语料注入进入 API 上下文：旧注入停用（留档），防止长会话 token 单调膨胀。
+                foreach (var previous in store.Messages.Where(message =>
+                    string.Equals(message.SessionId, session.SessionId, StringComparison.Ordinal) &&
+                    message.ToApi &&
+                    message.Content.StartsWith(CorpusInjectionMarker, StringComparison.Ordinal)))
+                {
+                    previous.ToApi = false;
+                }
+
                 store.Messages.Add(CreateMessage(
                     store,
                     session.SessionId,
@@ -441,6 +466,42 @@ public sealed class FileSystemChatSessionService : IChatSessionService, ISubagen
                     toFrontend: false,
                     eventType: null,
                     agentType: "main"));
+            }
+
+            // 语料用量持久化为前端事件消息：历史会话重放时可恢复用量卡；注入失败同样留档。
+            var corpusUsageDisplay = corpusInjection is not null
+                ? $"已注入本章参考语料 {corpusInjection.Usage.Count} 条"
+                : corpusInjectionError;
+            if (corpusInjection is not null || corpusInjectionError is not null)
+            {
+                store.Messages.Add(CreateMessage(
+                    store,
+                    session.SessionId,
+                    turnId,
+                    role: "system",
+                    content: string.Empty,
+                    thinkingContent: null,
+                    version: session.ActiveVersion,
+                    toApi: false,
+                    toFrontend: true,
+                    eventType: "corpus_usage",
+                    agentType: "main",
+                    extraMetadata: JsonSerializer.Serialize(new Dictionary<string, object?>
+                    {
+                        ["automatic"] = true,
+                        ["chapter_number"] = normalized.ChapterNumber,
+                        ["succeeded"] = corpusInjection is not null,
+                        ["error"] = corpusInjectionError,
+                        ["display_text"] = corpusUsageDisplay,
+                        ["materials"] = corpusInjection?.Usage.Select(item => (object)new Dictionary<string, object?>
+                        {
+                            ["material_id"] = item.MaterialId,
+                            ["anchor_id"] = item.AnchorId,
+                            ["anchor_title"] = item.AnchorTitle,
+                            ["text_preview"] = item.TextPreview,
+                            ["tags"] = item.Tags
+                        }).ToArray() ?? []
+                    }, BridgeJson.SerializerOptions)));
             }
 
             apiMessages = store.Messages
@@ -497,7 +558,7 @@ public sealed class FileSystemChatSessionService : IChatSessionService, ISubagen
                     seq,
                     new ChatToolCall(
                         Id: $"corpus-injection-{turnId}",
-                        Name: "search_reference_materials",
+                        Name: "corpus_injection",
                         ArgumentsJson: JsonSerializer.Serialize(new Dictionary<string, object?>
                         {
                             ["query"] = corpusInjection.Query,
@@ -522,6 +583,33 @@ public sealed class FileSystemChatSessionService : IChatSessionService, ISubagen
                                 ["text_preview"] = item.TextPreview,
                                 ["tags"] = item.Tags
                             }).ToArray()
+                        }),
+                    subTaskId: null,
+                    cancellationToken: linkedCancellation.Token);
+            }
+            else if (corpusInjectionError is not null)
+            {
+                seq = await EmitToolEventAsync(
+                    turnId,
+                    seq,
+                    new ChatToolCall(
+                        Id: $"corpus-injection-{turnId}",
+                        Name: "corpus_injection",
+                        ArgumentsJson: JsonSerializer.Serialize(new Dictionary<string, object?>
+                        {
+                            ["automatic"] = true
+                        }, BridgeJson.SerializerOptions)),
+                    phase: "failed",
+                    args: null,
+                    success: false,
+                    error: corpusInjectionError,
+                    display: new ToolDisplay(
+                        corpusInjectionError,
+                        "search",
+                        new Dictionary<string, object?>
+                        {
+                            ["automatic"] = true,
+                            ["chapter_number"] = normalized.ChapterNumber
                         }),
                     subTaskId: null,
                     cancellationToken: linkedCancellation.Token);
@@ -1983,6 +2071,8 @@ public sealed class FileSystemChatSessionService : IChatSessionService, ISubagen
     private const int CorpusInjectionMaxMaterials = 5;
     private const int CorpusInjectionQueryMaxLength = 160;
     private const int CorpusInjectionPreviewMaxLength = 160;
+    private const int CorpusInjectionTitleMaxLength = 200;
+    private const string CorpusInjectionMarker = "<reference-corpus>";
     private const string LineBreak = @"
 ";
     private const string ParagraphBreak = @"
@@ -2032,7 +2122,8 @@ public sealed class FileSystemChatSessionService : IChatSessionService, ISubagen
                 PovTags: [],
                 TechniqueTags: [],
                 Page: 1,
-                Size: CorpusInjectionMaxMaterials),
+                Size: CorpusInjectionMaxMaterials,
+                ReadyOnly: true),
             cancellationToken);
 
         var usage = new List<ChatCorpusUsageItemPayload>();
@@ -2042,6 +2133,11 @@ public sealed class FileSystemChatSessionService : IChatSessionService, ISubagen
             if (!anchorTitles.TryGetValue(material.AnchorId, out var anchorTitle))
             {
                 continue;
+            }
+
+            if (anchorTitle.Length > CorpusInjectionTitleMaxLength)
+            {
+                anchorTitle = anchorTitle[..CorpusInjectionTitleMaxLength];
             }
 
             var preview = material.Text.Length > CorpusInjectionPreviewMaxLength

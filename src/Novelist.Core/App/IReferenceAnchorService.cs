@@ -42,6 +42,14 @@ CancellationToken cancellationToken);
         SearchReferenceMaterialsPayload input,
         CancellationToken cancellationToken);
 
+    /// <summary>
+    /// 批量检索：同一进程内共享一次互斥与一次材料全量读取，逐查询独立打分。
+    /// 供细纲 beat 级覆盖度等多次检索场景复用，避免 N 次全表扫描。
+    /// </summary>
+    ValueTask<IReadOnlyList<PageResultPayload<ReferenceMaterialPayload>>> SearchMaterialsBatchAsync(
+        IReadOnlyList<SearchReferenceMaterialsPayload> inputs,
+        CancellationToken cancellationToken);
+
     ValueTask<ReferenceMaterialCoveragePayload> GetMaterialCoverageAsync(
         GetReferenceMaterialCoveragePayload input,
         CancellationToken cancellationToken);

@@ -1535,88 +1535,144 @@ public sealed partial class SqliteReferenceAnchorService : IReferenceAnchorServi
         }
     }
 
-    public async ValueTask<PageResultPayload<ReferenceMaterialPayload>> SearchMaterialsAsync(
+    public ValueTask<PageResultPayload<ReferenceMaterialPayload>> SearchMaterialsAsync(
         SearchReferenceMaterialsPayload input,
         CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(input);
-        ValidateNovelId(input.NovelId);
-        var page = Math.Max(1, input.Page);
-        var size = Math.Clamp(input.Size, 1, 100);
-        var archiveFilter = string.IsNullOrWhiteSpace(input.ArchiveFilter)
-            ? ReferenceMaterialArchiveFilters.Active
-            : ValidateAllowedText(input.ArchiveFilter, nameof(input.ArchiveFilter), AllowedMaterialArchiveFilters);
-        var styleOptions = NormalizeStyleSearchOptions(input);
+        return SearchMaterialsBatchCoreAsync(
+            [input],
+            singleResult: results => results[0],
+            cancellationToken);
+    }
+
+    public ValueTask<IReadOnlyList<PageResultPayload<ReferenceMaterialPayload>>> SearchMaterialsBatchAsync(
+        IReadOnlyList<SearchReferenceMaterialsPayload> inputs,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(inputs);
+        return SearchMaterialsBatchCoreAsync(
+            inputs,
+            singleResult: results => (IReadOnlyList<PageResultPayload<ReferenceMaterialPayload>>)results,
+            cancellationToken);
+    }
+
+    private async ValueTask<T> SearchMaterialsBatchCoreAsync<T>(
+        IReadOnlyList<SearchReferenceMaterialsPayload> inputs,
+        Func<List<PageResultPayload<ReferenceMaterialPayload>>, T> singleResult,
+        CancellationToken cancellationToken)
+    {
+        foreach (var input in inputs)
+        {
+            ArgumentNullException.ThrowIfNull(input);
+            ValidateNovelId(input.NovelId);
+        }
+
+        var normalized = inputs.Select(input => (
+            Input: input,
+            Page: Math.Max(1, input.Page),
+            Size: Math.Clamp(input.Size, 1, 100),
+            ArchiveFilter: string.IsNullOrWhiteSpace(input.ArchiveFilter)
+                ? ReferenceMaterialArchiveFilters.Active
+                : ValidateAllowedText(input.ArchiveFilter, nameof(input.ArchiveFilter), AllowedMaterialArchiveFilters),
+            StyleOptions: NormalizeStyleSearchOptions(input)))
+            .ToArray();
+
+        var results = new PageResultPayload<ReferenceMaterialPayload>[normalized.Length];
         await _mutex.WaitAsync(cancellationToken);
         try
         {
             var databasePath = await DatabasePathAsync(cancellationToken);
             await EnsureSchemaAsync(databasePath, cancellationToken);
             await using var connection = await OpenConnectionAsync(databasePath, cancellationToken);
-            var anchorIds = input.AnchorIds?.Where(id => id > 0).Distinct().ToArray() ?? [];
-            if (anchorIds.Length == 0)
+            // 同一 (小说, 就绪过滤, 归档过滤, 风格选项) 的查询共享一次材料全量读取，逐查询独立打分。
+            foreach (var group in normalized
+                .Select((item, index) => (Item: item, Index: index))
+                .GroupBy(entry => (
+                    entry.Item.Input.NovelId,
+                    entry.Item.Input.ReadyOnly,
+                    entry.Item.ArchiveFilter,
+                    entry.Item.StyleOptions)))
             {
-                anchorIds = await GetAnchorIdsAsync(connection, input.NovelId, cancellationToken);
-            }
-
-            if (input.ReadyOnly == true)
-            {
-                anchorIds = await FilterReadyAnchorIdsAsync(connection, anchorIds, cancellationToken);
-            }
-
-            if (anchorIds.Length == 0)
-            {
-                return new PageResultPayload<ReferenceMaterialPayload>([], 0, page, size, 0);
-            }
-
-            var all = await ReadMaterialsAsync(connection, input.NovelId, anchorIds, archiveFilter, cancellationToken);
-            var styleContext = await ReadStyleSearchContextAsync(
-                connection,
-                input.NovelId,
-                anchorIds,
-                styleOptions,
-                cancellationToken);
-            var unknownLicenseAnchorIds = await ReadUnknownLicenseAnchorIdsAsync(connection, input.NovelId, anchorIds, cancellationToken);
-            var acceptedFeedbackMaterialIds = await ReadAcceptedFeedbackMaterialIdsAsync(
-                connection,
-                input.NovelId,
-                cancellationToken);
-            var embeddingScores = await TryBuildEmbeddingScoresAsync(
-                databasePath,
-                connection,
-                input,
-                anchorIds,
-                all.Count,
-                cancellationToken);
-            var filtered = all
-                .Where(item => MatchesMaterialFilters(item, input))
-                .Select(item => new ScoredSearchMaterial(
-                    item,
-                    ScoreMaterialComponents(
-                        item,
-                        input,
-                        embeddingScores.TryGetValue(item.MaterialId, out var embeddingScore) ? embeddingScore : 0,
-                        acceptedFeedbackMaterialIds.Contains(item.MaterialId),
-                        styleContext.FitScores.TryGetValue(item.MaterialId, out var styleFitScore) ? styleFitScore : 0,
-                        styleContext.SourceAnchorIds.Contains(item.AnchorId) ? styleContext.SourceRiskPenalty : 0)))
-                .OrderByDescending(item => item.Score)
-                .ThenBy(item => item.Material.AnchorId)
-                .ThenBy(item => item.Material.MaterialId, StringComparer.Ordinal)
-                .ToArray();
-            var total = filtered.LongLength;
-            var totalPages = total == 0 ? 0 : (int)Math.Ceiling(total / (double)size);
-            var items = filtered
-                .Skip((page - 1) * size)
-                .Take(size)
-                .Select(item =>
+                var key = group.Key;
+                var anchorIds = group.First().Item.Input.AnchorIds?.Where(id => id > 0).Distinct().ToArray() ?? [];
+                if (anchorIds.Length == 0)
                 {
-                    var material = item.Material with { ScoreComponents = item.ScoreComponents };
-                    return unknownLicenseAnchorIds.Contains(material.AnchorId)
-                        ? material with { Text = TruncateUnknownLicensePreview(material.Text) }
-                        : material;
-                })
-                .ToArray();
-            return new PageResultPayload<ReferenceMaterialPayload>(items, total, page, size, totalPages);
+                    anchorIds = await GetAnchorIdsAsync(connection, key.NovelId, cancellationToken);
+                }
+
+                if (key.ReadyOnly == true)
+                {
+                    anchorIds = await FilterReadyAnchorIdsAsync(connection, anchorIds, cancellationToken);
+                }
+
+                if (anchorIds.Length == 0)
+                {
+                    foreach (var entry in group)
+                    {
+                        results[entry.Index] = new PageResultPayload<ReferenceMaterialPayload>(
+                            [], 0, entry.Item.Page, entry.Item.Size, 0);
+                    }
+
+                    continue;
+                }
+
+                var all = await ReadMaterialsAsync(connection, key.NovelId, anchorIds, key.ArchiveFilter, cancellationToken);
+                var styleContext = await ReadStyleSearchContextAsync(
+                    connection,
+                    key.NovelId,
+                    anchorIds,
+                    key.StyleOptions,
+                    cancellationToken);
+                var unknownLicenseAnchorIds = await ReadUnknownLicenseAnchorIdsAsync(connection, key.NovelId, anchorIds, cancellationToken);
+                var acceptedFeedbackMaterialIds = await ReadAcceptedFeedbackMaterialIdsAsync(
+                    connection,
+                    key.NovelId,
+                    cancellationToken);
+                foreach (var entry in group)
+                {
+                    var input = entry.Item.Input;
+                    var embeddingScores = await TryBuildEmbeddingScoresAsync(
+                        databasePath,
+                        connection,
+                        input,
+                        anchorIds,
+                        all.Count,
+                        cancellationToken);
+                    var filtered = all
+                        .Where(item => MatchesMaterialFilters(item, input))
+                        .Select(item => new ScoredSearchMaterial(
+                            item,
+                            ScoreMaterialComponents(
+                                item,
+                                input,
+                                embeddingScores.TryGetValue(item.MaterialId, out var embeddingScore) ? embeddingScore : 0,
+                                acceptedFeedbackMaterialIds.Contains(item.MaterialId),
+                                styleContext.FitScores.TryGetValue(item.MaterialId, out var styleFitScore) ? styleFitScore : 0,
+                                styleContext.SourceAnchorIds.Contains(item.AnchorId) ? styleContext.SourceRiskPenalty : 0)))
+                        .OrderByDescending(item => item.Score)
+                        .ThenBy(item => item.Material.AnchorId)
+                        .ThenBy(item => item.Material.MaterialId, StringComparer.Ordinal)
+                        .ToArray();
+                    var total = filtered.LongLength;
+                    var totalPages = total == 0 ? 0 : (int)Math.Ceiling(total / (double)entry.Item.Size);
+                    var items = filtered
+                        .Skip((entry.Item.Page - 1) * entry.Item.Size)
+                        .Take(entry.Item.Size)
+                        .Select(item =>
+                        {
+                            var material = item.Material with { ScoreComponents = item.ScoreComponents };
+                            return unknownLicenseAnchorIds.Contains(material.AnchorId)
+                                ? material with { Text = TruncateUnknownLicensePreview(material.Text) }
+                                : material;
+                        })
+                        .ToArray();
+                    results[entry.Index] = new PageResultPayload<ReferenceMaterialPayload>(
+                        items, total, entry.Item.Page, entry.Item.Size, totalPages);
+                }
+            }
+
+            return singleResult(results.ToList());
         }
         finally
         {

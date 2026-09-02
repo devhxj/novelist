@@ -207,3 +207,11 @@ public sealed record ReferenceCorpusTechniqueSpecimenAnalysisRunPayload(
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     DateTimeOffset? CompletedAt,
     [property: JsonPropertyName("diagnostics")] IReadOnlyList<string> Diagnostics);
+
+public sealed record GetReferenceCorpusAssetTotalsPayload(
+    [property: JsonPropertyName("novel_id")] long NovelId);
+
+public sealed record ReferenceCorpusAssetTotalsPayload(
+    [property: JsonPropertyName("novel_id")] long NovelId,
+    [property: JsonPropertyName("observation_total")] long ObservationTotal,
+    [property: JsonPropertyName("specimen_total")] long SpecimenTotal);

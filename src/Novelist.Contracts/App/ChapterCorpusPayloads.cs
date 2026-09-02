@@ -6,7 +6,10 @@ public sealed record GetChapterCorpusCoveragePayload(
     [property: JsonPropertyName("novel_id")] long NovelId,
     [property: JsonPropertyName("chapter_number")]
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-    int? ChapterNumber = null);
+    int? ChapterNumber = null,
+    [property: JsonPropertyName("refresh")]
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    bool? Refresh = null);
 
 public sealed record ChapterCorpusBeatCoveragePayload(
     [property: JsonPropertyName("beat")] string Beat,
@@ -28,4 +31,7 @@ public sealed record ChapterCorpusCoveragePayload(
     [property: JsonPropertyName("covered_count")] int CoveredCount,
     [property: JsonPropertyName("total_count")] int TotalCount,
     [property: JsonPropertyName("coverage_ratio")] double CoverageRatio,
-    [property: JsonPropertyName("sufficient")] bool Sufficient);
+    [property: JsonPropertyName("sufficient")] bool Sufficient,
+    [property: JsonPropertyName("truncated")]
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    bool? Truncated = null);

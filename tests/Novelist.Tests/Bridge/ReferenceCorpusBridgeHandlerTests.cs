@@ -735,6 +735,15 @@ cancellationToken.ThrowIfCancellationRequested();
                 TotalEstimate: 1));
         }
 
+        public ValueTask<ReferenceCorpusAssetTotalsPayload> GetAssetTotalsAsync(
+            GetReferenceCorpusAssetTotalsPayload input,
+            CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            Calls.Add($"AssetTotals:{input.NovelId}");
+            return ValueTask.FromResult(new ReferenceCorpusAssetTotalsPayload(input.NovelId, 3, 2));
+        }
+
         private static ReferenceCorpusFeatureAnalysisRunPayload BuildRun(
             string runId,
             long novelId,

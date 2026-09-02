@@ -5,8 +5,9 @@ using Novelist.Core.App;
 namespace Novelist.Infrastructure.App;
 
 /// <summary>
-/// 细纲 beat 级语料覆盖度实现：检索通路复用 <see cref="IReferenceAnchorService.SearchMaterialsAsync"/>，
-/// 与聊天写作注入保持同一条通路（轻量化聚焦方案 §3 覆盖度信号）。
+/// 细纲 beat 级语料覆盖度实现：批量检索通路复用 <see cref="IReferenceAnchorService.SearchMaterialsBatchAsync"/>，
+/// 与聊天写作注入同源（同一检索实现、同一 Ready 过滤，轻量化聚焦方案 §3 覆盖度信号）。
+/// 单次计算只做一次材料全量读取；结果按细纲内容短 TTL 缓存，材料变化由手动刷新兜底。
 /// </summary>
 public sealed partial class ChapterCorpusCoverageService : IChapterCorpusCoverageService
 {
@@ -14,9 +15,15 @@ public sealed partial class ChapterCorpusCoverageService : IChapterCorpusCoverag
     private const int MaxBeats = 40;
     private const int QueryMaxLength = 48;
     private const double SufficientRatio = 0.5;
+    private const int BeatTextMaxLength = 200;
+    private const int PreviewMaxLength = 200;
+    private const int TitleMaxLength = 200;
+    private static readonly TimeSpan CacheLifetime = TimeSpan.FromSeconds(10);
 
     private readonly IReferenceAnchorService _referenceAnchors;
     private readonly IPlanningService _planning;
+    private readonly object _cacheLock = new();
+    private CacheEntry? _cache;
 
     public ChapterCorpusCoverageService(
         IReferenceAnchorService referenceAnchors,
@@ -38,9 +45,31 @@ public sealed partial class ChapterCorpusCoverageService : IChapterCorpusCoverag
 
         var plans = await _planning.GetChapterPlansAsync(input.NovelId, cancellationToken);
         var plan = plans.FirstOrDefault(candidate => string.Equals(candidate.Scope, PlanScope, StringComparison.Ordinal));
+        var planContent = plan?.Content ?? string.Empty;
 
-        var beats = SplitBeats(plan?.Content);
-        if (beats.Count == 0)
+        if (input.Refresh != true)
+        {
+            var cached = ReadCache(input.NovelId, planContent);
+            if (cached is not null)
+            {
+                return cached;
+            }
+        }
+
+        var computed = await ComputeCoreAsync(input, planContent, cancellationToken);
+        WriteCache(input.NovelId, planContent, computed);
+        return computed;
+    }
+
+    private async ValueTask<ChapterCorpusCoveragePayload> ComputeCoreAsync(
+        GetChapterCorpusCoveragePayload input,
+        string planContent,
+        CancellationToken cancellationToken)
+    {
+        var allBeats = SplitBeats(planContent);
+        var truncated = allBeats.Count > MaxBeats;
+        var beats = allBeats.Take(MaxBeats).ToArray();
+        if (beats.Length == 0)
         {
             return new ChapterCorpusCoveragePayload(
                 input.NovelId,
@@ -53,16 +82,49 @@ public sealed partial class ChapterCorpusCoverageService : IChapterCorpusCoverag
                 Sufficient: false);
         }
 
-        var anchors = await _referenceAnchors.GetAnchorsAsync(input.NovelId, cancellationToken);
-        var anchorTitles = anchors
-            .Where(anchor => string.Equals(anchor.Status, ReferenceAnchorBuildStates.Ready, StringComparison.Ordinal))
-            .ToDictionary(anchor => anchor.AnchorId, anchor => anchor.Title);
+        // 与注入同口径：ReadyOnly 让"已覆盖"只统计会被实际注入的语料。
+        // 空 query 的 beat 与原实现一致：直接判未覆盖，不进入检索。
+        var queries = beats.Select(BuildQuery).ToArray();
+        var batchInputs = new List<SearchReferenceMaterialsPayload>(beats.Length);
+        var batchBeatIndexes = new List<int>(beats.Length);
+        for (var index = 0; index < beats.Length; index++)
+        {
+            if (queries[index].Length == 0)
+            {
+                continue;
+            }
+
+            batchInputs.Add(new SearchReferenceMaterialsPayload(
+                input.NovelId,
+                AnchorIds: [],
+                Query: queries[index],
+                MaterialTypes: [],
+                EmotionTags: [],
+                FunctionTags: [],
+                PovTags: [],
+                TechniqueTags: [],
+                Page: 1,
+                Size: 1,
+                ReadyOnly: true));
+            batchBeatIndexes.Add(index);
+        }
+
+        var pages = batchInputs.Count == 0
+            ? []
+            : await _referenceAnchors.SearchMaterialsBatchAsync(batchInputs, cancellationToken);
+        var hits = new ReferenceMaterialPayload?[beats.Length];
+        for (var batchIndex = 0; batchIndex < batchBeatIndexes.Count; batchIndex++)
+        {
+            hits[batchBeatIndexes[batchIndex]] = pages[batchIndex].Items.FirstOrDefault();
+        }
+
+        var anchorTitles = await BuildReadyAnchorTitlesAsync(input.NovelId, cancellationToken);
 
         var coveredCount = 0;
-        var beatResults = new List<ChapterCorpusBeatCoveragePayload>(beats.Count);
-        foreach (var beat in beats)
+        var beatResults = new List<ChapterCorpusBeatCoveragePayload>(beats.Length);
+        for (var index = 0; index < beats.Length; index++)
         {
-            var hit = await SearchBeatAsync(input.NovelId, beat, cancellationToken);
+            var hit = hits[index];
             var covered = hit is not null;
             if (covered)
             {
@@ -70,53 +132,46 @@ public sealed partial class ChapterCorpusCoverageService : IChapterCorpusCoverag
             }
 
             beatResults.Add(new ChapterCorpusBeatCoveragePayload(
-                beat,
+                Bound(beats[index], BeatTextMaxLength),
                 covered,
-                hit is not null && anchorTitles.TryGetValue(hit.AnchorId, out var title) ? title : null,
-                hit?.Text));
+                hit is not null && anchorTitles.TryGetValue(hit.AnchorId, out var title) ? Bound(title, TitleMaxLength) : null,
+                hit is null ? null : Bound(hit.Text, PreviewMaxLength)));
         }
 
-        var ratio = beats.Count == 0 ? 0 : (double)coveredCount / beats.Count;
+        var ratio = beats.Length == 0 ? 0 : (double)coveredCount / beats.Length;
         return new ChapterCorpusCoveragePayload(
             input.NovelId,
             input.ChapterNumber,
             PlanScope,
             beatResults,
             coveredCount,
-            beats.Count,
+            beats.Length,
             Math.Round(ratio, 4),
-            ratio >= SufficientRatio);
+            ratio >= SufficientRatio,
+            truncated);
     }
 
-    private async ValueTask<ReferenceMaterialPayload?> SearchBeatAsync(long novelId, string beat, CancellationToken cancellationToken)
+    private async ValueTask<IReadOnlyDictionary<long, string>> BuildReadyAnchorTitlesAsync(
+        long novelId,
+        CancellationToken cancellationToken)
+    {
+        var anchors = await _referenceAnchors.GetAnchorsAsync(novelId, cancellationToken);
+        return anchors
+            .Where(anchor => string.Equals(anchor.Status, ReferenceAnchorBuildStates.Ready, StringComparison.Ordinal))
+            .ToDictionary(anchor => anchor.AnchorId, anchor => anchor.Title);
+    }
+
+    internal static string Bound(string? value, int maxLength)
+    {
+        var text = value ?? string.Empty;
+        return text.Length > maxLength ? text[..maxLength] : text;
+    }
+
+    private static string BuildQuery(string beat)
     {
         var query = BeatQueryRegex().Replace(beat, " ").Trim();
-        if (query.Length > QueryMaxLength)
-        {
-            query = query[..QueryMaxLength];
-        }
-
-        if (query.Length == 0)
-        {
-            return null;
-        }
-
-        var page = await _referenceAnchors.SearchMaterialsAsync(
-            new SearchReferenceMaterialsPayload(
-                novelId,
-                AnchorIds: [],
-                Query: query,
-                MaterialTypes: [],
-                EmotionTags: [],
-                FunctionTags: [],
-                PovTags: [],
-                TechniqueTags: [],
-                Page: 1,
-                Size: 1),
-            cancellationToken);
-
         // v1 阈值：检索返回任意命中即视为该 beat 已覆盖；相关度分数阈值待真实语料校准（开放问题 3）。
-        return page.Items.FirstOrDefault();
+        return query.Length > QueryMaxLength ? query[..QueryMaxLength] : query;
     }
 
     internal static IReadOnlyList<string> SplitBeats(string? planContent)
@@ -130,9 +185,34 @@ public sealed partial class ChapterCorpusCoverageService : IChapterCorpusCoverag
             .Split('\n')
             .Select(line => line.Trim().TrimStart('-', '*', '+', ' ', '·').Trim())
             .Where(line => line.Length > 0)
-            .Take(MaxBeats)
             .ToArray();
     }
+
+    private ChapterCorpusCoveragePayload? ReadCache(long novelId, string planContent)
+    {
+        lock (_cacheLock)
+        {
+            var cache = _cache;
+            if (cache is null || cache.NovelId != novelId || !string.Equals(cache.PlanContent, planContent, StringComparison.Ordinal))
+            {
+                return null;
+            }
+
+            return UtcNow() - cache.CreatedAt <= CacheLifetime ? cache.Payload : null;
+        }
+    }
+
+    private void WriteCache(long novelId, string planContent, ChapterCorpusCoveragePayload payload)
+    {
+        lock (_cacheLock)
+        {
+            _cache = new CacheEntry(novelId, planContent, payload, UtcNow());
+        }
+    }
+
+    private static DateTimeOffset UtcNow() => DateTimeOffset.UtcNow;
+
+    private sealed record CacheEntry(long NovelId, string PlanContent, ChapterCorpusCoveragePayload Payload, DateTimeOffset CreatedAt);
 
     [GeneratedRegex(@"\s+")]
     private static partial Regex BeatQueryRegex();

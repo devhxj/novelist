@@ -289,6 +289,60 @@ public sealed class SqliteReferenceCorpusAnalysisService : IReferenceCorpusAnaly
         }
     }
 
+    public async ValueTask<ReferenceCorpusAssetTotalsPayload> GetAssetTotalsAsync(
+        GetReferenceCorpusAssetTotalsPayload input,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(input);
+        ValidateNovelId(input.NovelId);
+
+        await _mutex.WaitAsync(cancellationToken);
+        try
+        {
+            var databasePath = await DatabasePathAsync(cancellationToken);
+            await EnsureSchemaAsync(databasePath, cancellationToken);
+            await using var connection = await OpenConnectionAsync(databasePath, cancellationToken);
+            var observationTotal = await CountByNovelAsync(
+                connection,
+                """
+                SELECT COUNT(*)
+                FROM reference_feature_observations o
+                INNER JOIN reference_text_nodes n ON n.node_id = o.node_id AND n.anchor_id = o.anchor_id
+                WHERE n.novel_id = $novel_id AND o.validity_state = 'active'
+                """,
+                input.NovelId,
+                cancellationToken);
+            var specimenTotal = await CountByNovelAsync(
+                connection,
+                """
+                SELECT COUNT(*)
+                FROM reference_technique_specimens s
+                INNER JOIN reference_text_nodes n ON n.node_id = s.source_node_id AND n.anchor_id = s.source_anchor_id
+                WHERE n.novel_id = $novel_id AND s.validity_state = 'active'
+                """,
+                input.NovelId,
+                cancellationToken);
+            return new ReferenceCorpusAssetTotalsPayload(input.NovelId, observationTotal, specimenTotal);
+        }
+        finally
+        {
+            _mutex.Release();
+        }
+    }
+
+    private static async ValueTask<long> CountByNovelAsync(
+        SqliteConnection connection,
+        string sql,
+        long novelId,
+        CancellationToken cancellationToken)
+    {
+        await using var command = connection.CreateCommand();
+        command.CommandText = sql;
+        command.Parameters.AddWithValue("$novel_id", novelId);
+        var result = await command.ExecuteScalarAsync(cancellationToken);
+        return result is long count ? count : Convert.ToInt64(result ?? 0L);
+    }
+
     private static void ValidateStartInput(StartReferenceCorpusFeatureAnalysisPayload input)
     {
         ValidateNovelId(input.NovelId);

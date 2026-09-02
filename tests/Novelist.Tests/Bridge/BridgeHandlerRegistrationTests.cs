@@ -135,8 +135,9 @@ public sealed class BridgeHandlerRegistrationTests
     [Fact]
     public void CompatibilityAppMethodListHasExpectedCoverage()
     {
-        Assert.Equal(189, BridgeCompatibilityAppMethods.MethodNames.Count);
+        Assert.Equal(190, BridgeCompatibilityAppMethods.MethodNames.Count);
         Assert.Contains("GetChapterCorpusCoverage", BridgeCompatibilityAppMethods.MethodNames);
+        Assert.Contains("GetReferenceCorpusAssetTotals", BridgeCompatibilityAppMethods.MethodNames);
         Assert.Equal(BridgeCompatibilityAppMethods.MethodNames.Count, BridgeCompatibilityAppMethods.MethodNames.Distinct(StringComparer.Ordinal).Count());
         Assert.Contains("Chat", BridgeCompatibilityAppMethods.MethodNames);
         Assert.Contains("GetCover", BridgeCompatibilityAppMethods.MethodNames);

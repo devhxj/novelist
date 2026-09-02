@@ -922,6 +922,19 @@ DateTimeOffset.UtcNow));
  ValueTask.FromResult(new ReferenceMaterialEmbeddingBackfillPayload(
  "test", "test", 1, 0, 0, 0, 0, 0, 0, []));
 
+        public async ValueTask<IReadOnlyList<PageResultPayload<ReferenceMaterialPayload>>> SearchMaterialsBatchAsync(
+            IReadOnlyList<SearchReferenceMaterialsPayload> inputs,
+            CancellationToken cancellationToken)
+        {
+            var results = new List<PageResultPayload<ReferenceMaterialPayload>>(inputs.Count);
+            foreach (var input in inputs)
+            {
+                results.Add(await SearchMaterialsAsync(input, cancellationToken));
+            }
+
+            return results;
+        }
+
         public ValueTask<PageResultPayload<ReferenceMaterialPayload>> SearchMaterialsAsync(
             SearchReferenceMaterialsPayload input,
             CancellationToken cancellationToken)

@@ -93,6 +93,7 @@ public static class BridgeCompatibilityAppMethods
         "GetReferenceCorpusTechniqueSpecimenAnalysisRun",
         "GetReferenceMaterialDetail",
         "GetReferenceMaterialCoverage",
+        "GetReferenceCorpusAssetTotals",
         "GetReferenceMaterializationStatus",
         "RetryReferenceMaterialization",
         "GetReferenceMaterialTagReviewQueue",

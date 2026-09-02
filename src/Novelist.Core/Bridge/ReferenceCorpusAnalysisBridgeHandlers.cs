@@ -92,6 +92,11 @@ public static class ReferenceCorpusAnalysisBridgeHandlers
             }
         });
 
+        dispatcher.Register("GetReferenceCorpusAssetTotals", async (context, cancellationToken) =>
+            await service.GetAssetTotalsAsync(
+                ReadObjectArg<GetReferenceCorpusAssetTotalsPayload>(context.Payload, 0, "input"),
+                cancellationToken));
+
         return dispatcher;
     }
 

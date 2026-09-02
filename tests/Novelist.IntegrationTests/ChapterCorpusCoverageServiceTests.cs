@@ -64,6 +64,57 @@ public class ChapterCorpusCoverageServiceTests
         Assert.False(empty.Sufficient);
     }
 
+    [Fact]
+    public async Task ComputeCoverageSearchesAllBeatsInOneBatchAndMarksTruncation()
+    {
+        var beatLines = Enumerable.Range(1, 45).Select(index => $"- 第{index}个节拍").ToArray();
+        var planning = new StubPlanningService(
+        [
+            new ChapterPlanPayload(42, "next", string.Join('\n', beatLines)),
+        ]);
+        var anchors = new StubAnchorService(
+        [
+            new ReferenceAnchorPayload(
+                101, 42, "全局雨夜参考", "作者", "D:\\books\\a.md", "markdown", "user_provided",
+                "hash", "v1", ReferenceAnchorBuildStates.Ready,
+                DateTimeOffset.UtcNow, DateTimeOffset.UtcNow, "private", "user_verified", []),
+        ],
+        _ => true);
+        var service = new ChapterCorpusCoverageService(anchors, planning);
+
+        var coverage = await service.ComputeCoverageAsync(new GetChapterCorpusCoveragePayload(42, 1), CancellationToken.None);
+
+        // 性能约束：N 个 beat 只触发一次批量检索（一次材料全量读取），而非 N 次独立检索。
+        Assert.Equal(1, anchors.BatchCallCount);
+        Assert.Equal(40, anchors.BatchedQueryCount);
+        Assert.Equal(40, coverage.TotalCount);
+        Assert.Equal(40, coverage.CoveredCount);
+        Assert.True(coverage.Sufficient);
+        Assert.True(coverage.Truncated);
+    }
+
+    [Fact]
+    public async Task ComputeCoverageIgnoresMaterialsFromNonReadyAnchors()
+    {
+        var planning = new StubPlanningService(
+        [
+            new ChapterPlanPayload(42, "next", "- 雨夜门口对峙"),
+        ]);
+        var building = new ReferenceAnchorPayload(
+            101, 42, "全局雨夜参考", "作者", "D:\\books\\a.md", "markdown", "user_provided",
+            "hash", "v1", "building",
+            DateTimeOffset.UtcNow, DateTimeOffset.UtcNow, "private", "user_verified", []);
+        var anchors = new StubAnchorService([building], _ => true);
+        var service = new ChapterCorpusCoverageService(anchors, planning);
+
+        var coverage = await service.ComputeCoverageAsync(new GetChapterCorpusCoveragePayload(42, 1, Refresh: true), CancellationToken.None);
+
+        // 覆盖口径与注入一致：非 Ready 锚点的材料不会被实际注入，不能计入覆盖。
+        Assert.Equal(1, coverage.TotalCount);
+        Assert.Equal(0, coverage.CoveredCount);
+        Assert.False(coverage.Sufficient);
+    }
+
     private sealed class StubPlanningService(IReadOnlyList<ChapterPlanPayload> plans) : IPlanningService
     {
         public ValueTask<IReadOnlyList<ChapterPlanPayload>> GetChapterPlansAsync(long novelId, CancellationToken cancellationToken)
@@ -92,11 +143,36 @@ public class ChapterCorpusCoverageServiceTests
         IReadOnlyList<ReferenceAnchorPayload> anchors,
         Func<string, bool> matchQuery) : IReferenceAnchorService
     {
+        public int BatchCallCount { get; private set; }
+
+        public int BatchedQueryCount { get; private set; }
+
         public ValueTask<IReadOnlyList<ReferenceAnchorPayload>> GetAnchorsAsync(long novelId, CancellationToken cancellationToken)
             => ValueTask.FromResult(anchors);
 
+        public async ValueTask<IReadOnlyList<PageResultPayload<ReferenceMaterialPayload>>> SearchMaterialsBatchAsync(
+            IReadOnlyList<SearchReferenceMaterialsPayload> inputs,
+            CancellationToken cancellationToken)
+        {
+            BatchCallCount++;
+            BatchedQueryCount += inputs.Count;
+            var results = new List<PageResultPayload<ReferenceMaterialPayload>>(inputs.Count);
+            foreach (var input in inputs)
+            {
+                results.Add(await SearchMaterialsAsync(input, cancellationToken));
+            }
+
+            return results;
+        }
+
         public ValueTask<PageResultPayload<ReferenceMaterialPayload>> SearchMaterialsAsync(SearchReferenceMaterialsPayload input, CancellationToken cancellationToken)
         {
+            // 与真实服务一致：ReadyOnly 只统计就绪锚点，非 Ready 书的材料不参与覆盖判定。
+            if (input.ReadyOnly == true && anchors.All(anchor => !string.Equals(anchor.Status, ReferenceAnchorBuildStates.Ready, StringComparison.Ordinal)))
+            {
+                return ValueTask.FromResult(new PageResultPayload<ReferenceMaterialPayload>([], 0, 1, 1, 0));
+            }
+
             if (matchQuery(input.Query))
             {
                 var material = new ReferenceMaterialPayload(
