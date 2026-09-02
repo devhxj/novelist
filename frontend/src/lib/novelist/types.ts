@@ -1103,6 +1103,7 @@ has_more: boolean
     rejected_count: number
     review_count: number
     vector_count: number
+    model_call_count: number
     llm: MaterializationModelIdentity
     embedding: MaterializationModelIdentity
     last_error_code?: string | null
@@ -1898,6 +1899,7 @@ safe_diagnostics?: string[] | null
     covered: boolean
     anchor_title?: string | null
     text_preview?: string | null
+    hit_score?: number | null
   }
 
   export interface ChapterCorpusCoverage {
@@ -1910,12 +1912,45 @@ safe_diagnostics?: string[] | null
     coverage_ratio: number
     sufficient: boolean
     truncated?: boolean | null
+    source_books?: string[] | null
   }
 
   export interface GetChapterCorpusCoverageInput {
     novel_id: number
     chapter_number?: number | null
     refresh?: boolean | null
+  }
+
+  export interface CreateReferenceAnchorFromContentInput {
+    novel_id: number
+    title: string
+    author?: string | null
+    file_name: string
+    content_base64: string
+    license_status?: string | null
+  }
+
+  export interface ExportReferenceCorpusPackageInput {
+    novel_id: number
+    anchor_id: number
+  }
+
+  export interface ReferenceCorpusPackageExportResult {
+    file_path: string
+    observation_count: number
+    specimen_count: number
+  }
+
+  export interface ImportReferenceCorpusPackageInput {
+    novel_id: number
+    anchor_id: number
+  }
+
+  export interface ReferenceCorpusPackageImportResult {
+    imported_count: number
+    skipped_count: number
+    observation_count: number
+    specimen_count: number
   }
 
   export interface GetReferenceCorpusAssetTotalsInput {

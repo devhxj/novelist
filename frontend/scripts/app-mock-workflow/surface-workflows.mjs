@@ -712,6 +712,11 @@ export async function verifyCorpusChatWorkflow(page) {
 
   const input = page.getByPlaceholder('输入消息，按 / 调用技能...')
 
+  // 章节语境徽章：打开第 1 章后默认自动绑定，显示注入开启。
+  const badge = page.getByTestId('chapter-context-badge')
+  await expectVisible(badge, 'chapter context badge')
+  await expectVisible(badge.getByText('第 1 章 · 语料注入开启'), 'chapter badge auto binding')
+
   // 覆盖度信号：写入两命中一落空的细纲 beat，横幅应显示 67%。
   await page.evaluate(async () => {
     await window.novelist.invoke('UpdateChapterPlan', { args: [42, { scope: 'next', content: '雨夜门口对峙\n灯影停顿收尾\n完全无关的日常桥段' }] })
@@ -757,19 +762,54 @@ export async function verifyCorpusChatWorkflow(page) {
   await expectVisible(page.getByText('本章语料注入'), 'corpus usage card heading')
   await expectVisible(page.getByTestId('corpus-usage-card').getByText('《全局雨夜参考》').first(), 'corpus usage material source book')
 
+  // 访谈选择题：AI 以 choices 块提问，点击选项即作为作者回答发送。
+  await page.getByRole('button', { name: '发送消息' }).waitFor({ state: 'visible', timeout: 12_000 })
+  await input.fill('访谈：林岚在雨夜发现新线索')
+  await input.press('Enter')
+  await expectVisible(page.getByTestId('choice-block').first(), 'interview choice block')
+  await expectVisible(page.getByText('这处冲突的处理方式，两本参考书给出了不同的示范，你倾向哪一种？').first(), 'interview question text')
+  await page.getByTestId('choice-block').first().getByRole('button', { name: /冷处理/ }).click()
+  await expectVisible(page.getByText(/冷处理：参考《全局雨夜参考》用停顿和沉默压住情绪/), 'interview picked option echoed as user message')
+  await page.getByRole('button', { name: '发送消息' }).waitFor({ state: 'visible', timeout: 12_000 })
+
   // 注入失败态：语料检索故障时回合继续，失败卡片显式呈现而不是打断对话。
   await input.fill('注入失败：验证降级')
   await input.press('Enter')
   await expectVisible(page.getByText('参考语料注入失败，本章按无语料模式继续：mock 检索故障').first(), 'corpus injection failure card')
-
-  // 访谈选择题：AI 以 choices 块提问，点击选项即作为作者回答发送。
-  await input.fill('访谈：林岚在雨夜发现新线索')
-  await input.press('Enter')
-  await expectVisible(page.getByTestId('choice-block'), 'interview choice block')
-  await expectVisible(page.getByText('这处冲突的处理方式，两本参考书给出了不同的示范，你倾向哪一种？'), 'interview question text')
-  await page.getByTestId('choice-block').getByRole('button', { name: /冷处理/ }).click()
-  await expectVisible(page.getByText(/冷处理：参考《全局雨夜参考》用停顿和沉默压住情绪/), 'interview picked option echoed as user message')
   await page.getByRole('button', { name: '发送消息' }).waitFor({ state: 'visible', timeout: 12_000 })
+
+  // 直接开写：逃生门按钮发出的消息携带固定开写指令。
+  const chatBeforeDirectWrite = await bridgeCallCount(page, 'Chat')
+  await page.getByTestId('direct-write-button').click()
+  await waitForBridgeCall(page, 'Chat')
+  const directWriteCalls = await page.evaluate(() =>
+    window.__appMockState.calls.filter((call) => call.method === 'Chat'))
+  assert.equal(directWriteCalls.length, chatBeforeDirectWrite + 1, 'direct write must send exactly one Chat call')
+  assert.match(String(directWriteCalls.at(-1).args?.[0]?.message ?? ''), /直接开写/,
+    'direct write message must carry the explicit directive')
+  await page.getByRole('button', { name: '发送消息' }).waitFor({ state: 'visible', timeout: 12_000 })
+
+  // 章号锁定：锁定后徽章切换为已锁定，再恢复跟随编辑器。
+  await badge.click()
+  await page.getByLabel('锁定章号').fill('3')
+  await page.getByRole('button', { name: '锁定', exact: true }).click()
+  await expectVisible(badge.getByText('第 3 章 · 已锁定'), 'chapter badge pinned state')
+  await badge.click()
+  await page.getByRole('button', { name: '跟随编辑器' }).click()
+  await expectVisible(badge.getByText('第 1 章 · 语料注入开启'), 'chapter badge back to auto')
+
+  // 无细纲空态：清空细纲后覆盖度显示未建细纲引导，可跳转时间线创建。
+  await page.evaluate(async () => {
+    await window.novelist.invoke('UpdateChapterPlan', { args: [42, { scope: 'next', content: '' }] })
+  })
+  await page.getByTestId('direct-write-button').click()
+  await expectVisible(page.getByText('本章还没有细纲'), 'no-plan coverage empty state')
+  await page.getByTestId('chapter-coverage-banner').getByRole('button', { name: '去创建' }).click()
+  await expectVisible(page.getByRole('heading', { name: '章节计划' }), 'timeline plans panel opened from chat')
+  await clickActivity(page, '章节')
+  await page.evaluate(async () => {
+    await window.novelist.invoke('UpdateChapterPlan', { args: [42, { scope: 'next', content: '雨夜门口对峙\\n灯影停顿收尾' }] })
+  })
 
   await assertBridgeCallCount(page, 'SaveContent', 0)
   await page.screenshot({ path: path.join(outputDir, 'app-corpus-chat.png'), fullPage: true })
@@ -905,7 +945,8 @@ export async function verifyReferenceWorkspaceWorkflow(page) {
   await corpusTabs.getByRole('tab', { name: '语料包' }).click()
   const pack = page.getByTestId('corpus-pack')
   await expectVisible(pack.getByRole('heading', { name: '语料包' }), 'corpus pack heading')
-  await expectVisible(pack.getByText('导出 / 导入通道建设中'), 'corpus pack coming-soon note')
+  await expectVisible(pack.getByTestId('corpus-pack-export'), 'corpus pack export entry')
+  await expectVisible(pack.getByTestId('corpus-pack-import'), 'corpus pack import entry')
   await page.screenshot({ path: path.join(outputDir, 'corpus-pack.png'), fullPage: true })
 
   await referenceBooks.getByRole('button', { name: '归档《全局雨夜参考》为受限语料' }).click()

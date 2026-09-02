@@ -1221,6 +1221,9 @@ referenceCorpusTechniqueSpecimenAnalysisRuns: [],
       case 'PickReferenceSourceFile': return options.pickedReferenceSourceFile ?? null
       case 'CreateReferenceAnchor': return createReferenceAnchor(args[0])
       case 'RegisterReferenceMaterializationSource': return createReferenceAnchor(args[0])
+      case 'RegisterReferenceMaterializationSourceFromContent': return registerMaterializationSourceFromContent(args[0])
+      case 'ExportReferenceCorpusPackage': return exportReferenceCorpusPackage(args[0])
+      case 'ImportReferenceCorpusPackage': return importReferenceCorpusPackage(args[0])
       case 'CreateReferenceAnchors': return createReferenceAnchors(args[0])
       case 'CreateReferenceAnchorsWithResult': return createReferenceAnchorsWithResult(args[0])
       case 'DeleteReferenceAnchor':
@@ -4496,6 +4499,41 @@ function referenceAnchors() {
       ? filters.map((item) => String(item ?? '').trim().toLowerCase()).filter(Boolean)
       : []
     return normalizedFilters.length === 0 || normalizedFilters.includes(String(value ?? '').trim().toLowerCase())
+  }
+
+  async function registerMaterializationSourceFromContent(input = {}) {
+    const fileName = String(input?.file_name ?? '')
+    if (!/\.(txt|md)$/i.test(fileName)) {
+      throw new Error('Reference source must be a .txt or .md file.')
+    }
+    if (!input?.content_base64) {
+      throw new Error('Reference source content is required.')
+    }
+    const title = String(input?.title ?? '').trim() || fileName.replace(/\.[^.]+$/, '')
+    return createReferenceAnchor({
+      novel_id: Number(input?.novel_id ?? state.activeNovelId ?? 42),
+      title,
+      author: input?.author ?? null,
+      // 模拟写入应用数据目录后的服务端路径
+      source_path: `mock://sources/${Date.now().toString(36)}${fileName.slice(fileName.lastIndexOf('.'))}`,
+      source_kind: /\.txt$/i.test(fileName) ? 'text' : 'markdown',
+      license_status: input?.license_status ?? 'user_provided',
+      visibility: 'private',
+      source_trust: 'user_verified',
+      user_tags: [],
+    })
+  }
+
+  async function exportReferenceCorpusPackage(input = {}) {
+    return {
+      file_path: `C:\mock\corpus-package-${Number(input?.anchor_id ?? 101)}.jsonl`,
+      observation_count: 128,
+      specimen_count: 36,
+    }
+  }
+
+  async function importReferenceCorpusPackage(input = {}) {
+    return { imported_count: 42, skipped_count: 3, observation_count: 30, specimen_count: 15 }
   }
 
   function getReferenceCorpusAssetTotals(input = {}) {

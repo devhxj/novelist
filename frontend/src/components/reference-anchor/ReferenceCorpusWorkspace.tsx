@@ -14,7 +14,9 @@ import {
   XCircle,
 } from 'lucide-react'
 import { useApp } from '@/hooks/useApp'
+import SettingsDialog from '@/components/settings/SettingsDialog'
 import { BridgeError } from '@/lib/novelist/bridge'
+import { describeBridgeError } from '@/lib/novelist/bridgeErrors'
 import type { reference } from '@/lib/novelist/types'
 
 type Props = {
@@ -28,6 +30,9 @@ type Props = {
 type Action = 'analyze' | 'manual-preview' | 'confirm' | 'enqueue' | 'retry' | 'review' | null
 
 const numberFormatter = new Intl.NumberFormat('zh-CN')
+
+// 切分分析结果按锚点缓存于组件外：LLM 分析期间切换页面回来不丢结果。
+const analyzedProfiles = new Map<number, reference.ChapterSplitProfile>()
 
 function formatCount(value: number): string {
   return numberFormatter.format(Math.max(0, value))
@@ -69,6 +74,26 @@ function candidateTags(tags: reference.MaterializationMaterialTags): string[] {
   ].filter(Boolean).slice(0, 5)
 }
 
+function parseTimestampMs(value: unknown): number | null {
+  if (typeof value === 'number' && Number.isFinite(value)) return value
+  if (typeof value === 'string') {
+    const parsed = Date.parse(value)
+    return Number.isNaN(parsed) ? null : parsed
+  }
+  return null
+}
+
+function runDurationText(run: reference.MaterializationStatus): string {
+  const startedMs = parseTimestampMs(run.started_at)
+  if (startedMs === null) return ''
+  const endedMs = run.completed_at ? parseTimestampMs(run.completed_at) ?? Date.now() : Date.now()
+  if (endedMs <= startedMs) return ''
+  const minutes = Math.floor((endedMs - startedMs) / 60_000)
+  if (minutes < 1) return '不足 1 分钟'
+  if (minutes < 60) return `${minutes} 分钟`
+  return `${Math.floor(minutes / 60)} 小时 ${minutes % 60} 分钟`
+}
+
 function chapterSplitErrorMessage(error: unknown): string {
   if (error instanceof BridgeError && error.code === 'materialization_chapter_split_output_invalid') {
     return '自动分析返回的章节证据无法对应原文标题。请重新分析，或输入章节分隔模板后预览。'
@@ -92,6 +117,10 @@ export default function ReferenceCorpusWorkspace({
   const [manualTemplate, setManualTemplate] = useState('')
   const [action, setAction] = useState<Action>(null)
   const [error, setError] = useState<string | null>(null)
+  const [errorRetry, setErrorRetry] = useState<(() => void) | null>(null)
+  const [sampleLimit, setSampleLimit] = useState<number | null>(null)
+  const [statusTick, setStatusTick] = useState(0)
+  const [showModelSettings, setShowModelSettings] = useState(false)
   const requestIdRef = useRef(0)
   const notifiedCompletedRunRef = useRef<string | null>(null)
 
@@ -117,9 +146,10 @@ export default function ReferenceCorpusWorkspace({
       })
       if (requestId !== requestIdRef.current) return
       setRun(status)
-    } catch {
+    } catch (err) {
       if (requestId === requestIdRef.current) {
-        setError('无法读取该来源的材料化状态。请刷新后重试。')
+          setError(describeBridgeError(err, '无法读取该来源的材料化状态。').message)
+        setErrorRetry(() => () => { setStatusTick(t => t + 1) })
       }
     }
   }, [app, novelId])
@@ -151,20 +181,21 @@ export default function ReferenceCorpusWorkspace({
       ])
       setProgress(nextProgress.items ?? [])
       setCandidates(nextCandidates.items ?? [])
-    } catch {
-      setError('材料化进度或候选复核列表加载失败。请刷新后重试。')
+    } catch (err) {
+      setError(describeBridgeError(err, '材料化进度或候选复核列表加载失败。').message)
+      setErrorRetry(() => () => { setStatusTick(t => t + 1) })
     }
   }, [app, novelId])
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
       setError(null)
-      setProfile(null)
+      setProfile(selectedAnchor ? analyzedProfiles.get(selectedAnchor.anchor_id) ?? null : null)
       setManualTemplate('')
       void loadRun(selectedAnchor)
     }, 0)
     return () => window.clearTimeout(timer)
-  }, [loadRun, refreshKey, selectedAnchor])
+  }, [loadRun, refreshKey, selectedAnchor, statusTick])
 
   useEffect(() => {
     const timer = window.setTimeout(() => { void loadRunDetail(run) }, 0)
@@ -194,9 +225,11 @@ export default function ReferenceCorpusWorkspace({
         novel_id: novelId,
         anchor_id: selectedAnchor.anchor_id,
       })
+      analyzedProfiles.set(selectedAnchor.anchor_id, nextProfile)
       setProfile(nextProfile)
     } catch (error) {
       setError(chapterSplitErrorMessage(error))
+      setErrorRetry(() => () => { void analyze() })
     } finally {
       setAction(null)
     }
@@ -212,9 +245,11 @@ export default function ReferenceCorpusWorkspace({
         anchor_id: selectedAnchor.anchor_id,
         delimiter_template: manualTemplate.trim(),
       })
+      analyzedProfiles.set(selectedAnchor.anchor_id, nextProfile)
       setProfile(nextProfile)
-    } catch {
-      setError('章节分隔模板无法应用到整本来源。请调整模板后重试。')
+    } catch (err) {
+      setError(describeBridgeError(err, '章节分隔模板无法应用到整本来源。').message)
+      setErrorRetry(() => () => { void previewManual() })
     } finally {
       setAction(null)
     }
@@ -231,8 +266,9 @@ export default function ReferenceCorpusWorkspace({
         split_profile_id: profile.split_profile_id,
       })
       setProfile(confirmed)
-    } catch {
-      setError('章节边界确认失败。来源可能已变化，请重新分析。')
+    } catch (err) {
+      setError(describeBridgeError(err, '章节边界确认失败。来源可能已变化。').message)
+      setErrorRetry(() => () => { void confirmProfile() })
     } finally {
       setAction(null)
     }
@@ -250,8 +286,9 @@ export default function ReferenceCorpusWorkspace({
         chapter_batch_size: batchSize,
       })
       setRun(status)
-    } catch {
-      setError('材料化未能启动。大模型、向量模型和索引均必须可用；修复后请显式重试。')
+    } catch (err) {
+      setError(describeBridgeError(err, '材料化未能启动。大模型、向量模型和索引均必须可用。').message)
+      setErrorRetry(() => () => { void enqueue() })
     } finally {
       setAction(null)
     }
@@ -268,8 +305,9 @@ export default function ReferenceCorpusWorkspace({
         run_id: run.run_id,
       })
       setRun(status)
-    } catch {
-      setError('材料化重试未能启动。请先修复显示的模型或索引问题。')
+    } catch (err) {
+      setError(describeBridgeError(err, '材料化重试未能启动。请先修复模型或索引问题。').message)
+      setErrorRetry(() => () => { void retry() })
     } finally {
       setAction(null)
     }
@@ -289,8 +327,9 @@ export default function ReferenceCorpusWorkspace({
         expected_version: candidate.row_version,
       })
       setRun(result.status)
-    } catch {
-      setError('候选复核未保存。列表已变更时请刷新后再次提交。')
+    } catch (err) {
+      setError(describeBridgeError(err, '候选复核未保存。列表已变更时请刷新后再次提交。').message)
+      setErrorRetry(() => () => { void reviewCandidate(candidate, nextAction) })
     } finally {
       setAction(null)
     }
@@ -353,7 +392,24 @@ export default function ReferenceCorpusWorkspace({
         {error && (
           <div className="mt-4 flex items-start gap-2 border border-destructive/30 bg-destructive/5 px-3 py-2.5 text-xs text-destructive" role="alert">
             <CircleAlert className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
-            <span className="min-w-0 break-words">{error}</span>
+            <span className="min-w-0 flex-1 break-words">{error}</span>
+            {errorRetry && (
+              <button
+                type="button"
+                onClick={() => { setError(null); setErrorRetry(null); errorRetry() }}
+                className="shrink-0 self-center rounded border border-destructive/40 px-2 py-0.5 text-[11px] font-medium hover:bg-destructive/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              >
+                重试
+              </button>
+            )}
+            <button
+              type="button"
+              onClick={() => { setShowModelSettings(true) }}
+              className="shrink-0 self-center rounded border border-destructive/40 px-2 py-0.5 text-[11px] font-medium hover:bg-destructive/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              data-testid="open-model-settings"
+            >
+              去配置模型
+            </button>
           </div>
         )}
 
@@ -503,6 +559,7 @@ export default function ReferenceCorpusWorkspace({
               <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-1 text-[11px] text-muted-foreground">
                 <span className={runTone(run.status)}>运行 {run.status}</span>
                 <span>批次 {formatCount(run.completed_chapter_batches)} / {formatCount(run.total_chapter_batches)} · 每批 {run.chapter_batch_size} 章</span>
+                <span>模型调用 {formatCount(run.model_call_count)} 次{runDurationText(run) ? ` · 耗时 ${runDurationText(run)}` : ''}</span>
                 <span>{run.vector_index_healthy ? '向量索引完整' : '向量索引未就绪'}</span>
                 <span>LLM {run.llm.provider}/{run.llm.model_id}</span>
                 <span>向量 {run.embedding.provider}/{run.embedding.model_id}</span>
@@ -548,28 +605,87 @@ export default function ReferenceCorpusWorkspace({
                 <p className="mt-1 text-xs text-muted-foreground">确认或拒绝后，候选会重新经过大模型准入与向量处理。</p>
               </div>
             </div>
+            <div className="mt-2 flex items-center gap-1.5" role="group" aria-label="复核抽样">
+              <span className="text-[11px] text-muted-foreground">抽样复核：</span>
+              {([null, 5, 10] as const).map((limit) => (
+                <button
+                  key={String(limit)}
+                  type="button"
+                  onClick={() => { setSampleLimit(limit) }}
+                  aria-pressed={sampleLimit === limit}
+                  className={`h-6 min-w-9 rounded border px-1.5 text-[11px] transition-colors ${sampleLimit === limit ? 'border-primary bg-primary/10 text-primary' : 'border-border text-muted-foreground hover:text-foreground'}`}
+                >
+                  {limit === null ? '全部' : `前 ${limit} 条`}
+                </button>
+              ))}
+            </div>
             <ol className="mt-3 space-y-2" aria-label="待复核候选">
-              {candidates.map((candidate) => (
-                <li key={candidate.candidate_id} className="border border-border px-3 py-3">
-                  <div className="flex flex-wrap items-start justify-between gap-2">
-                    <div className="min-w-0 flex-1">
-                      <p className="text-xs leading-5 text-foreground">{candidate.text_preview}</p>
-                      <div className="mt-2 flex flex-wrap gap-1">
-                        {candidateTags(candidate.tags).map((tag) => <span key={tag} className="border border-border bg-muted/35 px-1.5 py-0.5 text-[11px] text-muted-foreground">{tag.replaceAll('_', ' ')}</span>)}
-                      </div>
-                      <p className="mt-2 text-[11px] text-muted-foreground">第 {candidate.chapter_index} 章 · {candidate.candidate_type.replaceAll('_', ' ')} · {candidate.reason_codes.join('；') || '需要人工判断'}</p>
-                    </div>
-                    <div className="flex shrink-0 gap-1">
-                      <button type="button" onClick={() => { void reviewCandidate(candidate, 'confirm') }} disabled={isBusy} className="inline-flex h-7 items-center gap-1 rounded-md bg-primary px-2 text-[11px] font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50"><CheckCircle2 className="h-3 w-3" aria-hidden="true" />确认</button>
-                      <button type="button" onClick={() => { void reviewCandidate(candidate, 'reject') }} disabled={isBusy} className="inline-flex h-7 items-center gap-1 rounded-md border border-border px-2 text-[11px] text-muted-foreground hover:bg-secondary hover:text-foreground disabled:opacity-50"><XCircle className="h-3 w-3" aria-hidden="true" />拒绝</button>
-                    </div>
-                  </div>
-                </li>
+              {(sampleLimit === null ? candidates : candidates.slice(0, sampleLimit)).map((candidate) => (
+                <ReviewCandidateCard
+                  key={candidate.candidate_id}
+                  candidate={candidate}
+                  busy={isBusy}
+                  onReview={reviewCandidate}
+                />
               ))}
             </ol>
           </section>
         )}
       </div>
+
+      <SettingsDialog
+        open={showModelSettings}
+        onClose={() => setShowModelSettings(false)}
+        initialTab="model"
+      />
     </main>
+  )
+}
+
+function ReviewCandidateCard({ candidate, busy, onReview }: {
+  candidate: reference.MaterializationCandidate
+  busy: boolean
+  onReview: (candidate: reference.MaterializationCandidate, nextAction: 'confirm' | 'reject') => Promise<void>
+}) {
+  const [showEvidence, setShowEvidence] = useState(false)
+
+  return (
+    <li className="border border-border px-3 py-3">
+      <div className="flex flex-wrap items-start justify-between gap-2">
+        <div className="min-w-0 flex-1">
+          <p className="text-xs leading-5 text-foreground">{candidate.text_preview}</p>
+          <div className="mt-2 flex flex-wrap gap-1">
+            {candidateTags(candidate.tags).map((tag) => <span key={tag} className="border border-border bg-muted/35 px-1.5 py-0.5 text-[11px] text-muted-foreground">{tag.replaceAll('_', ' ')}</span>)}
+          </div>
+          <p className="mt-2 text-[11px] text-muted-foreground">第 {candidate.chapter_index} 章 · {candidate.candidate_type.replaceAll('_', ' ')} · {candidate.reason_codes.join('；') || '需要人工判断'}</p>
+          {candidate.source_spans.length > 0 && (
+            <>
+              <button
+                type="button"
+                onClick={() => { setShowEvidence((open) => !open) }}
+                aria-expanded={showEvidence}
+                className="mt-1.5 rounded px-1 py-0.5 text-[11px] text-primary underline-offset-2 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                data-testid={`evidence-toggle-${candidate.candidate_id}`}
+              >
+                {showEvidence ? '收起证据定位' : `查看证据定位（${candidate.source_spans.length} 处）`}
+              </button>
+              {showEvidence && (
+                <ul className="mt-1 space-y-0.5 rounded border border-border bg-muted/20 px-2 py-1.5 text-[11px] text-muted-foreground" data-testid={`evidence-list-${candidate.candidate_id}`}>
+                  {candidate.source_spans.map((span) => (
+                    <li key={`${span.node_id}:${span.start}`} className="break-all">
+                      节点 {span.node_id} · 偏移 {span.start}–{span.end}
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </>
+          )}
+        </div>
+        <div className="flex shrink-0 gap-1">
+          <button type="button" onClick={() => { void onReview(candidate, 'confirm') }} disabled={busy} className="inline-flex h-7 items-center gap-1 rounded-md bg-primary px-2 text-[11px] font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50"><CheckCircle2 className="h-3 w-3" aria-hidden="true" />确认</button>
+          <button type="button" onClick={() => { void onReview(candidate, 'reject') }} disabled={busy} className="inline-flex h-7 items-center gap-1 rounded-md border border-border px-2 text-[11px] text-muted-foreground hover:bg-secondary hover:text-foreground disabled:opacity-50"><XCircle className="h-3 w-3" aria-hidden="true" />拒绝</button>
+        </div>
+      </div>
+    </li>
   )
 }

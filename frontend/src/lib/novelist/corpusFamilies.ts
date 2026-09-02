@@ -1,6 +1,6 @@
 // 语料浏览维度枚举（单一来源）。
 // 须与后端 ReferenceCorpusFeatureFamilies / 技法标本 family 词表保持一致；
-// 轻量化聚焦方案第四节新增 scene/trope 场景级 family 时，在此同步扩展。
+// scene/trope 为场景级 family（方案 §4），分析产出随真实语料积累。
 export const OBSERVATION_FAMILIES = [
   'emotion',
   'sensory',
@@ -12,6 +12,8 @@ export const OBSERVATION_FAMILIES = [
   'rhetoric',
   'hook',
   'narrative',
+  'scene',
+  'trope',
 ] as const
 
 export const SPECIMEN_FAMILIES = [

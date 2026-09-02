@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { ChevronLeft, ChevronRight, Gauge, Hammer, LibraryBig, PackageOpen, RefreshCcw } from 'lucide-react'
 import { useApp } from '@/hooks/useApp'
+import { describeBridgeError } from '@/lib/novelist/bridgeErrors'
 import type { reference, storage } from '@/lib/novelist/types'
 import { OBSERVATION_FAMILIES, SPECIMEN_FAMILIES } from '@/lib/novelist/corpusFamilies'
 import ReferenceCorpusWorkspace from './ReferenceCorpusWorkspace'
@@ -192,6 +193,8 @@ function CorpusBrowse({ novelId, anchors, refreshKey }: {
   const [anchorId, setAnchorId] = useState<number | null>(null)
   const [kind, setKind] = useState<BrowseKind>('observations')
   const [family, setFamily] = useState('')
+  const [keyword, setKeyword] = useState('')
+  const [reviewFilter, setReviewFilter] = useState('')
   const [observations, setObservations] = useState<storage.PageResult_reference_CorpusFeatureObservation_ | null>(null)
   const [specimens, setSpecimens] = useState<storage.PageResult_reference_CorpusTechniqueSpecimen_ | null>(null)
   const [cursorStack, setCursorStack] = useState<string[]>([])
@@ -219,22 +222,29 @@ function CorpusBrowse({ novelId, anchors, refreshKey }: {
     setError(null)
     try {
       if (kind === 'observations') {
+        const filters: Record<string, string> = {}
+        if (family) filters.feature_family = family
+        if (keyword.trim()) filters.feature_key = keyword.trim()
+        if (reviewFilter) filters.review_state = reviewFilter
         const page: storage.PageRequest = {
           cursor,
           page_size: BROWSE_PAGE_SIZE,
           sort_by: 'feature_family',
           sort_dir: 'asc',
-          filters: family ? { feature_family: family } : null,
+          filters: Object.keys(filters).length > 0 ? filters : null,
         }
         const result = await app.ListReferenceCorpusFeatureObservations({ novel_id: novelId, anchor_id: anchorId, page_request: page })
         if (requestSeqRef.current === requestId) setObservations(result)
       } else {
+        const filters: Record<string, string> = {}
+        if (family) filters.technique_family = family
+        if (reviewFilter) filters.review_state = reviewFilter
         const page: storage.PageRequest = {
           cursor,
           page_size: BROWSE_PAGE_SIZE,
           sort_by: 'confidence',
           sort_dir: 'desc',
-          filters: family ? { technique_family: family } : null,
+          filters: Object.keys(filters).length > 0 ? filters : null,
         }
         const result = await app.ListReferenceCorpusTechniqueSpecimens({ novel_id: novelId, anchor_id: anchorId, page_request: page })
         if (requestSeqRef.current === requestId) setSpecimens(result)
@@ -244,7 +254,7 @@ function CorpusBrowse({ novelId, anchors, refreshKey }: {
     } finally {
       if (requestSeqRef.current === requestId) setLoading(false)
     }
-  }, [app, novelId, anchorId, kind, family])
+  }, [app, novelId, anchorId, kind, family, keyword, reviewFilter])
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
@@ -293,6 +303,32 @@ function CorpusBrowse({ novelId, anchors, refreshKey }: {
             </button>
           ))}
         </div>
+        <label className="flex items-center gap-1.5 text-xs text-muted-foreground">
+          关键字
+          <input
+            value={keyword}
+            onChange={(event) => { setKeyword(event.target.value) }}
+            placeholder={kind === 'observations' ? 'feature_key' : '—'}
+            disabled={kind !== 'observations'}
+            className="h-8 w-28 rounded-md border border-border bg-background px-2 text-xs text-foreground placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50"
+            aria-label="按关键字筛选"
+          />
+        </label>
+        <label className="flex items-center gap-1.5 text-xs text-muted-foreground">
+          复核
+          <select
+            value={reviewFilter}
+            onChange={(event) => { setReviewFilter(event.target.value) }}
+            className="h-8 rounded-md border border-border bg-background px-2 text-xs text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            aria-label="按复核状态筛选"
+          >
+            <option value="">全部</option>
+            <option value="unverified">未复核</option>
+            <option value="low_confidence">低置信</option>
+            <option value="confirmed">已确认</option>
+            <option value="rejected">已拒绝</option>
+          </select>
+        </label>
         <label className="flex items-center gap-1.5 text-xs text-muted-foreground">
           维度
           <select
@@ -381,6 +417,33 @@ function ObservationCard({ observation, isExpanded, onToggle }: {
   isExpanded: boolean
   onToggle: () => void
 }) {
+  const app = useApp()
+  const [context, setContext] = useState<string | null>(null)
+  const [contextError, setContextError] = useState(false)
+
+  useEffect(() => {
+    if (!isExpanded || context || contextError) return
+    let cancelled = false
+    void (async () => {
+      try {
+        const window = await app.GetReferenceCorpusNodeWindow({
+          anchor_id: observation.anchor_id,
+          node_id: observation.node_id,
+          max_nodes: 3,
+        })
+        if (cancelled) return
+        const text = (window?.chapter_nodes ?? [])
+          .map((item) => item.text)
+          .filter(Boolean)
+          .join('\n……\n')
+        setContext(text || null)
+      } catch {
+        if (!cancelled) setContextError(true)
+      }
+    })()
+    return () => { cancelled = true }
+  }, [app, isExpanded, context, contextError, observation.anchor_id, observation.node_id])
+
   return (
     <div className="rounded-md border border-border bg-background">
       <button
@@ -404,6 +467,11 @@ function ObservationCard({ observation, isExpanded, onToggle }: {
           <div>
             <dt className="font-medium text-foreground">证据</dt>
             <dd className="mt-0.5 whitespace-pre-wrap break-words">{observation.evidence_preview || '（无证据预览）'}</dd>
+            {isExpanded && (
+              <dd className="mt-1 whitespace-pre-wrap break-words rounded border border-border bg-muted/20 px-2 py-1.5" data-testid="evidence-context">
+                {context ?? (contextError ? '（证据上下文不可用）' : '正在加载证据原文…')}
+              </dd>
+            )}
           </div>
           <div>
             <dt className="font-medium text-foreground">说明</dt>
@@ -465,17 +533,107 @@ function SpecimenCard({ specimen, isExpanded, onToggle }: {
 }
 
 function CorpusPack({ anchors }: { anchors: reference.Anchor[] }) {
+  const app = useApp()
   const usableAnchors = useMemo(() => anchors.filter(isUsableAnchor), [anchors])
+  const [anchorId, setAnchorId] = useState<number | null>(null)
+  const [busy, setBusy] = useState<'export' | 'import' | null>(null)
+  const [message, setMessage] = useState<{ tone: 'ok' | 'error'; text: string } | null>(null)
+
+  useEffect(() => {
+    if (anchorId != null || usableAnchors.length === 0) return
+    const timer = window.setTimeout(() => {
+      setAnchorId(usableAnchors[0]?.anchor_id ?? null)
+    }, 0)
+    return () => window.clearTimeout(timer)
+  }, [anchorId, usableAnchors])
+
+  const exportPackage = async () => {
+    if (anchorId == null) return
+    setBusy('export')
+    setMessage(null)
+    try {
+      const result = await app.ExportReferenceCorpusPackage({ novel_id: 0, anchor_id: anchorId })
+      setMessage({ tone: 'ok', text: `已导出 ${result.observation_count} 条观察、${result.specimen_count} 条标本 → ${result.file_path}` })
+    } catch (err) {
+      setMessage({ tone: 'error', text: describeBridgeError(err, '语料包导出失败。').message })
+    } finally {
+      setBusy(null)
+    }
+  }
+
+  const importPackage = async () => {
+    if (anchorId == null) return
+    setBusy('import')
+    setMessage(null)
+    try {
+      const result = await app.ImportReferenceCorpusPackage({ novel_id: 0, anchor_id: anchorId })
+      setMessage({ tone: 'ok', text: `导入完成：新增 ${result.imported_count} 条，跳过已存在 ${result.skipped_count} 条（观察 ${result.observation_count} / 标本 ${result.specimen_count}）。` })
+    } catch (err) {
+      setMessage({ tone: 'error', text: describeBridgeError(err, '语料包导入失败。').message })
+    } finally {
+      setBusy(null)
+    }
+  }
 
   return (
     <div className="min-h-0 flex-1 overflow-y-auto p-4" data-testid="corpus-pack">
       <h2 className="text-sm font-semibold text-foreground">语料包</h2>
       <p className="mt-1 text-xs text-muted-foreground">
-        将语料资产（原文引用 + 维度观察 + 证据 + 复核状态）导出为 JSONL，或在另一台设备导入。当前共 {usableAnchors.length} 本可携带的参考书。
+        将参考书的语料资产（观察 + 标本 + 证据原文）导出为 JSONL 备份；导入按同书恢复语义合并，已存在的条目自动跳过。当前共 {usableAnchors.length} 本可携带的参考书。
       </p>
-      <div className="mt-3 rounded-md border border-dashed border-border bg-muted/20 px-3 py-4 text-xs text-muted-foreground">
-        导出 / 导入通道建设中：语料包格式与 SafePath 校验落地后，此处提供「导出语料包」与「导入语料包」入口。
-      </div>
+      {usableAnchors.length === 0 ? (
+        <div className="mt-3 rounded-md border border-dashed border-border bg-muted/20 px-3 py-4 text-xs text-muted-foreground">
+          暂无可导出的语料书。先在「制作」完成一本书的材料化。
+        </div>
+      ) : (
+        <>
+          <div className="mt-3 flex flex-wrap items-center gap-2">
+            <label className="flex items-center gap-1.5 text-xs text-muted-foreground">
+              参考书
+              <select
+                value={anchorId ?? ''}
+                onChange={(event) => { setAnchorId(Number(event.target.value)) }}
+                className="h-8 rounded-md border border-border bg-background px-2 text-xs text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                aria-label="选择要导出的参考书"
+              >
+                {usableAnchors.map((anchor) => (
+                  <option key={anchor.anchor_id} value={anchor.anchor_id}>{anchor.title}</option>
+                ))}
+              </select>
+            </label>
+            <button
+              type="button"
+              onClick={() => { void exportPackage() }}
+              disabled={busy !== null || anchorId == null}
+              className="inline-flex h-8 items-center rounded-md bg-primary px-3 text-xs font-medium text-primary-foreground hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-50"
+              data-testid="corpus-pack-export"
+            >
+              {busy === 'export' ? '导出中…' : '导出语料包'}
+            </button>
+            <button
+              type="button"
+              onClick={() => { void importPackage() }}
+              disabled={busy !== null || anchorId == null}
+              className="inline-flex h-8 items-center rounded-md border border-border px-3 text-xs font-medium text-foreground hover:bg-secondary disabled:cursor-not-allowed disabled:opacity-50"
+              data-testid="corpus-pack-import"
+            >
+              {busy === 'import' ? '导入中…' : '导入语料包'}
+            </button>
+          </div>
+          {message && (
+            <div
+              role={message.tone === 'error' ? 'alert' : 'status'}
+              className={`mt-3 rounded-md border px-3 py-2 text-xs ${message.tone === 'error' ? 'border-destructive/30 bg-destructive/5 text-destructive' : 'border-border bg-muted/30 text-foreground'}`}
+              data-testid="corpus-pack-message"
+            >
+              {message.text}
+            </div>
+          )}
+          <p className="mt-3 text-[11px] leading-relaxed text-muted-foreground">
+            提示：导入为同书备份恢复语义——观察/标本需要原文证据节点，跨设备迁移请在同一本书的文本树存在时执行。
+          </p>
+        </>
+      )}
     </div>
   )
 }

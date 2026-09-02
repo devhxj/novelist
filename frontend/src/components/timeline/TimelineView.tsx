@@ -6,7 +6,7 @@ import ErrorCallout from '@/components/shared/ErrorCallout'
 import { buildCopyableDiagnostic, diagnosticMessage } from '@/lib/diagnostics'
 import type { diagnostics } from '@/lib/novelist/types'
 
-interface Props { novelId: number; focusEntryId?: number }
+interface Props { novelId: number; focusEntryId?: number; onOpenInEditor?: (path: string, title: string) => void }
 
 type Tab = 'next' | 'near' | 'far'
 type Filter = 'all' | 'pending' | 'resolved' | 'abandoned'
@@ -20,7 +20,8 @@ const FILTERS: { key: Filter; label: string }[] = [
   { key: 'abandoned', label: '已废弃' },
 ]
 
-const PLAN_LABELS: Record<Tab, string> = { next: '下一章', near: '近期', far: '远期' }
+// 计划三层按轻量化聚焦方案口径命名：大纲（全书）→ 部纲（近期数章）→ 细纲（当前/下一章，聊天注入与覆盖度的依据）。
+const PLAN_LABELS: Record<Tab, string> = { next: '细纲', near: '部纲', far: '大纲' }
 const CATEGORIES = [
   { value: 'foreshadowing', label: '伏笔' },
   { value: 'user_directive', label: '用户指令' },
@@ -67,7 +68,7 @@ type VisibleError = {
   diagnostic?: diagnostics.CopyableDiagnostic | null
 }
 
-export default function TimelineView({ novelId, focusEntryId }: Props) {
+export default function TimelineView({ novelId, focusEntryId, onOpenInEditor }: Props) {
   const app = useApp()
 
   const [plans, setPlans] = useState<timeline.ChapterPlan[]>([])
@@ -452,6 +453,17 @@ export default function TimelineView({ novelId, focusEntryId }: Props) {
             <div className="flex items-center gap-2 mb-3">
               <BookOpen className="h-4 w-4 text-tag-green-foreground" />
               <h2 className="text-sm font-semibold text-foreground">章节计划</h2>
+              <span className="text-[11px] text-muted-foreground">（大纲 / 部纲 / 细纲，保存后镜像到书目录 plans/）</span>
+              {onOpenInEditor && (
+                <button
+                  type="button"
+                  onClick={() => onOpenInEditor('plans/细纲.md', '细纲')}
+                  className="ml-auto rounded border border-border px-2 py-0.5 text-[11px] text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                  data-testid="open-plan-in-editor"
+                >
+                  在编辑器中打开细纲
+                </button>
+              )}
             </div>
             <div className="flex gap-1 mb-3">
               {(['next', 'near', 'far'] as Tab[]).map(tab => (

@@ -1,8 +1,14 @@
 import { useMemo, useState, useRef } from 'react'
+import { BookMarked, CircleCheck, CircleX } from 'lucide-react'
+import type { MaterializationCompletion } from '@/hooks/useMaterializationWatcher'
 
 interface Props {
   content: string
   isDirty?: boolean
+  materializationActiveCount?: number
+  materializationNotifications?: MaterializationCompletion[]
+  onDismissMaterializationNotification?: (runId: string) => void
+  onOpenReference?: () => void
 }
 
 interface DetailedStats {
@@ -55,7 +61,14 @@ function computeStats(text: string): DetailedStats {
   }
 }
 
-export default function StatusBar({ content, isDirty }: Props) {
+export default function StatusBar({
+  content,
+  isDirty,
+  materializationActiveCount = 0,
+  materializationNotifications = [],
+  onDismissMaterializationNotification,
+  onOpenReference,
+}: Props) {
   const stats = useMemo(() => computeStats(content), [content])
   const [showDetail, setShowDetail] = useState(false)
   const hoverTimer = useRef<ReturnType<typeof setTimeout>>(0)
@@ -80,6 +93,18 @@ export default function StatusBar({ content, isDirty }: Props) {
           字数 {stats.wordCount}
         </span>
         <span>行数 {stats.lineCount}</span>
+        {materializationActiveCount > 0 && (
+          <button
+            type="button"
+            onClick={onOpenReference}
+            className="flex items-center gap-1 text-sky-700 dark:text-sky-300 hover:text-foreground transition-colors"
+            title="参考书材料化进行中，点击打开语料区"
+            data-testid="materialization-active-indicator"
+          >
+            <BookMarked className="h-3 w-3 animate-pulse" aria-hidden="true" />
+            材料化中 ×{materializationActiveCount}
+          </button>
+        )}
       </div>
 
       {showDetail && (
@@ -126,6 +151,45 @@ export default function StatusBar({ content, isDirty }: Props) {
         <span className={`w-1.5 h-1.5 rounded-full ${isDirty ? 'bg-amber-500' : 'bg-emerald-500'}`} />
         {isDirty ? '未保存' : '已保存'}
       </span>
+
+      {materializationNotifications.length > 0 && (
+        <div className="absolute bottom-8 right-4 z-50 flex w-72 flex-col gap-2" role="status" aria-live="polite">
+          {materializationNotifications.map((notice) => (
+            <div
+              key={notice.run_id}
+              className="rounded-md border border-border bg-popover px-3 py-2 shadow-lg text-xs"
+              data-testid={`materialization-notice-${notice.status}`}
+            >
+              <div className="flex items-center gap-1.5 font-medium text-foreground">
+                {notice.status === 'completed'
+                  ? <CircleCheck className="h-3.5 w-3.5 text-emerald-600" aria-hidden="true" />
+                  : <CircleX className="h-3.5 w-3.5 text-destructive" aria-hidden="true" />}
+                {notice.status === 'completed' ? '材料化完成' : notice.status === 'failed' ? '材料化失败' : '材料化已取消'}
+              </div>
+              <p className="mt-0.5 text-muted-foreground">《{notice.anchor_title}》</p>
+              {notice.error_message && (
+                <p className="mt-0.5 line-clamp-2 break-words text-destructive">{notice.error_message}</p>
+              )}
+              <div className="mt-1.5 flex gap-2">
+                <button
+                  type="button"
+                  onClick={() => { onDismissMaterializationNotification?.(notice.run_id); onOpenReference?.() }}
+                  className="rounded border border-border px-1.5 py-0.5 text-[11px] text-foreground hover:bg-muted"
+                >
+                  查看
+                </button>
+                <button
+                  type="button"
+                  onClick={() => onDismissMaterializationNotification?.(notice.run_id)}
+                  className="rounded px-1.5 py-0.5 text-[11px] text-muted-foreground hover:text-foreground"
+                >
+                  关闭
+                </button>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   )
 }

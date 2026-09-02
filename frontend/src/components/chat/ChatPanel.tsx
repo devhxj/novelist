@@ -1,6 +1,6 @@
 import { useState, useCallback, useRef, useEffect } from 'react'
 import type { KeyboardEvent as ReactKeyboardEvent, MouseEvent as ReactMouseEvent } from 'react'
-import { MessageSquare, Loader2, History, Plus } from 'lucide-react'
+import { MessageSquare, Loader2, History, Plus, PenLine, ChevronDown, Link2, Link2Off, Lock } from 'lucide-react'
 import { EventsOn } from '@/lib/novelist/events'
 import { useApp } from '@/hooks/useApp'
 import type { llm, app, reference } from '@/hooks/useApp'
@@ -31,6 +31,7 @@ interface Props {
   novelId: number
   chapterNumber?: number | null
   referenceRefreshKey?: number
+  onOpenPlans?: () => void
   onApprove: (toolId: string, feedback: string) => Promise<void>
   onReject: (toolId: string, feedback: string) => Promise<void>
   onApprovalFileEdit?: (payload: {
@@ -38,6 +39,11 @@ interface Props {
     changeType: string; reason: string; toolId: string
   }) => void
 }
+
+const DIRECT_WRITE_MESSAGE = '直接开写：请立即按当前细纲开始写本章正文，不再继续访谈。'
+
+// 章号绑定模式：auto 跟随编辑器当前章节 tab；pinned 锁定指定章号；off 显式不绑定。
+type ChapterBinding = { mode: 'auto' } | { mode: 'pinned'; chapter: number } | { mode: 'off' }
 
 const EVENT_REORDER_TIMEOUT = 120
 
@@ -65,6 +71,7 @@ export default function ChatPanel({
   novelId,
   chapterNumber,
   referenceRefreshKey = 0,
+  onOpenPlans,
   onApprove,
   onReject,
   onApprovalFileEdit,
@@ -98,9 +105,18 @@ export default function ChatPanel({
   const [slashCommands, setSlashCommands] = useState<app.SlashCommand[]>([])
   const [chapterCoverage, setChapterCoverage] = useState<reference.ChapterCorpusCoverage | null>(null)
   const [coverageState, setCoverageState] = useState<'idle' | 'loading' | 'ready' | 'error'>('idle')
+  const [chapterBinding, setChapterBinding] = useState<ChapterBinding>({ mode: 'auto' })
+  const [bindingMenuOpen, setBindingMenuOpen] = useState(false)
+  const [pinnedDraft, setPinnedDraft] = useState('')
   const coverageRequestSeqRef = useRef(0)
-  const chapterNumberRef = useRef<number | null | undefined>(chapterNumber)
-  chapterNumberRef.current = chapterNumber
+  // 生效章号：锁定优先，其次跟随编辑器 tab；off 显式为空。
+  const effectiveChapterNumber = chapterBinding.mode === 'pinned'
+    ? chapterBinding.chapter
+    : chapterBinding.mode === 'off'
+      ? null
+      : (chapterNumber ?? null)
+  const effectiveChapterRef = useRef<number | null>(effectiveChapterNumber)
+  effectiveChapterRef.current = effectiveChapterNumber
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const scrollContainerRef = useRef<HTMLDivElement>(null)
   const isNearBottomRef = useRef(true)
@@ -119,7 +135,8 @@ export default function ChatPanel({
   // 章节语料覆盖度：打开章节后按细纲 beat 聚合检索命中，写作前给出“语料不足”信号。
   // seq guard 防止章节快速切换时旧请求覆盖新结果；失败显式呈现，不再静默吞掉。
   const loadCoverage = useCallback((options?: { refresh?: boolean }) => {
-    if (!novelId || !chapterNumber) {
+    const activeChapter = effectiveChapterRef.current
+    if (!novelId || !activeChapter) {
       coverageRequestSeqRef.current++
       setChapterCoverage(null)
       setCoverageState('idle')
@@ -127,7 +144,7 @@ export default function ChatPanel({
     }
     const requestId = ++coverageRequestSeqRef.current
     setCoverageState('loading')
-    app.GetChapterCorpusCoverage({ novel_id: novelId, chapter_number: chapterNumber, refresh: options?.refresh ?? false })
+    app.GetChapterCorpusCoverage({ novel_id: novelId, chapter_number: activeChapter, refresh: options?.refresh ?? false })
       .then((coverage) => {
         if (coverageRequestSeqRef.current !== requestId) return
         setChapterCoverage(coverage)
@@ -138,12 +155,12 @@ export default function ChatPanel({
         setChapterCoverage(null)
         setCoverageState('error')
       })
-  }, [app, novelId, chapterNumber])
+  }, [app, novelId])
 
   useEffect(() => {
     const timer = window.setTimeout(() => { loadCoverage() }, 0)
     return () => { window.clearTimeout(timer) }
-  }, [loadCoverage])
+  }, [loadCoverage, effectiveChapterNumber])
 
   useEffect(() => {
     if (!isLoading) return
@@ -913,7 +930,7 @@ export default function ChatPanel({
         provider_name: p,
         model_id: m,
         reasoning_effort: reasoningEffort,
-        chapter_number: chapterNumberRef.current ?? null,
+        chapter_number: effectiveChapterRef.current,
       })
       // 刷新会话列表
       app.GetSessions({ novel_id: novelId, page: 1, size: 5, search: '' }).then(r => {
@@ -1217,7 +1234,119 @@ export default function ChatPanel({
         <div ref={messagesEndRef} />
       </div>
 
-      {chapterNumber && coverageState === 'error' && (
+      {/* 章节语境行：当前为第几章写作 + 访谈逃生门（直接开写）。 */}
+      <div className="relative mx-4 mb-1.5 flex items-center gap-1.5" data-testid="chapter-context-row">
+        <button
+          type="button"
+          onClick={() => {
+            setBindingMenuOpen((open) => !open)
+            setPinnedDraft(chapterBinding.mode === 'pinned' ? String(chapterBinding.chapter) : '')
+          }}
+          aria-haspopup="menu"
+          aria-expanded={bindingMenuOpen}
+          className={`inline-flex h-6 items-center gap-1 rounded-md border px-2 text-[11px] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${
+            effectiveChapterNumber
+              ? chapterBinding.mode === 'pinned'
+                ? 'border-tag-amber text-tag-amber-foreground bg-tag-amber/30'
+                : 'border-primary/30 text-primary bg-primary/5'
+              : 'border-border text-muted-foreground bg-muted/30'
+          }`}
+          data-testid="chapter-context-badge"
+        >
+          {effectiveChapterNumber
+            ? chapterBinding.mode === 'pinned'
+              ? (<><Lock className="h-3 w-3" aria-hidden="true" />第 {effectiveChapterNumber} 章 · 已锁定</>)
+              : (<><Link2 className="h-3 w-3" aria-hidden="true" />第 {effectiveChapterNumber} 章 · 语料注入开启</>)
+            : (<><Link2Off className="h-3 w-3" aria-hidden="true" />未绑定章节 · 注入关闭</>)}
+          <ChevronDown className="h-3 w-3 opacity-60" aria-hidden="true" />
+        </button>
+        {hasNovel && (
+          <button
+            type="button"
+            onClick={() => { void handleSend(DIRECT_WRITE_MESSAGE) }}
+            disabled={!selectedKey || isLoading}
+            title="跳过剩余访谈，让 AI 立即按当前细纲开始写正文"
+            className="inline-flex h-6 items-center gap-1 rounded-md border border-border bg-background px-2 text-[11px] text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
+            data-testid="direct-write-button"
+          >
+            <PenLine className="h-3 w-3" aria-hidden="true" />
+            直接开写
+          </button>
+        )}
+
+        {bindingMenuOpen && (
+          <div
+            role="menu"
+            aria-label="章节绑定设置"
+            className="absolute bottom-full left-0 z-40 mb-1 w-56 rounded-md border border-border bg-background p-2 shadow-lg"
+          >
+            <p className="px-1 pb-1.5 text-[11px] text-muted-foreground">本章语料注入绑定的章节</p>
+            <div className="flex items-center gap-1.5">
+              <input
+                value={pinnedDraft}
+                onChange={(event) => { setPinnedDraft(event.target.value.replace(/[^0-9]/g, '')) }}
+                placeholder="章号，如 3"
+                inputMode="numeric"
+                aria-label="锁定章号"
+                className="h-7 min-w-0 flex-1 rounded border border-border bg-background px-2 text-[11px] text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              />
+              <button
+                type="button"
+                disabled={!pinnedDraft || Number(pinnedDraft) <= 0}
+                onClick={() => {
+                  setChapterBinding({ mode: 'pinned', chapter: Number(pinnedDraft) })
+                  setBindingMenuOpen(false)
+                }}
+                className="h-7 rounded bg-primary px-2 text-[11px] font-medium text-primary-foreground disabled:opacity-50"
+              >
+                锁定
+              </button>
+            </div>
+            <div className="mt-1.5 flex gap-1.5">
+              <button
+                type="button"
+                onClick={() => { setChapterBinding({ mode: 'auto' }); setBindingMenuOpen(false) }}
+                className={`h-7 flex-1 rounded border px-2 text-[11px] ${chapterBinding.mode === 'auto' ? 'border-primary text-primary' : 'border-border text-muted-foreground hover:text-foreground'}`}
+              >
+                跟随编辑器
+              </button>
+              <button
+                type="button"
+                onClick={() => { setChapterBinding({ mode: 'off' }); setBindingMenuOpen(false) }}
+                className={`h-7 flex-1 rounded border px-2 text-[11px] ${chapterBinding.mode === 'off' ? 'border-primary text-primary' : 'border-border text-muted-foreground hover:text-foreground'}`}
+              >
+                不绑定
+              </button>
+            </div>
+            <p className="mt-1.5 px-1 text-[10px] leading-relaxed text-muted-foreground">
+              「跟随编辑器」按当前打开的章节 tab 自动绑定；锁定后切走 tab 仍保持注入。
+            </p>
+          </div>
+        )}
+      </div>
+
+      {effectiveChapterNumber && coverageState === 'ready' && chapterCoverage && chapterCoverage.total_count === 0 && (
+        <div
+          className="mx-4 mb-1.5 rounded-md border border-border bg-muted/30 px-2.5 py-2 text-[11px] text-muted-foreground"
+          data-testid="chapter-coverage-banner"
+        >
+          <div className="flex items-center justify-between gap-2">
+            <span className="font-medium">本章还没有细纲</span>
+            {onOpenPlans && (
+              <button
+                type="button"
+                onClick={onOpenPlans}
+                className="shrink-0 rounded px-1.5 py-0.5 underline underline-offset-2 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              >
+                去创建
+              </button>
+            )}
+          </div>
+          <p className="mt-1 leading-relaxed">创建细纲后，AI 将按细纲检索参考语料并显示覆盖度信号。</p>
+        </div>
+      )}
+
+      {effectiveChapterNumber && coverageState === 'error' && (
         <div
           className="mx-4 mb-1.5 rounded-md border border-destructive/30 bg-destructive/5 px-2.5 py-2 text-[11px] text-destructive"
           data-testid="chapter-coverage-banner"
@@ -1236,7 +1365,7 @@ export default function ChatPanel({
         </div>
       )}
 
-      {chapterNumber && coverageState === 'loading' && !chapterCoverage && (
+      {effectiveChapterNumber && coverageState === 'loading' && !chapterCoverage && (
         <div
           className="mx-4 mb-1.5 rounded-md border border-border bg-muted/30 px-2.5 py-2 text-[11px] text-muted-foreground"
           data-testid="chapter-coverage-banner"
@@ -1245,7 +1374,7 @@ export default function ChatPanel({
         </div>
       )}
 
-      {chapterNumber && chapterCoverage && chapterCoverage.total_count > 0 && (
+      {effectiveChapterNumber && chapterCoverage && chapterCoverage.total_count > 0 && (
         <div
           className={`mx-4 mb-1.5 rounded-md border px-2.5 py-2 text-[11px] ${chapterCoverage.sufficient ? 'border-border bg-muted/30 text-muted-foreground' : 'border-border bg-tag-amber text-tag-amber-foreground'}`}
           data-testid="chapter-coverage-banner"
@@ -1270,6 +1399,11 @@ export default function ChatPanel({
           {!chapterCoverage.sufficient && (
             <p className="mt-1 leading-relaxed">
               可直写（AI 会诚实标注语料不足），或先到「语料」区导入同类参考书补足 beat 对应素材。
+              {chapterCoverage.source_books && chapterCoverage.source_books.length > 0 && (
+                <span className="opacity-80">
+                  {' '}现有语料来源：{chapterCoverage.source_books.map((book) => `《${book}》`).join('')}。
+                </span>
+              )}
             </p>
           )}
           {chapterCoverage.beats.filter((beat) => !beat.covered).length > 0 && (

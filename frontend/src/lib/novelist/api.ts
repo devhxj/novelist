@@ -157,6 +157,9 @@ export interface NovelistAppApi {
   StartReferenceCorpusTechniqueSpecimenAnalysis: AppMethod<[reference.StartCorpusTechniqueSpecimenAnalysisInput], reference.CorpusTechniqueSpecimenAnalysisRun>
   GetReferenceCorpusTechniqueSpecimenAnalysisRun: AppMethod<[reference.GetCorpusTechniqueSpecimenAnalysisRunInput], reference.CorpusTechniqueSpecimenAnalysisRun | null>
   GetReferenceCorpusAssetTotals: AppMethod<[reference.GetReferenceCorpusAssetTotalsInput], reference.ReferenceCorpusAssetTotals>
+  RegisterReferenceMaterializationSourceFromContent: AppMethod<[reference.CreateReferenceAnchorFromContentInput], reference.Anchor>
+  ExportReferenceCorpusPackage: AppMethod<[reference.ExportReferenceCorpusPackageInput], reference.ReferenceCorpusPackageExportResult>
+  ImportReferenceCorpusPackage: AppMethod<[reference.ImportReferenceCorpusPackageInput], reference.ReferenceCorpusPackageImportResult>
   ListReferenceCorpusFeatureObservations: AppMethod<[reference.ListCorpusFeatureObservationsInput], storage.PageResult_reference_CorpusFeatureObservation_>
   ListReferenceCorpusTechniqueSpecimens: AppMethod<[reference.ListCorpusTechniqueSpecimensInput], storage.PageResult_reference_CorpusTechniqueSpecimen_>
   GetAppConfig: AppMethod<[], config.AppConfig>
@@ -409,6 +412,9 @@ GetReferenceCorpusFeatureAnalysisRun: appMethod<NovelistAppApi['GetReferenceCorp
   GetReferenceMaterialDetail: appMethod<NovelistAppApi['GetReferenceMaterialDetail']>('GetReferenceMaterialDetail'),
   GetReferenceMaterialCoverage: appMethod<NovelistAppApi['GetReferenceMaterialCoverage']>('GetReferenceMaterialCoverage'),
   GetReferenceCorpusAssetTotals: appMethod<NovelistAppApi['GetReferenceCorpusAssetTotals']>('GetReferenceCorpusAssetTotals'),
+  RegisterReferenceMaterializationSourceFromContent: appMethod<NovelistAppApi['RegisterReferenceMaterializationSourceFromContent']>('RegisterReferenceMaterializationSourceFromContent'),
+  ExportReferenceCorpusPackage: ((...args) => invokeAppArgs('ExportReferenceCorpusPackage', args, { timeoutMs: null })) as NovelistAppApi['ExportReferenceCorpusPackage'],
+  ImportReferenceCorpusPackage: ((...args) => invokeAppArgs('ImportReferenceCorpusPackage', args, { timeoutMs: null })) as NovelistAppApi['ImportReferenceCorpusPackage'],
   GetChapterCorpusCoverage: ((...args) => invokeAppArgs('GetChapterCorpusCoverage', args, { timeoutMs: 90_000 })) as NovelistAppApi['GetChapterCorpusCoverage'],
   GetReferenceMaterializationStatus: appMethod<NovelistAppApi['GetReferenceMaterializationStatus']>('GetReferenceMaterializationStatus'),
   GetReferenceMaterialTagReviewQueue: appMethod<NovelistAppApi['GetReferenceMaterialTagReviewQueue']>('GetReferenceMaterialTagReviewQueue'),

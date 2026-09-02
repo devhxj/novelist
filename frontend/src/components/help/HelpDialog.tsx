@@ -1,7 +1,7 @@
 import { useState } from 'react'
-import { BookOpen, Wrench, Bot, Wand2, Cpu, Zap, ShieldCheck, Library } from 'lucide-react'
+import { BookOpen, Wrench, Bot, Wand2, Cpu, Zap, ShieldCheck, Library, PenLine } from 'lucide-react'
 
-type Tab = 'quickstart' | 'phase15' | 'reference' | 'tools' | 'subagents' | 'skills' | 'llm' | 'context' | 'approval'
+type Tab = 'quickstart' | 'corpus-writing' | 'phase15' | 'reference' | 'tools' | 'subagents' | 'skills' | 'llm' | 'context' | 'approval'
 
 interface Props {
   open: boolean
@@ -87,6 +87,7 @@ const subAgentCards = [
 
 const tabs: { id: Tab; label: string; icon: React.ReactNode }[] = [
   { id: 'quickstart', label: '快速入门', icon: <BookOpen className="w-4 h-4" /> },
+  { id: 'corpus-writing', label: '语料写作', icon: <PenLine className="w-4 h-4" /> },
   { id: 'phase15', label: '导入与素材', icon: <BookOpen className="w-4 h-4" /> },
   { id: 'reference', label: '素材库/参考', icon: <Library className="w-4 h-4" /> },
   { id: 'tools', label: '工具参考', icon: <Wrench className="w-4 h-4" /> },
@@ -138,6 +139,7 @@ export default function HelpDialog({ open, onClose }: Props) {
 
           <div className="flex-1 overflow-y-auto p-6">
             {activeTab === 'quickstart' && <QuickStartTab />}
+            {activeTab === 'corpus-writing' && <CorpusWritingTab />}
             {activeTab === 'phase15' && <ImportStylePatternTab />}
             {activeTab === 'reference' && <ReferenceAnchorSplitTab />}
             {activeTab === 'tools' && <ToolsTab />}
@@ -258,6 +260,56 @@ function ImportStylePatternTab() {
           <p>设置里的 Git 作者名称和邮箱会写入 repo-local Git config；留空时使用安全默认身份。导入提交和普通保存提交都会使用这组设置。</p>
           <p>更新检查需要配置 HTTPS release endpoint。自动检查默认关闭且不会阻塞启动；打开发布页必须由你显式点击。</p>
         </div>
+      </section>
+    </div>
+  )
+}
+
+function CorpusWritingTab() {
+  return (
+    <div className="space-y-6 max-w-none">
+      <section>
+        <h2 className="text-lg font-semibold mb-2">语料写作工作流</h2>
+        <p className="text-muted-foreground leading-relaxed">
+          聊天面板是主写作界面。核心闭环：你提出想法点 → AI 以选择题逐项追问（选项尽量引用参考书实例）→
+          AI 收口后问「是否开写？」→ 你确认后开始写作：语料覆盖充分时自动检索注入参考语料并细化扩写，
+          语料不足时直写并诚实标注。写作过程中 AI 会给出正文候选与处理方式选择题，选完继续，直到本章完成。
+        </p>
+      </section>
+
+      <section>
+        <h3 className="font-semibold mb-1.5">细纲是写作的依据</h3>
+        <p className="text-muted-foreground leading-relaxed">
+          聊天的语料注入与覆盖度信号都依据「时间线」面板中的三层计划：大纲（全书）→ 部纲（近期数章）→
+          细纲（当前章，按行拆 beat）。没有细纲时不会注入语料；输入框上方的横幅会提示你去创建。
+          计划同时以 markdown 文件保存在书目录 plans/ 下，可直接在编辑器中修改。
+        </p>
+      </section>
+
+      <section>
+        <h3 className="font-semibold mb-1.5">章节绑定与覆盖度信号</h3>
+        <ul className="list-disc pl-5 space-y-1 text-muted-foreground leading-relaxed">
+          <li>输入框上方的章节徽章显示当前为第几章写作：默认跟随编辑器打开的章节，也可点击锁定章号或显式不绑定。</li>
+          <li>覆盖度 = 细纲 beat 的检索命中占比。覆盖率低于 50% 显示「语料不足」——可直写（AI 会诚实标注），或先导入同类参考书补足；细纲超过 40 个 beat 时仅统计前 40 个。</li>
+          <li>每轮写作后，「本章语料注入 N 条」卡片显示用了哪些语料、来自哪本书；历史会话中同样可见。</li>
+        </ul>
+      </section>
+
+      <section>
+        <h3 className="font-semibold mb-1.5">你始终掌握节奏</h3>
+        <ul className="list-disc pl-5 space-y-1 text-muted-foreground leading-relaxed">
+          <li>任何时候都可以点「直接开写」跳过剩余访谈，让 AI 立即按细纲写正文。</li>
+          <li>选择题里的「都不满意，换个方向」永远是合法选项；也可以直接用文字回答。</li>
+          <li>语料是质量杠杆不是枷锁：积累不够时照常写作，覆盖度信号负责告诉你该补哪类参考书。</li>
+        </ul>
+      </section>
+
+      <section>
+        <h3 className="font-semibold mb-1.5">积累参考语料</h3>
+        <p className="text-muted-foreground leading-relaxed">
+          到「素材库」区导入参考书（支持拖拽 .txt/.md 文件）：自动分析章节边界 → 确认 → 后台材料化 →
+          复核候选。完成后会收到通知；总览页可查看资产规模（N 本书 / M 观察 / K 标本）与覆盖度地图。
+        </p>
       </section>
     </div>
   )

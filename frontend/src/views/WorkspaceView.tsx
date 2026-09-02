@@ -31,6 +31,7 @@ import { Settings, User, HelpCircle, Moon, Sun, AlertTriangle, CheckCircle2, Cli
 import { WindowMinimise, Quit } from '@/lib/novelist/runtime'
 import Logo from '@/components/Logo'
 import { useTheme, type Theme } from '@/hooks/useTheme'
+import { useMaterializationWatcher } from '@/hooks/useMaterializationWatcher'
 import { useLayoutState } from '@/hooks/useLayoutState'
 import { useWindowState } from '@/hooks/useWindowState'
 import { copyTextToClipboard } from '@/lib/clipboard'
@@ -353,6 +354,11 @@ export default function WorkspaceView({ initialNovelId, initialShowHelp, startup
   }
 
   const activeNovel = novels.find(n => n.id === activeNovelId)
+
+  // 材料化全局监视：素材库页之外也能收到 run 完成/失败通知（状态栏展示）。
+  const isCorpusViewActive = activePanel === 'reference'
+  const { notifications: materializationNotices, dismiss: dismissMaterializationNotice, activeCount: materializationActiveCount } =
+    useMaterializationWatcher(activeNovelId, referenceAnchors, !isCorpusViewActive)
   const activeChapterNumber = useMemo(() => {
     const match = tabTarget?.path.match(/^chapters\/(\d+)\.md$/)
     return match ? Number(match[1]) : null
@@ -528,7 +534,7 @@ export default function WorkspaceView({ initialNovelId, initialShowHelp, startup
         ) : activePanel === 'storyarcs' ? (
           <ArcListView novelId={activeNovelId} focusArcId={arcFocusId} />
         ) : activePanel === 'timeline' ? (
-          <TimelineView novelId={activeNovelId} focusEntryId={timelineFocusId} />
+          <TimelineView novelId={activeNovelId} focusEntryId={timelineFocusId} onOpenInEditor={(path, title) => contentRef.current?.openFile(path, title)} />
         ) : activePanel === 'reader' ? (
           <ReaderView novelId={activeNovelId} focusId={readerFocusId} />
         ) : activePanel === 'preferences' ? (
@@ -556,6 +562,7 @@ export default function WorkspaceView({ initialNovelId, initialShowHelp, startup
             novelId={activeNovelId}
             chapterNumber={activeChapterNumber}
             referenceRefreshKey={referenceRefreshKey}
+            onOpenPlans={() => { setActivePanel('timeline'); setSidebarPanel(null) }}
             onApprove={handleApprove}
             onReject={handleReject}
             onApprovalFileEdit={handleApprovalFileEdit}
@@ -563,7 +570,14 @@ export default function WorkspaceView({ initialNovelId, initialShowHelp, startup
         )}
       </div>
 
-      <StatusBar content={activeContent} isDirty={isDirty} />
+      <StatusBar
+        content={activeContent}
+        isDirty={isDirty}
+        materializationActiveCount={materializationActiveCount}
+        materializationNotifications={materializationNotices}
+        onDismissMaterializationNotification={dismissMaterializationNotice}
+        onOpenReference={() => { setActivePanel('reference'); setSidebarPanel(null) }}
+      />
 
       <SettingsDialog
         open={showSettings}

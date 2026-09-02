@@ -260,7 +260,7 @@ async function verifyStoryArcActions(page) {
 async function verifyTimelineActions(page) {
   await clickActivity(page, '时间线')
   await page.locator('section').filter({ hasText: '章节计划' }).getByTitle('编辑').click({ force: true })
-  await page.getByPlaceholder('下一章计划内容...').fill('下一章让钟楼线索与旧城门交叉。')
+  await page.getByPlaceholder('细纲计划内容...').fill('下一章让钟楼线索与旧城门交叉。')
   await page.locator('section').filter({ hasText: '章节计划' }).getByRole('button', { name: '保存' }).click()
   await waitForBridgeCall(page, 'UpdateChapterPlan')
   await expectVisible(page.getByText('下一章让钟楼线索与旧城门交叉。'), 'updated chapter plan')

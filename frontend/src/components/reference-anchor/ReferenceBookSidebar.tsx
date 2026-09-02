@@ -14,6 +14,7 @@ import {
   X,
 } from 'lucide-react'
 import { useApp } from '@/hooks/useApp'
+import { describeBridgeError } from '@/lib/novelist/bridgeErrors'
 import type { reference } from '@/lib/novelist/types'
 
 type Props = {
@@ -77,10 +78,13 @@ export default function ReferenceBookSidebar({
   const [query, setQuery] = useState('')
   const [isLoading, setIsLoading] = useState(false)
   const [isCreateOpen, setIsCreateOpen] = useState(false)
+  const [dragActive, setDragActive] = useState(false)
+  const [reloadTick, setReloadTick] = useState(0)
   const [form, setForm] = useState<CreateForm>(EMPTY_FORM)
   const [pendingDeleteId, setPendingDeleteId] = useState<number | null>(null)
   const [activeAction, setActiveAction] = useState<'pick' | 'create' | 'delete' | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [errorRetry, setErrorRetry] = useState<(() => void) | null>(null)
   const selectedIdsRef = useRef(selectedAnchorIds)
   const loadSequenceRef = useRef(0)
 
@@ -110,9 +114,10 @@ export default function ReferenceBookSidebar({
       if (nextSelectedIds.length !== selectedIdsRef.current.length) {
         onSelectionChange(nextSelectedIds)
       }
-    } catch {
+    } catch (err) {
       if (loadSequence !== loadSequenceRef.current) return
-      setError('参考书籍加载失败，请重试。')
+      setError(describeBridgeError(err, '参考书籍加载失败。').message)
+      setErrorRetry(() => () => { setReloadTick(t => t + 1) })
     } finally {
       if (loadSequence === loadSequenceRef.current) setIsLoading(false)
     }
@@ -123,7 +128,7 @@ export default function ReferenceBookSidebar({
       void loadAnchors()
     }, 0)
     return () => window.clearTimeout(timer)
-  }, [loadAnchors, refreshKey])
+  }, [loadAnchors, refreshKey, reloadTick])
 
   const visibleAnchors = useMemo(() => {
     const normalizedQuery = query.trim().toLowerCase()
@@ -148,6 +153,57 @@ export default function ReferenceBookSidebar({
     onSelectionChange(nextSelectedIds)
   }
 
+  const createFromDroppedFile = async (file: File) => {
+    if (!/\.(txt|md)$/i.test(file.name)) {
+      setError('拖拽导入仅支持 .txt 或 .md 文件。')
+      setErrorRetry(null)
+      return
+    }
+    if (file.size > 20 * 1024 * 1024) {
+      setError('拖拽的文件超过 20MB 上限。')
+      setErrorRetry(null)
+      return
+    }
+    setActiveAction('create')
+    setError(null)
+    try {
+      const buffer = await file.arrayBuffer()
+      let binary = ''
+      const bytes = new Uint8Array(buffer)
+      const chunkSize = 0x8000
+      for (let index = 0; index < bytes.length; index += chunkSize) {
+        binary += String.fromCharCode(...bytes.subarray(index, index + chunkSize))
+      }
+      const created = await app.RegisterReferenceMaterializationSourceFromContent({
+        novel_id: novelId,
+        title: titleFromPath(file.name),
+        author: null,
+        file_name: file.name,
+        content_base64: btoa(binary),
+        license_status: 'user_provided',
+      })
+      if (anchorState(created).usable) {
+        const nextSelectedIds = [...new Set([...selectedIdsRef.current, created.anchor_id])]
+        selectedIdsRef.current = nextSelectedIds
+        onSelectionChange(nextSelectedIds)
+      }
+      await loadAnchors()
+      onReferenceMutation()
+    } catch (err) {
+      setError(describeBridgeError(err, '拖拽导入失败，请重试或改用文件选择器。').message)
+      setErrorRetry(() => () => { void createFromDroppedFile(file) })
+    } finally {
+      setActiveAction(null)
+    }
+  }
+
+  function handleDrop(event: React.DragEvent) {
+    event.preventDefault()
+    setDragActive(false)
+    const file = event.dataTransfer.files?.[0]
+    if (file) { void createFromDroppedFile(file) }
+  }
+
   const pickSourceFile = async () => {
     setActiveAction('pick')
     setError(null)
@@ -159,8 +215,9 @@ export default function ReferenceBookSidebar({
         sourcePath,
         title: current.title.trim() || titleFromPath(sourcePath),
       }))
-    } catch {
-      setError('无法打开文件选择器，请手动填写文件路径。')
+    } catch (err) {
+      setError(describeBridgeError(err, '无法打开文件选择器，请手动填写文件路径。').message)
+      setErrorRetry(() => () => { void pickSourceFile() })
     } finally {
       setActiveAction(null)
     }
@@ -197,8 +254,9 @@ export default function ReferenceBookSidebar({
       setIsCreateOpen(false)
       await loadAnchors()
       onReferenceMutation()
-    } catch {
-      setError('无法添加参考书籍，请检查文件路径后重试。')
+    } catch (err) {
+      setError(describeBridgeError(err, '无法添加参考书籍，请检查文件路径。').message)
+      setErrorRetry(() => () => { void createReferenceBook() })
     } finally {
       setActiveAction(null)
     }
@@ -215,15 +273,30 @@ export default function ReferenceBookSidebar({
       setPendingDeleteId(null)
       await loadAnchors()
       onReferenceMutation()
-    } catch {
-      setError('无法删除参考书籍，请稍后重试。')
+    } catch (err) {
+      setError(describeBridgeError(err, '无法删除参考书籍。').message)
+      setErrorRetry(() => () => { void deleteReferenceBook(anchor) })
     } finally {
       setActiveAction(null)
     }
   }
 
   return (
-    <section data-testid="reference-book-sidebar" className="reference-materialization-sidebar flex min-h-0 flex-1 flex-col bg-sidebar" aria-busy={isLoading}>
+    <section
+      data-testid="reference-book-sidebar"
+      className={`reference-materialization-sidebar relative flex min-h-0 flex-1 flex-col bg-sidebar ${dragActive ? 'ring-2 ring-inset ring-primary/50' : ''}`}
+      aria-busy={isLoading}
+      onDragOver={(event) => { event.preventDefault(); setDragActive(true) }}
+      onDragLeave={(event) => { if (!event.currentTarget.contains(event.relatedTarget as Node)) setDragActive(false) }}
+      onDrop={handleDrop}
+    >
+      {dragActive && (
+        <div className="pointer-events-none absolute inset-0 z-20 flex items-center justify-center bg-background/70" data-testid="sidebar-drop-hint">
+          <p className="rounded-md border border-dashed border-primary/50 px-4 py-3 text-xs font-medium text-foreground">
+            松开以导入参考书（支持 .txt / .md，≤20MB）
+          </p>
+        </div>
+      )}
       <header className="flex items-center gap-2 border-b px-4 py-3">
         <BookMarked className="h-4 w-4 text-muted-foreground" aria-hidden="true" />
         <div className="min-w-0 flex-1">
@@ -325,7 +398,16 @@ export default function ReferenceBookSidebar({
       {error && (
         <div className="mx-3 mt-3 flex items-start gap-2 rounded-md border border-destructive/30 bg-destructive/5 px-2.5 py-2 text-xs text-destructive" role="alert">
           <CircleAlert className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden="true" />
-          <span className="min-w-0 break-words">{error}</span>
+          <span className="min-w-0 flex-1 break-words">{error}</span>
+          {errorRetry && (
+            <button
+              type="button"
+              onClick={() => { setError(null); setErrorRetry(null); errorRetry() }}
+              className="shrink-0 self-center rounded border border-destructive/40 px-2 py-0.5 text-[11px] font-medium hover:bg-destructive/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            >
+              重试
+            </button>
+          )}
         </div>
       )}
 
