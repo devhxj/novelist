@@ -735,6 +735,14 @@ cancellationToken.ThrowIfCancellationRequested();
                 TotalEstimate: 1));
         }
 
+        public ValueTask<ReferenceCorpusPackageExportResult> ExportPackageAsync(
+            ExportReferenceCorpusPackagePayload input,
+            CancellationToken cancellationToken) => throw new NotSupportedException();
+
+        public ValueTask<ReferenceCorpusPackageImportResult> ImportPackageAsync(
+            ImportReferenceCorpusPackagePayload input,
+            CancellationToken cancellationToken) => throw new NotSupportedException();
+
         public ValueTask<ReferenceCorpusAssetTotalsPayload> GetAssetTotalsAsync(
             GetReferenceCorpusAssetTotalsPayload input,
             CancellationToken cancellationToken)

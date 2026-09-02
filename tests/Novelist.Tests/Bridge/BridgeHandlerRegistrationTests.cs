@@ -135,14 +135,17 @@ public sealed class BridgeHandlerRegistrationTests
     [Fact]
     public void CompatibilityAppMethodListHasExpectedCoverage()
     {
-        Assert.Equal(190, BridgeCompatibilityAppMethods.MethodNames.Count);
+        Assert.Equal(193, BridgeCompatibilityAppMethods.MethodNames.Count);
         Assert.Contains("GetChapterCorpusCoverage", BridgeCompatibilityAppMethods.MethodNames);
         Assert.Contains("GetReferenceCorpusAssetTotals", BridgeCompatibilityAppMethods.MethodNames);
+        Assert.Contains("ExportReferenceCorpusPackage", BridgeCompatibilityAppMethods.MethodNames);
+        Assert.Contains("ImportReferenceCorpusPackage", BridgeCompatibilityAppMethods.MethodNames);
         Assert.Equal(BridgeCompatibilityAppMethods.MethodNames.Count, BridgeCompatibilityAppMethods.MethodNames.Distinct(StringComparer.Ordinal).Count());
         Assert.Contains("Chat", BridgeCompatibilityAppMethods.MethodNames);
         Assert.Contains("GetCover", BridgeCompatibilityAppMethods.MethodNames);
         Assert.Contains("CreateReferenceAnchor", BridgeCompatibilityAppMethods.MethodNames);
         Assert.Contains("RegisterReferenceMaterializationSource", BridgeCompatibilityAppMethods.MethodNames);
+        Assert.Contains("RegisterReferenceMaterializationSourceFromContent", BridgeCompatibilityAppMethods.MethodNames);
         Assert.Contains("CreateReferenceAnchors", BridgeCompatibilityAppMethods.MethodNames);
         Assert.Contains("CreateReferenceAnchorsWithResult", BridgeCompatibilityAppMethods.MethodNames);
         Assert.Contains("AnalyzeReferenceChapterSplit", BridgeCompatibilityAppMethods.MethodNames);

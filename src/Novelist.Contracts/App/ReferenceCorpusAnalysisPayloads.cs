@@ -215,3 +215,22 @@ public sealed record ReferenceCorpusAssetTotalsPayload(
     [property: JsonPropertyName("novel_id")] long NovelId,
     [property: JsonPropertyName("observation_total")] long ObservationTotal,
     [property: JsonPropertyName("specimen_total")] long SpecimenTotal);
+
+public sealed record ExportReferenceCorpusPackagePayload(
+    [property: JsonPropertyName("novel_id")] long NovelId,
+    [property: JsonPropertyName("anchor_id")] long AnchorId);
+
+public sealed record ReferenceCorpusPackageExportResult(
+    [property: JsonPropertyName("file_path")] string FilePath,
+    [property: JsonPropertyName("observation_count")] int ObservationCount,
+    [property: JsonPropertyName("specimen_count")] int SpecimenCount);
+
+public sealed record ImportReferenceCorpusPackagePayload(
+    [property: JsonPropertyName("novel_id")] long NovelId,
+    [property: JsonPropertyName("anchor_id")] long AnchorId);
+
+public sealed record ReferenceCorpusPackageImportResult(
+    [property: JsonPropertyName("imported_count")] int ImportedCount,
+    [property: JsonPropertyName("skipped_count")] int SkippedCount,
+    [property: JsonPropertyName("observation_count")] int ObservationCount,
+    [property: JsonPropertyName("specimen_count")] int SpecimenCount);

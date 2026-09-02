@@ -43,6 +43,46 @@ public sealed class ReferenceMaterializationChapterSplitTests : IDisposable
     }
 
     [Fact]
+    public async Task RegisterMaterializationSourceFromContentWritesAppDataFileAndRegisters()
+    {
+        var options = CreateOptions();
+        await InitializeAsync(options);
+        var novels = new FileSystemNovelService(options, new FileSystemAppSettingsService(options));
+        var novel = await novels.CreateNovelAsync(new CreateNovelPayload("拖拽导入登记", "", ""), CancellationToken.None);
+        var anchors = new SqliteReferenceAnchorService(options, novels);
+        var content = "第1章 开端\n" + new string('丙', 12_000) + "\n第2章 结束\n" + new string('丁', 8_000);
+        var encoded = Convert.ToBase64String(System.Text.Encoding.UTF8.GetBytes(content));
+
+        var anchor = await anchors.RegisterMaterializationSourceFromContentAsync(
+            new CreateReferenceAnchorFromContentPayload(novel.Id, "雨夜参考书", null, "拖拽的书.md", encoded),
+            CancellationToken.None);
+
+        // 内容被写入应用数据目录（服务端生成文件名），并按普通来源完成注册。
+        Assert.Equal(ReferenceAnchorBuildStates.Ready, anchor.Status);
+        Assert.True(File.Exists(anchor.SourcePath), "content registration must materialize a source file");
+        Assert.EndsWith(".md", anchor.SourcePath, StringComparison.Ordinal);
+        Assert.Contains("sources", anchor.SourcePath, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task RegisterMaterializationSourceFromContentRejectsUnsupportedExtensions()
+    {
+        var options = CreateOptions();
+        await InitializeAsync(options);
+        var novels = new FileSystemNovelService(options, new FileSystemAppSettingsService(options));
+        var novel = await novels.CreateNovelAsync(new CreateNovelPayload("拖拽扩展名校验", "", ""), CancellationToken.None);
+        var anchors = new SqliteReferenceAnchorService(options, novels);
+        var encoded = Convert.ToBase64String(System.Text.Encoding.UTF8.GetBytes("不应被接受的文件内容"));
+
+        var exception = await Assert.ThrowsAsync<ArgumentException>(async () =>
+            await anchors.RegisterMaterializationSourceFromContentAsync(
+                new CreateReferenceAnchorFromContentPayload(novel.Id, "非法扩展名", null, "书.pdf", encoded),
+                CancellationToken.None));
+
+        Assert.Contains(".txt or .md", exception.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task AnalyzeAutoSplitSendsOnlyTheFirstFiftyThousandNormalizedCharactersToTheModel()
     {
         var options = CreateOptions();

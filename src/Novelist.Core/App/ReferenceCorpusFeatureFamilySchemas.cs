@@ -21,6 +21,8 @@ public static class ReferenceCorpusFeatureFamilies
     public const string Action = "action";
     public const string Character = "character";
     public const string Commercial = "commercial";
+    public const string Scene = "scene";
+    public const string Trope = "trope";
 
     public static IReadOnlyList<string> SentenceFamilies { get; } =
     [
@@ -40,6 +42,14 @@ public static class ReferenceCorpusFeatureFamilies
         Commercial
     ];
 
+    // 场景级 family（轻量化聚焦方案 §4）：scene/trope，分析单位 Scene 节点；
+    // 枚举词表以内置技能方法论为种子，桥段词表随积累生长（复核选择题归类/命名新桥段）。
+    public static IReadOnlyList<string> SceneFamilies { get; } =
+    [
+        Scene,
+        Trope
+    ];
+
     public static IReadOnlyList<string> All { get; } =
     [
         Syntax,
@@ -51,7 +61,9 @@ public static class ReferenceCorpusFeatureFamilies
         Pov,
         Action,
         Character,
-        Commercial
+        Commercial,
+        Scene,
+        Trope
     ];
 }
 

@@ -62,6 +62,8 @@ internal sealed partial class SqliteReferenceMaterializationRunStore
                    total_chapters, processed_chapters, total_chapter_batches, completed_chapter_batches,
                    current_batch_index, current_batch_start_chapter, current_batch_end_chapter,
                    candidate_count, accepted_count, rejected_count, review_count, vector_count,
+                   COALESCE((SELECT SUM(progress.model_call_count) FROM reference_materialization_chapter_progress progress
+                    WHERE progress.run_id = reference_materialization_runs.run_id), 0) AS model_call_count,
                    model_provider, model_id, embedding_provider, embedding_model_id, embedding_dimensions,
                    last_error_code, last_error_message, started_at, completed_at,
                    EXISTS(
@@ -96,6 +98,8 @@ internal sealed partial class SqliteReferenceMaterializationRunStore
                    total_chapters, processed_chapters, total_chapter_batches, completed_chapter_batches,
                    current_batch_index, current_batch_start_chapter, current_batch_end_chapter,
                    candidate_count, accepted_count, rejected_count, review_count, vector_count,
+                   COALESCE((SELECT SUM(progress.model_call_count) FROM reference_materialization_chapter_progress progress
+                    WHERE progress.run_id = reference_materialization_runs.run_id), 0) AS model_call_count,
                    model_provider, model_id, embedding_provider, embedding_model_id, embedding_dimensions,
                    last_error_code, last_error_message, started_at, completed_at,
                    EXISTS(
@@ -425,6 +429,7 @@ internal sealed partial class SqliteReferenceMaterializationRunStore
             0,
             0,
             0,
+            0,
             seed.Llm,
             seed.Embedding,
             null,
@@ -457,13 +462,14 @@ internal sealed partial class SqliteReferenceMaterializationRunStore
             reader.GetInt32(15),
             reader.GetInt32(16),
             reader.GetInt32(17),
-            new ReferenceMaterializationModelIdentityPayload(reader.GetString(18), reader.GetString(19)),
-            new ReferenceMaterializationModelIdentityPayload(reader.GetString(20), reader.GetString(21), reader.GetInt32(22)),
-            reader.IsDBNull(23) ? null : reader.GetString(23),
+            reader.GetInt32(18),
+            new ReferenceMaterializationModelIdentityPayload(reader.GetString(19), reader.GetString(20)),
+            new ReferenceMaterializationModelIdentityPayload(reader.GetString(21), reader.GetString(22), reader.GetInt32(23)),
             reader.IsDBNull(24) ? null : reader.GetString(24),
-            ParseTimestamp(reader.GetString(25)),
-            reader.IsDBNull(26) ? null : ParseTimestamp(reader.GetString(26)),
-            reader.GetInt64(27) != 0,
+            reader.IsDBNull(25) ? null : reader.GetString(25),
+            ParseTimestamp(reader.GetString(26)),
+            reader.IsDBNull(27) ? null : ParseTimestamp(reader.GetString(27)),
+            reader.GetInt64(28) != 0,
             NextActionFor(status));
     }
 

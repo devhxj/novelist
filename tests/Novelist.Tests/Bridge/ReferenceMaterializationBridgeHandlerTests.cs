@@ -381,6 +381,7 @@ public sealed class ReferenceMaterializationBridgeHandlerTests
                 0,
                 0,
                 0,
+                0,
                 new ReferenceMaterializationModelIdentityPayload("provider", "model"),
                 new ReferenceMaterializationModelIdentityPayload("embedding", "embedding-model", 3),
                 null,

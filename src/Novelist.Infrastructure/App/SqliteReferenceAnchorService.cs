@@ -549,6 +549,65 @@ public sealed partial class SqliteReferenceAnchorService : IReferenceAnchorServi
         }
     }
 
+    public async ValueTask<ReferenceAnchorPayload> RegisterMaterializationSourceFromContentAsync(
+        CreateReferenceAnchorFromContentPayload input,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(input);
+        ValidateNovelId(input.NovelId);
+        await EnsureNovelExistsAsync(input.NovelId, cancellationToken);
+
+        var fileName = NormalizeRequiredText(input.FileName, nameof(input.FileName), maxLength: 256);
+        var extension = Path.GetExtension(fileName);
+        if (!AllowedSourceExtensions.Contains(extension))
+        {
+            throw new ArgumentException("Reference source must be a .txt or .md file.", nameof(input));
+        }
+
+        if (string.IsNullOrWhiteSpace(input.ContentBase64))
+        {
+            throw new ArgumentException("Reference source content is required.", nameof(input));
+        }
+
+        byte[] content;
+        try
+        {
+            content = Convert.FromBase64String(input.ContentBase64);
+        }
+        catch (FormatException exception)
+        {
+            throw new ArgumentException("Reference source content must be base64 encoded.", nameof(input), exception);
+        }
+
+        if (content.Length == 0)
+        {
+            throw new ArgumentException("Reference source content must not be empty.", nameof(input));
+        }
+
+        if (content.Length > MaxSourceBytes)
+        {
+            throw new ArgumentException("Reference source exceeds the 20 MB size limit.", nameof(input));
+        }
+
+        // 服务端生成文件名：作者只提供显示名，不产生任何用户可控的路径片段。
+        var appDataDirectory = await AppDataDirectoryResolver.ResolveAsync(_options, cancellationToken);
+        var sourcesDirectory = Path.Combine(appDataDirectory, "reference-anchor", "sources");
+        Directory.CreateDirectory(sourcesDirectory);
+        var sourcePath = Path.Combine(sourcesDirectory, $"{Guid.NewGuid():N}{extension.ToLowerInvariant()}");
+        await File.WriteAllBytesAsync(sourcePath, content, cancellationToken);
+
+        return await RegisterMaterializationSourceAsync(new CreateReferenceAnchorPayload(
+            input.NovelId,
+            input.Title,
+            input.Author,
+            sourcePath,
+            extension.Equals(".txt", StringComparison.OrdinalIgnoreCase) ? "text" : "markdown",
+            string.IsNullOrWhiteSpace(input.LicenseStatus) ? "user_provided" : input.LicenseStatus,
+            Visibility: "private",
+            SourceTrust: "user_verified",
+            UserTags: []), cancellationToken);
+    }
+
     public async ValueTask<ReferenceAnchorPayload> RegisterMaterializationSourceAsync(
         CreateReferenceAnchorPayload input,
         CancellationToken cancellationToken)

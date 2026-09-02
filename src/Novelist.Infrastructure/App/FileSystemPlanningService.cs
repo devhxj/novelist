@@ -92,12 +92,51 @@ public sealed class FileSystemPlanningService : IPlanningService
             }
 
             await SaveAsync(store, cancellationToken);
+            await WritePlanMirrorsAsync(novelId, store, cancellationToken);
         }
         finally
         {
             _mutex.Release();
         }
     }
+
+    // 把三层计划镜像到书目录 plans/ 大纲.md / 部纲.md / 细纲.md：
+    // 作者可在编辑器直接查看（git/diff 自动覆盖）；镜像为单向导出，槽位保存仍是唯一权威入口。
+    private async ValueTask WritePlanMirrorsAsync(
+        long novelId,
+        PlanningStoreDocument store,
+        CancellationToken cancellationToken)
+    {
+        var dataDirectory = await AppDataDirectoryResolver.ResolveAsync(_options, cancellationToken);
+        var plansDirectory = Path.Combine(dataDirectory, "novels", novelId.ToString(System.Globalization.CultureInfo.InvariantCulture), "plans");
+        Directory.CreateDirectory(plansDirectory);
+        foreach (var (scope, fileName) in PlanScopeFileNames)
+        {
+            var stored = store.ChapterPlans.SingleOrDefault(plan =>
+                plan.NovelId == novelId &&
+                string.Equals(plan.Scope, scope, StringComparison.Ordinal));
+            var body = stored?.Content;
+            var markdown = string.IsNullOrWhiteSpace(body)
+                ? string.Empty
+                : body.Replace("\r\n", "\n");
+            var path = Path.Combine(plansDirectory, fileName);
+            var tempPath = $"{path}.{Guid.NewGuid():N}.tmp";
+            await using (var stream = File.Create(tempPath))
+            {
+                await using var writer = new StreamWriter(stream);
+                await writer.WriteAsync(markdown.AsMemory(), cancellationToken);
+            }
+
+            File.Move(tempPath, path, overwrite: true);
+        }
+    }
+
+    private static readonly (string Scope, string FileName)[] PlanScopeFileNames =
+    [
+        ("far", "大纲.md"),
+        ("near", "部纲.md"),
+        ("next", "细纲.md"),
+    ];
 
     public async ValueTask<IReadOnlyList<TimelineEntryPayload>> GetTimelineEntriesAsync(
         long novelId,

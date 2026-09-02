@@ -1,0 +1,23 @@
+{
+  "schema_id": "reference-corpus.feature.scene.v1",
+  "schema_version": "reference-corpus-feature-family-v1",
+  "family": "scene",
+  "node_type": "scene",
+  "max_observations": 6,
+  "required_observation_fields": ["feature_key", "scene_goal", "conflict_source", "pacing", "confidence", "evidence_start", "evidence_end", "explanation"],
+  "observation_fields": {
+    "feature_key": { "type": "enum", "enum": ["scene_structure"] },
+    "scene_goal": { "type": "enum", "enum": ["advance_main_plot", "shape_character", "setup", "payoff", "reveal_information", "emotional_rise", "transition_buffer"] },
+    "conflict_source": { "type": "enum", "enum": ["external_threat", "interpersonal", "inner_struggle", "misunderstanding", "environment", "no_conflict"] },
+    "turn_count": { "type": "enum", "enum": ["none", "single", "double", "multiple"] },
+    "turn_type": { "type": "enum", "enum": ["reversal", "escalation", "revelation", "interruption", "new_variable"] },
+    "scene_result": { "type": "enum", "enum": ["achieved", "thwarted", "cost_paid", "new_question"] },
+    "entry_mode": { "type": "enum", "enum": ["dialogue", "action", "environment", "inner_voice", "carry_over"] },
+    "exit_hook": { "type": "enum", "enum": ["suspense", "threat", "revelation", "emotional_afterglow", "quiet_close"] },
+    "pacing": { "type": "enum", "enum": ["very_fast", "fast", "medium", "slow"] },
+    "confidence": { "type": "number", "minimum": 0, "maximum": 0.95 },
+    "evidence_start": { "type": "integer", "minimum": 0 },
+    "evidence_end": { "type": "integer", "minimum": 1 },
+    "explanation": { "type": "string", "max_length": 360 }
+  }
+}

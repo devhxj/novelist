@@ -38,6 +38,9 @@ public class ChapterCorpusCoverageServiceTests
         Assert.Equal(2d / 3d, coverage.CoverageRatio, 4);
         Assert.True(coverage.Sufficient);
         Assert.Contains(coverage.Beats, beat => beat.Covered && beat.AnchorTitle == "全局雨夜参考");
+        // 指路补书：横幅来源书 = 当前 Ready 锚点去重（v1 观测：命中分随 payload 透出，供阈值校准）。
+        Assert.Equal(["全局雨夜参考"], coverage.SourceBooks);
+        Assert.Contains(coverage.Beats, beat => beat.Covered && beat.HitScore is not null);
         var uncovered = Assert.Single(coverage.Beats, beat => !beat.Covered);
         Assert.Equal("无关的日常过渡", uncovered.Beat);
         Assert.Null(uncovered.AnchorTitle);
@@ -180,7 +183,8 @@ public class ChapterCorpusCoverageServiceTests
                     "environment", "restrained", "rain_threshold", "close", "delayed_reaction",
                     0.9, 0.88, 0.9,
                     "雨声压低了整条街的呼吸。",
-                    "hash", "test", true, DateTimeOffset.UtcNow);
+                    "hash", "test", true, DateTimeOffset.UtcNow,
+                    new Dictionary<string, double> { ["lexical"] = 0.6, ["embedding"] = 0.25 });
                 return ValueTask.FromResult(new PageResultPayload<ReferenceMaterialPayload>([material], 1, 1, 1, 1));
             }
 
@@ -189,6 +193,10 @@ public class ChapterCorpusCoverageServiceTests
 
         public ValueTask<ReferenceAnchorPayload> CreateAnchorAsync( CreateReferenceAnchorPayload input, CancellationToken cancellationToken) => throw new NotSupportedException();
         public ValueTask<ReferenceAnchorPayload> RegisterMaterializationSourceAsync( CreateReferenceAnchorPayload input, CancellationToken cancellationToken) => throw new NotSupportedException();
+        public ValueTask<ReferenceAnchorPayload> RegisterMaterializationSourceFromContentAsync(
+            CreateReferenceAnchorFromContentPayload input,
+            CancellationToken cancellationToken) => throw new NotSupportedException();
+
         public ValueTask<IReadOnlyList<ReferenceAnchorPayload>> CreateAnchorsAsync( CreateReferenceAnchorsPayload input, CancellationToken cancellationToken) => throw new NotSupportedException();
         public ValueTask<CreateReferenceAnchorsResultPayload> CreateAnchorsWithResultAsync( CreateReferenceAnchorsPayload input, CancellationToken cancellationToken) => throw new NotSupportedException();
         public ValueTask<ReferenceAnchorBuildStatusPayload> RebuildAnchorAsync( long novelId, long anchorId, CancellationToken cancellationToken) => throw new NotSupportedException();

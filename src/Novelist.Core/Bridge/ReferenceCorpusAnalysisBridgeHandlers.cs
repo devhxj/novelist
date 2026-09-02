@@ -92,6 +92,16 @@ public static class ReferenceCorpusAnalysisBridgeHandlers
             }
         });
 
+        dispatcher.Register("ExportReferenceCorpusPackage", async (context, cancellationToken) =>
+            await service.ExportPackageAsync(
+                ReadObjectArg<ExportReferenceCorpusPackagePayload>(context.Payload, 0, "input"),
+                cancellationToken));
+
+        dispatcher.Register("ImportReferenceCorpusPackage", async (context, cancellationToken) =>
+            await service.ImportPackageAsync(
+                ReadObjectArg<ImportReferenceCorpusPackagePayload>(context.Payload, 0, "input"),
+                cancellationToken));
+
         dispatcher.Register("GetReferenceCorpusAssetTotals", async (context, cancellationToken) =>
             await service.GetAssetTotalsAsync(
                 ReadObjectArg<GetReferenceCorpusAssetTotalsPayload>(context.Payload, 0, "input"),

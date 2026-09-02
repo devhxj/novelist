@@ -5,11 +5,11 @@ namespace Novelist.Tests;
 public sealed class ReferenceCorpusFeatureFamilySchemaTests
 {
     [Fact]
-    public void RegistryLoadsTenLockedFeatureFamilies()
+    public void RegistryLoadsAllLockedFeatureFamiliesIncludingSceneLevel()
     {
         var schemas = ReferenceCorpusFeatureFamilySchemaRegistry.All;
 
-        Assert.Equal(10, schemas.Count);
+        Assert.Equal(12, schemas.Count);
         foreach (var family in ReferenceCorpusFeatureFamilies.All)
         {
             var schema = schemas[family];
@@ -28,6 +28,9 @@ public sealed class ReferenceCorpusFeatureFamilySchemaTests
             Assert.Equal("sentence", schemas[family].NodeType));
         Assert.All(ReferenceCorpusFeatureFamilies.PassageFamilies, family =>
             Assert.Equal("passage", schemas[family].NodeType));
+        // 场景级 family（轻量化聚焦方案 §4）：分析单位为 Scene 节点，词表种子已随 schema 落地。
+        Assert.All(ReferenceCorpusFeatureFamilies.SceneFamilies, family =>
+            Assert.Equal("scene", schemas[family].NodeType));
     }
 
     [Fact]

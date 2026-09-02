@@ -1950,6 +1950,10 @@ public sealed class ChatSessionServiceTests : IDisposable
 
         public ValueTask<ReferenceAnchorPayload> CreateAnchorAsync(CreateReferenceAnchorPayload input, CancellationToken cancellationToken) => throw new NotSupportedException();
         public ValueTask<ReferenceAnchorPayload> RegisterMaterializationSourceAsync(CreateReferenceAnchorPayload input, CancellationToken cancellationToken) => throw new NotSupportedException();
+        public ValueTask<ReferenceAnchorPayload> RegisterMaterializationSourceFromContentAsync(
+            CreateReferenceAnchorFromContentPayload input,
+            CancellationToken cancellationToken) => throw new NotSupportedException();
+
         public ValueTask<IReadOnlyList<ReferenceAnchorPayload>> CreateAnchorsAsync(CreateReferenceAnchorsPayload input, CancellationToken cancellationToken) => throw new NotSupportedException();
         public ValueTask<CreateReferenceAnchorsResultPayload> CreateAnchorsWithResultAsync(CreateReferenceAnchorsPayload input, CancellationToken cancellationToken) => throw new NotSupportedException();
         public ValueTask<ReferenceAnchorBuildStatusPayload> RebuildAnchorAsync(long novelId, long anchorId, CancellationToken cancellationToken) => throw new NotSupportedException();

@@ -14,8 +14,11 @@ public sealed class FileSystemChapterContentService : IChapterContentService
     private const int MaxChapterNumber = 999_999;
 
     private static readonly Regex AllowedContentPathPattern = new(
-        @"^(novelist\.md|chapters/\d{3,6}\.md|outlines/\d{3,6}\.md|skills/[^/\\]+\.md)$",
+        @"^(novelist\.md|chapters/\d{3,6}\.md|outlines/\d{3,6}\.md|skills/[^/\\]+\.md|plans/(大纲|部纲|细纲)\.md)$",
         RegexOptions.Compiled | RegexOptions.CultureInvariant);
+
+    // 计划镜像文件由 PlanningService 在保存槽位时单向写出；编辑器可读，改动以时间线面板保存为准。
+    public static readonly string[] PlanMirrorPaths = ["plans/大纲.md", "plans/部纲.md", "plans/细纲.md"];
 
     private static readonly Regex ChapterPathPattern = new(
         @"^chapters/(\d{3,6})\.md$",

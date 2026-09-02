@@ -18,6 +18,7 @@ public sealed partial class ChapterCorpusCoverageService : IChapterCorpusCoverag
     private const int BeatTextMaxLength = 200;
     private const int PreviewMaxLength = 200;
     private const int TitleMaxLength = 200;
+    private const int MaxSourceBooks = 5;
     private static readonly TimeSpan CacheLifetime = TimeSpan.FromSeconds(10);
 
     private readonly IReferenceAnchorService _referenceAnchors;
@@ -119,6 +120,10 @@ public sealed partial class ChapterCorpusCoverageService : IChapterCorpusCoverag
         }
 
         var anchorTitles = await BuildReadyAnchorTitlesAsync(input.NovelId, cancellationToken);
+        var sourceBooks = anchorTitles.Values
+            .OrderBy(title => title, StringComparer.Ordinal)
+            .Take(MaxSourceBooks)
+            .ToArray();
 
         var coveredCount = 0;
         var beatResults = new List<ChapterCorpusBeatCoveragePayload>(beats.Length);
@@ -135,7 +140,8 @@ public sealed partial class ChapterCorpusCoverageService : IChapterCorpusCoverag
                 Bound(beats[index], BeatTextMaxLength),
                 covered,
                 hit is not null && anchorTitles.TryGetValue(hit.AnchorId, out var title) ? Bound(title, TitleMaxLength) : null,
-                hit is null ? null : Bound(hit.Text, PreviewMaxLength)));
+                hit is null ? null : Bound(hit.Text, PreviewMaxLength),
+                hit is null ? null : MaterialHitScore(hit)));
         }
 
         var ratio = beats.Length == 0 ? 0 : (double)coveredCount / beats.Length;
@@ -148,7 +154,8 @@ public sealed partial class ChapterCorpusCoverageService : IChapterCorpusCoverag
             beats.Length,
             Math.Round(ratio, 4),
             ratio >= SufficientRatio,
-            truncated);
+            truncated,
+            sourceBooks);
     }
 
     private async ValueTask<IReadOnlyDictionary<long, string>> BuildReadyAnchorTitlesAsync(
@@ -165,6 +172,13 @@ public sealed partial class ChapterCorpusCoverageService : IChapterCorpusCoverag
     {
         var text = value ?? string.Empty;
         return text.Length > maxLength ? text[..maxLength] : text;
+    }
+
+    // v1 观测字段：命中综合分（ScoreComponents 各分量之和），供后续相关度阈值校准（开放问题 3）。
+    private static double? MaterialHitScore(ReferenceMaterialPayload hit)
+    {
+        var components = hit.ScoreComponents;
+        return components is null || components.Count == 0 ? null : components.Values.Sum();
     }
 
     private static string BuildQuery(string beat)

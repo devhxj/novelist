@@ -7,7 +7,7 @@ using Novelist.Core.App;
 
 namespace Novelist.Infrastructure.App;
 
-public sealed class SqliteReferenceCorpusAnalysisService : IReferenceCorpusAnalysisService
+public sealed partial class SqliteReferenceCorpusAnalysisService : IReferenceCorpusAnalysisService
 {
     private const string FeatureAnalyzerVersion = "reference-corpus-feature-llm-v1";
     private const string TechniqueSpecimenAnalyzerVersion = "reference-corpus-technique-specimen-llm-v1";
@@ -46,6 +46,7 @@ public sealed class SqliteReferenceCorpusAnalysisService : IReferenceCorpusAnaly
     private readonly IAppSettingsService _settings;
     private readonly IReferenceCorpusFeatureFamilyAnalyzer _featureAnalyzer;
     private readonly IReferenceCorpusTechniqueSpecimenAnalyzer _techniqueSpecimenAnalyzer;
+    private readonly IReferenceCorpusPackageFilePicker? _packageFilePicker;
     private readonly SemaphoreSlim _mutex = new(1, 1);
 
     public SqliteReferenceCorpusAnalysisService(
@@ -53,8 +54,11 @@ public sealed class SqliteReferenceCorpusAnalysisService : IReferenceCorpusAnaly
         IAppSettingsService? settings = null,
         IReferenceCorpusFeatureFamilyAnalyzer? analyzer = null,
         IChatCompletionClient? chatCompletion = null,
-        IReferenceCorpusTechniqueSpecimenAnalyzer? techniqueSpecimenAnalyzer = null)
+        IReferenceCorpusTechniqueSpecimenAnalyzer? techniqueSpecimenAnalyzer = null,
+        IReferenceCorpusPackageFilePicker? packageFilePicker = null)
     {
+        _packageFilePicker = packageFilePicker;
+
         _options = options ?? new AppInitializationOptions();
         _settings = settings ?? new FileSystemAppSettingsService(_options);
         var completion = chatCompletion ?? new StandardChatCompletionClient(new FileSystemLlmConfigurationService(_options));

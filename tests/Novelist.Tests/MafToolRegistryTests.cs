@@ -738,6 +738,10 @@ public sealed class MafToolRegistryTests
                 DateTimeOffset.UtcNow));
         }
 
+        public ValueTask<ReferenceAnchorPayload> RegisterMaterializationSourceFromContentAsync(
+            CreateReferenceAnchorFromContentPayload input,
+            CancellationToken cancellationToken) => throw new NotSupportedException();
+
         public ValueTask<ReferenceAnchorPayload> RegisterMaterializationSourceAsync(
             CreateReferenceAnchorPayload input,
             CancellationToken cancellationToken) => CreateAnchorAsync(input, cancellationToken);

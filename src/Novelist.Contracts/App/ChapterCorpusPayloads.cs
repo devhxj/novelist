@@ -19,7 +19,10 @@ public sealed record ChapterCorpusBeatCoveragePayload(
     string? AnchorTitle = null,
     [property: JsonPropertyName("text_preview")]
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-    string? TextPreview = null);
+    string? TextPreview = null,
+    [property: JsonPropertyName("hit_score")]
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    double? HitScore = null);
 
 public sealed record ChapterCorpusCoveragePayload(
     [property: JsonPropertyName("novel_id")] long NovelId,
@@ -34,4 +37,7 @@ public sealed record ChapterCorpusCoveragePayload(
     [property: JsonPropertyName("sufficient")] bool Sufficient,
     [property: JsonPropertyName("truncated")]
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-    bool? Truncated = null);
+    bool? Truncated = null,
+    [property: JsonPropertyName("source_books")]
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    IReadOnlyList<string>? SourceBooks = null);

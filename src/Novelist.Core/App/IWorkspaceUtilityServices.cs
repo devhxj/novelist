@@ -88,3 +88,10 @@ public interface IWritingDeltaRecorder
         int wordDelta,
         CancellationToken cancellationToken);
 }
+
+public interface IReferenceCorpusPackageFilePicker
+{
+    ValueTask<string?> PickPackageSaveFileAsync(string defaultFileName, CancellationToken cancellationToken);
+
+    ValueTask<string?> PickPackageOpenFileAsync(CancellationToken cancellationToken);
+}

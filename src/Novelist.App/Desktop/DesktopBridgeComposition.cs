@@ -129,7 +129,8 @@ public static PhotinoWebMessageBridge CreateBridge(
 var referenceCorpusAnalysisService = new SqliteReferenceCorpusAnalysisService(
 options,
 settingsService,
-chatCompletion: chatCompletionClient);
+chatCompletion: chatCompletionClient,
+packageFilePicker: new PhotinoReferenceCorpusPackageFilePicker(window));
 var referenceCorpusAnalysisScheduler = new SqliteReferenceCorpusAnalysisScheduler(
 new ReferenceCorpusDatabasePathResolver(options),
 settingsService);

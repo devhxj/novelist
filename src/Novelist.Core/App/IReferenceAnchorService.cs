@@ -12,6 +12,13 @@ public interface IReferenceAnchorService
         CreateReferenceAnchorPayload input,
         CancellationToken cancellationToken);
 
+    /// <summary>
+    /// 拖拽/粘贴导入：把文件内容写入应用数据目录后按普通来源注册，作者无需手动选择路径。
+    /// </summary>
+    ValueTask<ReferenceAnchorPayload> RegisterMaterializationSourceFromContentAsync(
+        CreateReferenceAnchorFromContentPayload input,
+        CancellationToken cancellationToken);
+
     ValueTask<IReadOnlyList<ReferenceAnchorPayload>> CreateAnchorsAsync(
         CreateReferenceAnchorsPayload input,
         CancellationToken cancellationToken);

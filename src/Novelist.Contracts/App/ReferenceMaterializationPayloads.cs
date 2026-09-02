@@ -295,6 +295,7 @@ public sealed record ReferenceMaterializationStatusPayload(
     [property: JsonPropertyName("rejected_count")] int RejectedCount,
     [property: JsonPropertyName("review_count")] int ReviewCount,
     [property: JsonPropertyName("vector_count")] int VectorCount,
+    [property: JsonPropertyName("model_call_count")] int ModelCallCount,
     [property: JsonPropertyName("llm")] ReferenceMaterializationModelIdentityPayload Llm,
     [property: JsonPropertyName("embedding")] ReferenceMaterializationModelIdentityPayload Embedding,
     [property: JsonPropertyName("last_error_code")]

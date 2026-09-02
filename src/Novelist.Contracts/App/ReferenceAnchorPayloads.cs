@@ -669,3 +669,15 @@ public sealed record ReferenceUserFeedbackPayload(
     [property: JsonPropertyName("edited_text_hash")] string EditedTextHash,
     [property: JsonPropertyName("origin")] string Origin,
     [property: JsonPropertyName("created_at")] DateTimeOffset CreatedAt);
+
+public sealed record CreateReferenceAnchorFromContentPayload(
+    [property: JsonPropertyName("novel_id")] long NovelId,
+    [property: JsonPropertyName("title")] string Title,
+    [property: JsonPropertyName("author")]
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    string? Author,
+    [property: JsonPropertyName("file_name")] string FileName,
+    [property: JsonPropertyName("content_base64")] string ContentBase64,
+    [property: JsonPropertyName("license_status")]
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    string? LicenseStatus = null);
