@@ -34,6 +34,7 @@ export default function GeneralConfigTab() {
   const [gitAuthorEmail, setGitAuthorEmail] = useState('')
   const [gitAuthorSaving, setGitAuthorSaving] = useState(false)
   const [gitAuthorFeedback, setGitAuthorFeedback] = useState<InlineSettingsFeedback | null>(null)
+  const [rebuildFeedback, setRebuildFeedback] = useState<InlineSettingsFeedback | null>(null)
   const [updateEnabled, setUpdateEnabled] = useState(false)
   const [updateEndpoint, setUpdateEndpoint] = useState('')
   const [updateDismissedVersion, setUpdateDismissedVersion] = useState('')
@@ -78,10 +79,24 @@ export default function GeneralConfigTab() {
   async function handleRebuild() {
     if (!selectedID) return
     setRebuilding(true)
+    setRebuildFeedback(null)
     try {
       await app.RebuildNovelIndex(selectedID)
+      setRebuildFeedback({ kind: 'success', message: '向量索引重建完成' })
     } catch (err) {
       console.error('Rebuild failed:', err)
+      // 重建失败必须有作者可见的反馈，不能只留在控制台（F11）。
+      setRebuildFeedback({
+        kind: 'error',
+        title: '向量索引重建失败',
+        message: diagnosticMessage(err, '重建未能完成，请稍后重试。'),
+        diagnostic: buildCopyableDiagnostic({
+          error: err,
+          fallbackMessage: '向量索引重建失败',
+          operation: 'GeneralConfigTab.RebuildNovelIndex',
+          bridgeMethod: 'RebuildNovelIndex',
+        }),
+      })
     } finally {
       setRebuilding(false)
     }
@@ -447,6 +462,19 @@ export default function GeneralConfigTab() {
             {rebuilding ? '重建中...' : '重建向量索引'}
           </button>
         </div>
+        {rebuildFeedback && (
+          rebuildFeedback.kind === 'success' ? (
+            <p className="text-[11px] text-emerald-600" role="status">{rebuildFeedback.message}</p>
+          ) : (
+            <ErrorCallout
+              title={rebuildFeedback.kind === 'error' ? rebuildFeedback.title : undefined}
+              message={rebuildFeedback.message}
+              diagnostic={rebuildFeedback.kind === 'error' ? rebuildFeedback.diagnostic : null}
+              className="rounded-md"
+              onClose={() => setRebuildFeedback(null)}
+            />
+          )
+        )}
       </div>
       <UpdateDialog
         open={showUpdateDialog}

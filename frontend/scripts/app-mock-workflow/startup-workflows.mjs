@@ -82,6 +82,30 @@ export async function verifyBootstrapStates(browser, url, consoleErrors, pageErr
   await bridgeUnavailablePage.close()
 
   await verifyPlatformProbeRecovery(browser, url, consoleErrors, pageErrors)
+  await verifyLastSessionRestore(browser, url, consoleErrors, pageErrors)
+}
+
+// F12：设置里带 last_session_id 时，重新打开工作区必须恢复上次会话。
+// 旧实现把该 ID 塞进 ref，会话列表 effect 可能带着空值先跑完，恢复被静默跳过。
+async function verifyLastSessionRestore(browser, url, consoleErrors, pageErrors) {
+  const page = await newAppPage(browser, consoleErrors, pageErrors, {
+    initialized: true,
+    settings: { ...settingsFixture(42), last_session_id: 'session-last-42' },
+  }, undefined, 'last-session-restore')
+  await page.goto(url, { waitUntil: 'domcontentloaded' })
+  await expectVisible(page.getByText('全局回归小说'), 'workspace title before session restore')
+
+  // 恢复生效的可观察结果：先按上次会话 ID 查详情，再加载该会话的历史消息。
+  await waitForBridgeCall(page, 'GetSessionMessages')
+  const restored = await page.evaluate(() => {
+    const calls = window.__appMockState.calls
+    const getSession = calls.filter((call) => call.method === 'GetSession').at(-1) ?? null
+    const messages = calls.filter((call) => call.method === 'GetSessionMessages').at(-1) ?? null
+    return { getSessionId: getSession?.args?.[0] ?? null, messagesSessionId: messages?.args?.[0] ?? null }
+  })
+  assert.equal(restored.getSessionId, 'session-last-42', 'the last session id from settings must be restored')
+  assert.equal(restored.messagesSessionId, 'session-last-42', 'the restored session must load its history')
+  await page.close()
 }
 
 // 默认目录探测失败过去会把首屏钉死在"加载中..."，按钮永久禁用。

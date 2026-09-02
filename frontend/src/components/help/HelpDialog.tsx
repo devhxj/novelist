@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { useDialogA11y } from '@/hooks/useDialogA11y'
 import { BookOpen, Wrench, Bot, Wand2, Cpu, Zap, ShieldCheck, Library, PenLine } from 'lucide-react'
 
 type Tab = 'quickstart' | 'corpus-writing' | 'phase15' | 'reference' | 'tools' | 'subagents' | 'skills' | 'llm' | 'context' | 'approval'
@@ -100,6 +101,7 @@ const tabs: { id: Tab; label: string; icon: React.ReactNode }[] = [
 
 export default function HelpDialog({ open, onClose }: Props) {
   const [activeTab, setActiveTab] = useState<Tab>('quickstart')
+  const dialogProps = useDialogA11y(open, onClose, '帮助')
 
   if (!open) return null
 
@@ -107,7 +109,10 @@ export default function HelpDialog({ open, onClose }: Props) {
     <div className="fixed inset-0 z-50 flex items-center justify-center">
       <div className="absolute inset-0 bg-black/40" onClick={onClose} />
 
-      <div className="relative bg-background rounded-xl shadow-2xl border flex w-[960px] h-[680px] max-w-[95vw] max-h-[90vh]">
+      <div
+        {...dialogProps}
+        className="relative bg-background rounded-xl shadow-2xl border flex w-[960px] h-[680px] max-w-[95vw] max-h-[90vh]"
+      >
         {/* 左侧导航 */}
         <nav className="w-[160px] border-r py-4 px-2 flex flex-col gap-1 shrink-0">
           <div className="text-sm font-medium px-3 pb-3 text-foreground">帮助</div>

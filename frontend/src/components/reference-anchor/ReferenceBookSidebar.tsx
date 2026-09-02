@@ -15,6 +15,7 @@ import {
 } from 'lucide-react'
 import { useApp } from '@/hooks/useApp'
 import { describeBridgeError } from '@/lib/novelist/bridgeErrors'
+import { describeAnchorStatus, type ReferenceAnchorTone } from '@/lib/novelist/referenceAnchorStates'
 import type { reference } from '@/lib/novelist/types'
 
 type Props = {
@@ -48,17 +49,18 @@ function titleFromPath(path: string): string {
   return fileName.replace(/\.[^.]+$/, '').trim()
 }
 
+// 状态分组与可用性判定统一走 referenceAnchorStates（U12）：
+// 按后端 ReferenceAnchorBuildStates 的真实枚举逐一映射，不再手写散落的状态判断。
+const TONE_CLASS: Record<ReferenceAnchorTone, string> = {
+  done: 'text-emerald-700 dark:text-emerald-400',
+  failed: 'text-destructive',
+  working: 'text-sky-700 dark:text-sky-300',
+  pending: 'text-amber-700 dark:text-amber-300',
+}
+
 function anchorState(anchor: reference.Anchor): { label: string; className: string; usable: boolean } {
-  if (anchor.status === 'ready' || anchor.status === 'completed') {
-    return { label: '已导入', className: 'text-emerald-700 dark:text-emerald-400', usable: true }
-  }
-  if (anchor.status.startsWith('failed_') || anchor.status === 'cancelled') {
-    return { label: '处理失败', className: 'text-destructive', usable: false }
-  }
-  if (anchor.status === 'queued' || anchor.status === 'running' || anchor.status === 'processing') {
-    return { label: '处理中', className: 'text-sky-700 dark:text-sky-300', usable: false }
-  }
-  return { label: '待处理', className: 'text-amber-700 dark:text-amber-300', usable: false }
+  const state = describeAnchorStatus(anchor.status)
+  return { label: state.label, className: TONE_CLASS[state.tone], usable: state.usable }
 }
 
 function isWorkspaceCorpus(anchor: reference.Anchor): boolean {

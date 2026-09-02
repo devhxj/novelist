@@ -2,6 +2,7 @@ import { useState, useCallback, useRef, useEffect } from 'react'
 import type { KeyboardEvent as ReactKeyboardEvent, MouseEvent as ReactMouseEvent } from 'react'
 import { MessageSquare, Loader2, History, Plus, PenLine, ChevronDown, Link2, Link2Off, Lock, CheckCircle2 } from 'lucide-react'
 import { EventsOn } from '@/lib/novelist/events'
+import { pushToast } from '@/lib/toast'
 import { useApp } from '@/hooks/useApp'
 import type { llm, app, reference } from '@/hooks/useApp'
 import type { AgentEvent, Turn } from './types'
@@ -51,6 +52,12 @@ const EVENT_REORDER_TIMEOUT = 120
 function describeError(err: unknown): string {
   if (err instanceof Error && err.message) return err.message
   return String(err)
+}
+
+// 静默失败检查点（F11）：这些后台加载/取消失败过去只进 console，
+// 界面呈现为"空"，作者会误以为没有数据。现在同时走统一通知通道。
+function notifyChatFailure(message: string, err: unknown) {
+  pushToast({ kind: 'error', message, description: describeError(err) })
 }
 
 interface EventQueue {
@@ -137,7 +144,8 @@ export default function ChatPanel({
   const pendingCancelRef = useRef(false)
   const onApprovalFileEditRef = useRef(onApprovalFileEdit)
   useEffect(() => { onApprovalFileEditRef.current = onApprovalFileEdit }, [onApprovalFileEdit])
-  const lastSessionIdRef = useRef('')
+  // 待恢复的上次会话 ID：设置加载完成后由恢复 effect 消费（F12）。
+  const [pendingLastSessionId, setPendingLastSessionId] = useState('')
 
   useEffect(() => {
     latestWidthRef.current = width
@@ -234,10 +242,9 @@ export default function ChatPanel({
         setApprovalMode(mode)
       }
 
-      // 暂存上次会话 ID，等 novelId 加载后恢复
-      if (settings?.last_session_id) {
-        lastSessionIdRef.current = settings.last_session_id
-      }
+      // 上次会话 ID 改用状态保存（F12）：它由设置请求异步送达，
+      // 若像以前一样塞进 ref，会话列表 effect 可能早已带着空值跑完，恢复就永远不触发。
+      setPendingLastSessionId(settings?.last_session_id || '')
     }).catch((err) => {
       console.error('Load models/settings failed', err)
       setInitLoadError(true)
@@ -257,21 +264,23 @@ export default function ChatPanel({
       }
     }).catch((err) => {
       console.error('Load sessions failed', err)
+      notifyChatFailure('会话列表加载失败', err)
     })
-
-    // 尝试恢复上次活跃会话（仅恢复一次，通过 ref 标记）
-    const sid = lastSessionIdRef.current
-    if (sid && novelId) {
-      lastSessionIdRef.current = ''
-      app.GetSession(sid).then(detail => {
-        if (detail && detail.novel_id === novelId) {
-          setActiveSessionId(sid)
-        }
-      }).catch(() => {
-        app.SetLastSession('').catch(() => {})
-      })
-    }
   }, [app, novelId])
+
+  // 恢复上次活跃会话：设置与 novelId 都就位后才执行，恢复一次即消费掉。
+  useEffect(() => {
+    const sid = pendingLastSessionId
+    if (!sid || !novelId) return
+    setPendingLastSessionId('')
+    app.GetSession(sid).then(detail => {
+      if (detail && detail.novel_id === novelId) {
+        setActiveSessionId(sid)
+      }
+    }).catch(() => {
+      app.SetLastSession('').catch(() => {})
+    })
+  }, [app, novelId, pendingLastSessionId])
 
   // 加载历史消息
   useEffect(() => {
@@ -400,6 +409,7 @@ export default function ChatPanel({
       if (r) { setSessions(r.items); setSessionsTotal(r.total) }
     }).catch((err) => {
       console.error('Refresh sessions failed', err)
+      notifyChatFailure('会话列表刷新失败', err)
     })
   }, [novelId, app])
 
@@ -418,6 +428,7 @@ export default function ChatPanel({
       setSlashCommands(list ?? [])
     } catch (err) {
       console.error('Load slash commands failed', err)
+      notifyChatFailure('技能列表加载失败', err)
     }
   }, [app, novelId])
 
@@ -915,6 +926,7 @@ export default function ChatPanel({
     if (activeCountRef.current > 1 && sessionId) {
       app.CancelChat(sessionId).catch(err => {
         console.error('Cancel previous chat failed', err)
+        notifyChatFailure('停止上一轮的请求未送达', err)
       })
     }
     setIsLoading(true)
@@ -981,6 +993,7 @@ export default function ChatPanel({
         if (r) { setSessions(r.items); setSessionsTotal(r.total) }
       }).catch((err) => {
         console.error('Post-send refresh sessions failed', err)
+        notifyChatFailure('会话列表刷新失败', err)
       })
     } catch (err) {
       setTurns(prev => prev.map(t => {
@@ -1030,6 +1043,7 @@ export default function ChatPanel({
       pendingCancelRef.current = false
       app.CancelChat(sessionId).catch(err => {
         console.error('Cancel chat failed', err)
+        notifyChatFailure('停止会话的请求未送达', err)
       })
       return
     }

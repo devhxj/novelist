@@ -1,6 +1,7 @@
 import { Suspense, lazy, useState, useEffect, useCallback } from 'react'
 import { useApp } from '@/hooks/useApp'
 import InitView from '@/views/InitView'
+import ToastHost from '@/components/toast/ToastHost'
 import { Button } from '@/components/ui/button'
 import { AlertTriangle } from 'lucide-react'
 import type { novelImport } from '@/lib/novelist/types'
@@ -106,6 +107,7 @@ export default function App() {
 
   return (
     <div className="min-h-screen bg-background text-foreground">
+      <ToastHost />
       {view === 'init' && (
         <InitView onInitialized={async () => {
           const config = await app.GetAppConfig()

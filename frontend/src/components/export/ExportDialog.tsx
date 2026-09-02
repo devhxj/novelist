@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { useDialogA11y } from '@/hooks/useDialogA11y'
 import { BookOpen, FileText, AlignLeft } from 'lucide-react'
 import ErrorCallout from '@/components/shared/ErrorCallout'
 import { buildCopyableDiagnostic, diagnosticMessage } from '@/lib/diagnostics'
@@ -43,6 +44,7 @@ function ExportDialogContent({ novelId, novelTitle, onClose, onExport }: Omit<Pr
   const [exporting, setExporting] = useState(false)
   const [error, setError] = useState<ExportError | null>(null)
   const [success, setSuccess] = useState(false)
+  const dialogProps = useDialogA11y(true, onClose, '导出作品')
 
   async function handleExport() {
     if (exporting) return
@@ -73,16 +75,12 @@ function ExportDialogContent({ novelId, novelTitle, onClose, onExport }: Omit<Pr
     }
   }
 
-  function handleKeyDown(e: React.KeyboardEvent) {
-    if (e.key === 'Escape') onClose()
-  }
-
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center">
       <div className="absolute inset-0 bg-black/40" onClick={onClose} />
       <div
+        {...dialogProps}
         className="relative bg-background rounded-xl shadow-2xl border w-[420px] max-w-[90vw] p-6"
-        onKeyDown={handleKeyDown}
       >
         <button
           onClick={onClose}

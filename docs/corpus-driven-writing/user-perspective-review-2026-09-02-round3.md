@@ -168,6 +168,22 @@
 | O13 | 章节进度补分页 + 失败章节筛选 | 断言 >30 章的书可查看全部与仅失败项 |
 | N2/N3/N4 | 对话框补 `role="dialog"`/`aria-modal`/Escape/焦点陷阱；Escape 监听移到 document 或可聚焦容器；卡片改 `button`；快捷键提升到 WorkspaceView 层；删除类操作补撤销窗口 | 键盘全流程走查 + 截图；快捷键在非内容面板下仍生效 |
 
+#### 第二批落地记录（2026-09-01）
+
+11 项全部完成并通过验收：build / lint / `test:node`（23 例，含 2 个新契约测试）/ `test:phase16` / `test:app` / `--grep=@writing` / `--grep=@error` 全绿。新增截图：`materialization-toast.png`、`reference-progress-filter.png`。
+
+- **F9**：新增 `lib/toast.ts` + `ToastHost`（`aria-live="polite"` 容器，错误条目单独 `role="alert"`），材料化完成/失败会经统一通道推送通知并附「打开素材库」跳转动作，工作流断言非素材库面板也能收到。
+- **F11**：9 处 `console.error` 全部接入可见反馈——6 处会话/技能/取消类失败走 toast，`GeneralConfigTab` 重建失败新增就地 ErrorCallout（含可复制诊断），模型列表与消息历史失败沿用既有的横幅 + 重试。
+- **U11**：`bridgeErrors.ts` 新增 `bridgeErrorGuide`（19 个材料化错误码 → {message, action}），命中映射时后端消息降级为 `detail` 折叠诊断；契约测试直接解析 `ReferenceMaterializationPayloads.cs` 断言全覆盖。
+- **U12**：新增 `referenceAnchorStates.ts`，按 `ReferenceAnchorBuildStates` 真实枚举逐一给出标签/语气/可用性（`stale` 不再误标"待处理"）；契约测试解析 .cs 断言 18 个状态全覆盖且仅 `ready` 可用。
+- **O12**：run 明细按 `run_id` 判定"新 run"——只有锚点/run 切换才重置候选与进度分页；同 run 轮询刷新按已加载页数整段重拉进度，候选列表不再被打回第一页。
+- **O13**：章节进度补「加载更多」分页与「仅看失败章节」筛选；mock 提供 45 章 / 6 失败的确定性数据支撑验收。
+- **O14**：ChatPanel 改为常驻挂载（个人中心态用 `hidden` + `aria-hidden` 隐藏），切换面板不再丢失输入框草稿。
+- **F12**：末次会话恢复改为状态驱动——设置加载完成后写入 `pendingLastSessionId`，恢复 effect 在设置与 novelId 都就位时执行并消费，消除"列表 effect 先跑、恢复被跳过"的时序竞态；工作流以预置 `last_session_id` 断言重开后恢复。
+- **N2**：新增 `useDialogA11y`（`role="dialog"` + `aria-modal` + document 级 Escape + Tab 焦点圈定 + 初始焦点），Settings/Help/Export/ExtractStyle 四个对话框接入；书架卡片主体补 `role="button"` + 键盘 Enter/Space。
+- **N3**：Ctrl+S / Ctrl+Shift+V 监听器从 ContentPanel 提升到 WorkspaceView，经 `ContentPanelHandle.saveActiveTab/toggleActivePreview` 委托执行，面板卸载时优雅空操作。
+- **N4**：偏好与读者认知条目的删除接入撤销窗口——删除前截获完整内容，删除成功后 toast 提供「撤销」动作原样重建；角色/地点删除因关联数据无法完整恢复，维持显式确认。
+
 ### 第三批：完整性承诺（跨迭代）
 
 1. **O7 章节删除**：软删除 + 版本留痕 + 索引清理 + 覆盖度缓存失效；产品决策取"不重排章号"。

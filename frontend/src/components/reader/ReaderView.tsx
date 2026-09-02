@@ -4,6 +4,7 @@ import { useApp } from '@/hooks/useApp'
 import type { reader } from '@/hooks/useApp'
 import ErrorCallout from '@/components/shared/ErrorCallout'
 import { buildCopyableDiagnostic, diagnosticMessage } from '@/lib/diagnostics'
+import { pushToast } from '@/lib/toast'
 import type { diagnostics } from '@/lib/novelist/types'
 
 interface Props { novelId: number; focusId?: number }
@@ -254,12 +255,40 @@ export default function ReaderView({ novelId, focusId }: Props) {
   }
 
   async function handleDelete(id: number) {
-    if (!confirm('确定要删除这条读者认知条目吗？此操作不可撤销。')) return
+    // N4：删除前截获完整条目，给作者一个真正的撤销窗口（toast 动作）。
+    const target = entries.find((item) => item.id === id) ?? null
+    if (!confirm('确定要删除这条读者认知条目吗？删除后可在通知里选择「撤销」恢复。')) return
     setSaving(true)
     try {
       await app.DeleteReaderPerspective(id, novelId)
       if (expandedId === id) setExpandedId(null)
       await load()
+      if (target) {
+        pushToast({
+          kind: 'info',
+          message: `已删除读者认知条目「${target.content.slice(0, 20)}${target.content.length > 20 ? '…' : ''}」`,
+          description: '通知消失前可撤销。',
+          action: {
+            label: '撤销',
+            run: () => {
+              void (async () => {
+                try {
+                  await app.CreateReaderPerspective(novelId, {
+                    type: target.type,
+                    content: target.content,
+                    planted_chapter: target.planted_chapter,
+                    related_truth: target.related_truth,
+                    ...(target.revealed_chapter ? { revealed_chapter: target.revealed_chapter } : {}),
+                  })
+                  await load()
+                } catch (err) {
+                  setError(buildVisibleError(err, '撤销删除失败', '撤销删除', 'CreateReaderPerspective', { novel_id: novelId }))
+                }
+              })()
+            },
+          },
+        })
+      }
     } catch (err) {
       setError(buildVisibleError(err, '删除读者视角失败', '删除读者视角', 'DeleteReaderPerspective', {
         novel_id: novelId,

@@ -3915,30 +3915,60 @@ function referenceAnchors() {
 
   function listReferenceMaterializationChapterProgress(input = {}) {
     const run = getReferenceMaterializationStatus(input)
-    if (!run) return { items: [], total: 0, page: 1, size: Number(input?.size ?? 20), total_pages: 1, next_cursor: null, has_more: false, total_estimate: 0 }
-    const items = Array.from({ length: run.total_chapters }, (_, index) => ({
-      chapter_index: index + 1,
-      batch_index: Math.floor(index / run.chapter_batch_size),
-      status: 'completed',
-      current_stage: 'completed',
-      candidate_count: 6,
-      decided_count: 6,
-      accepted_count: 4,
-      rejected_count: 2,
-      review_count: 0,
-      vector_count: 4,
-      model_call_count: 1,
-      started_at: now,
-      completed_at: now,
-      last_error_code: null,
-      last_error_message: null,
-      row_version: 1,
-    }))
-    return { items, total: items.length, page: 1, size: Number(input?.size ?? 20), total_pages: 1, next_cursor: null, has_more: false, total_estimate: items.length }
+    if (!run) return { items: [], total: 0, page: Number(input?.page ?? 1), size: Number(input?.size ?? 20), total_pages: 1, next_cursor: null, has_more: false, total_estimate: 0 }
+    const items = Array.from({ length: run.total_chapters }, (_, index) => {
+      const chapterIndex = index + 1
+      // 混入确定性的失败章节，供"仅看失败"筛选与 O13 验收使用。
+      const failed = chapterIndex % 7 === 5
+      return {
+        chapter_index: chapterIndex,
+        batch_index: Math.floor(index / run.chapter_batch_size),
+        status: failed ? 'failed' : 'completed',
+        current_stage: failed ? 'failed' : 'completed',
+        candidate_count: 6,
+        decided_count: 6,
+        accepted_count: failed ? 2 : 4,
+        rejected_count: failed ? 3 : 2,
+        review_count: 0,
+        vector_count: failed ? 1 : 4,
+        model_call_count: 1,
+        started_at: now,
+        completed_at: failed ? null : now,
+        last_error_code: failed ? 'materialization_llm_request_failed' : null,
+        last_error_message: failed ? `第 ${chapterIndex} 章模型请求失败（mock）` : null,
+        row_version: 1,
+      }
+    })
+    const page = Number(input?.page ?? 1)
+    const size = Number(input?.size ?? 20)
+    const start = (page - 1) * size
+    const slice = items.slice(start, start + size)
+    return { items: slice, total: items.length, page, size, total_pages: Math.ceil(items.length / size), next_cursor: null, has_more: start + size < items.length, total_estimate: items.length }
   }
 
   function listReferenceMaterializationCandidates(input = {}) {
-    return { items: [], total: 0, page: 1, size: Number(input?.size ?? 20), total_pages: 1, next_cursor: null, has_more: false, total_estimate: 0 }
+    const run = getReferenceMaterializationStatus(input)
+    if (!run) return { items: [], total: 0, page: Number(input?.page ?? 1), size: Number(input?.size ?? 20), total_pages: 1, next_cursor: null, has_more: false, total_estimate: 0 }
+    // 固定 30 条待复核候选：支撑候选分页（加载更多）与轮询不重置分页的 O12 验收。
+    const all = Array.from({ length: 30 }, (_, index) => ({
+      candidate_id: `mock-candidate-${run.anchor_id}-${index + 1}`,
+      run_id: run.run_id,
+      anchor_id: run.anchor_id,
+      chapter_index: (index % run.total_chapters) + 1,
+      candidate_type: index % 2 === 0 ? 'action_reaction' : 'passage',
+      text_preview: `待复核候选 ${index + 1}：她把杯底半圈水痕压进记忆里，没有急着回头。`,
+      quality_score: 0.9,
+      confidence: 0.87,
+      row_version: 1,
+      reason_codes: ['needs_human_judgement'],
+      source_spans: [{ node_id: `mock-node-${index + 1}`, start: 8, end: 96 }],
+      tags: { narrative_functions: ['reveal'], emotion_mechanics: ['restraint'], pov: ['close_third'], techniques: ['delayed_reaction'], scene_beat_roles: ['turn'] },
+    }))
+    const page = Number(input?.page ?? 1)
+    const size = Number(input?.size ?? 20)
+    const start = (page - 1) * size
+    const slice = all.slice(start, start + size)
+    return { items: slice, total: all.length, page, size, total_pages: Math.ceil(all.length / size), next_cursor: null, has_more: start + size < all.length, total_estimate: all.length }
   }
 
   function reviewReferenceMaterializationCandidate(input = {}) {

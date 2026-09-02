@@ -834,6 +834,11 @@ async function verifyApprovalSubmitErrorRecovery(context) {
   await failurePage.screenshot({ path: path.join(outputDir, 'app-approval-submit-failure.png'), fullPage: true })
 
   await approvalCard(failurePage).getByRole('button', { name: '重试批准' }).click()
+  // 等待审批徽章回归 = 重试的 promise 已结算并完成重渲染，避免读到重渲染前的输入框。
+  await failurePage.waitForFunction(() => {
+    const badge = document.querySelector('.tool-card.awaiting-approval .tool-badge')
+    return badge !== null && badge.textContent?.includes('等待审批')
+  }, undefined, { timeout: 12_000 })
   await expectHidden(approvalAlert, 'approval failure error cleared after successful retry')
   assert.equal(await feedbackBox(failurePage).inputValue(), '', 'feedback cleared after successful approval')
   await expectVisible(approvalCard(failurePage).getByText('等待审批', { exact: true }), 'approval card still awaiting after successful submit')

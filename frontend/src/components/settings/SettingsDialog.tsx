@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { Settings, Cpu } from 'lucide-react'
 import ModelConfigTab from './ModelConfigTab'
 import GeneralConfigTab from './GeneralConfigTab'
+import { useDialogA11y } from '@/hooks/useDialogA11y'
 
 type Tab = 'general' | 'model'
 
@@ -14,6 +15,7 @@ interface Props {
 
 export default function SettingsDialog({ open, onClose, onSaved, initialTab = 'model' }: Props) {
   const [activeTab, setActiveTab] = useState<Tab>(initialTab)
+  const dialogProps = useDialogA11y(open, onClose, '设置')
 
   if (!open) return null
 
@@ -28,7 +30,10 @@ export default function SettingsDialog({ open, onClose, onSaved, initialTab = 'm
       <div className="absolute inset-0 bg-black/40" onClick={onClose} />
 
       {/* 弹窗 */}
-      <div className="relative flex h-[760px] max-h-[calc(100vh-32px)] w-[920px] max-w-[95vw] overflow-hidden rounded-xl border bg-background shadow-2xl">
+      <div
+        {...dialogProps}
+        className="relative flex h-[760px] max-h-[calc(100vh-32px)] w-[920px] max-w-[95vw] overflow-hidden rounded-xl border bg-background shadow-2xl"
+      >
         {/* 左侧导航 */}
         <nav className="w-[160px] border-r py-4 px-2 flex flex-col gap-1 shrink-0">
           <div className="text-sm font-medium px-3 pb-3 text-foreground">设置</div>

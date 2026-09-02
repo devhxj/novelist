@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import { Sparkle, Loader2 } from 'lucide-react'
 import { useApp } from '@/hooks/useApp'
+import { useDialogA11y } from '@/hooks/useDialogA11y'
 import type { llm } from '@/hooks/useApp'
 import PopSelect from '@/components/chat/PopSelect'
 import Markdown from '@/components/Markdown'
@@ -133,11 +134,11 @@ export default function ExtractStyleDialog({ open, novelId, onClose, onSaved }: 
     }
   }, [result, novelId, app, onSaved, onClose])
 
-  const handleKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === 'Escape' && phase !== 'extracting' && phase !== 'saving') {
-      onClose()
-    }
-  }
+  // 提取/保存进行中不允许 Escape 关闭，其余时候走统一的对话框关闭逻辑（N2）。
+  const requestClose = useCallback(() => {
+    if (phase !== 'extracting' && phase !== 'saving') onClose()
+  }, [phase, onClose])
+  const dialogProps = useDialogA11y(open, requestClose, '提取写作风格')
 
   if (!open) return null
 
@@ -147,9 +148,12 @@ export default function ExtractStyleDialog({ open, novelId, onClose, onSaved }: 
   const { meta, body } = result ? splitFrontmatter(result.rawContent) : { meta: {}, body: '' }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center" onKeyDown={handleKeyDown}>
+    <div className="fixed inset-0 z-50 flex items-center justify-center">
       <div className="absolute inset-0 bg-black/40" onClick={phase === 'extracting' || phase === 'saving' ? undefined : onClose} />
-      <div className="relative bg-background rounded-xl shadow-2xl border w-[860px] max-w-[95vw] h-[88vh] max-h-[96vh] flex flex-col">
+      <div
+        {...dialogProps}
+        className="relative bg-background rounded-xl shadow-2xl border w-[860px] max-w-[95vw] h-[88vh] max-h-[96vh] flex flex-col"
+      >
         {/* 标题栏 */}
         <div className="flex items-center justify-between px-5 py-3.5 border-b shrink-0">
           <div className="flex items-center gap-2">

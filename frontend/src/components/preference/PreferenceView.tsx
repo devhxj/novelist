@@ -4,6 +4,7 @@ import { useApp } from '@/hooks/useApp'
 import type { novel } from '@/hooks/useApp'
 import ErrorCallout from '@/components/shared/ErrorCallout'
 import { buildCopyableDiagnostic, diagnosticMessage } from '@/lib/diagnostics'
+import { pushToast } from '@/lib/toast'
 import type { diagnostics } from '@/lib/novelist/types'
 
 interface Props { novelId: number; focusId?: number }
@@ -140,11 +141,37 @@ export default function PreferenceView({ novelId }: Props) {
   }
 
   async function handleDelete(id: number) {
-    if (!confirm('确定要删除这条偏好吗？此操作不可撤销。')) return
+    // N4：删除前截获完整内容，给作者一个真正的撤销窗口（toast 动作）。
+    const target = [...global, ...novelPrefs].find((item) => item.id === id) ?? null
+    if (!confirm('确定要删除这条偏好吗？删除后可在通知里选择「撤销」恢复。')) return
     setSaving(true)
     try {
       await app.DeletePreference(id)
       await load()
+      if (target) {
+        pushToast({
+          kind: 'info',
+          message: `已删除偏好「${target.category}」`,
+          description: '通知消失前可撤销。',
+          action: {
+            label: '撤销',
+            run: () => {
+              void (async () => {
+                try {
+                  await app.CreatePreference(novelId, {
+                    is_global: target.is_global,
+                    category: target.category,
+                    content: target.content,
+                  })
+                  await load()
+                } catch (err) {
+                  setError(buildVisibleError(err, '撤销删除失败', '撤销删除', 'CreatePreference', { novel_id: novelId }))
+                }
+              })()
+            },
+          },
+        })
+      }
     } catch (err) {
       setError(buildVisibleError(err, '删除偏好失败', '删除偏好', 'DeletePreference', {
         novel_id: novelId,

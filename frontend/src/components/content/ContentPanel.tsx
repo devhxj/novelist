@@ -67,6 +67,10 @@ export interface ContentPanelHandle {
   }) => void
   handleDiffApprove: (toolId: string) => Promise<void>
   handleDiffReject: (toolId: string) => void
+  /** N3：Ctrl+S 保存当前脏 tab（由 WorkspaceView 层的监听器调用）。 */
+  saveActiveTab: () => void
+  /** N3：Ctrl+Shift+V 切换技能/故事状态预览。 */
+  toggleActivePreview: () => void
 }
 
 interface Props {
@@ -155,20 +159,13 @@ const ContentPanel = forwardRef<ContentPanelHandle, Props>(function ContentPanel
     }
   }, [app, tabs, novelId, updateTab, initRef])
 
-  // Ctrl+Shift+V 切换技能预览
-  useEffect(() => {
-    const handler = (e: KeyboardEvent) => {
-      if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key === 'V') {
-        const tab = tabs.find(t => t.id === activeTabId)
-        if (tab?.type === 'file' && (isSkillPath(tab.path) || tab.path === 'novelist.md')) {
-          e.preventDefault()
-          const newMode = tab.viewMode === 'preview' ? 'content' : 'preview'
-          updateTab(tab.id, { viewMode: newMode })
-        }
-      }
+  // Ctrl+Shift+V 的实际动作（N3）：监听器同样上收到 WorkspaceView 层。
+  const toggleActivePreview = useCallback(() => {
+    const tab = tabs.find(t => t.id === activeTabId)
+    if (tab?.type === 'file' && (isSkillPath(tab.path) || tab.path === 'novelist.md')) {
+      const newMode = tab.viewMode === 'preview' ? 'content' : 'preview'
+      updateTab(tab.id, { viewMode: newMode })
     }
-    window.addEventListener('keydown', handler)
-    return () => window.removeEventListener('keydown', handler)
   }, [tabs, activeTabId, updateTab])
 
   // ── 切换 viewMode：按需加载大纲内容 ──────────────────────
@@ -231,25 +228,17 @@ const ContentPanel = forwardRef<ContentPanelHandle, Props>(function ContentPanel
     }
   }, [app, updateTab])
 
-  // Ctrl+S 立即保存
-  useEffect(() => {
-    const handler = (e: KeyboardEvent) => {
-      if ((e.ctrlKey || e.metaKey) && !e.shiftKey && e.key === 's') {
-        e.preventDefault()
-        if (saveTimerRef.current) clearTimeout(saveTimerRef.current)
-        const s = savingRef.current
-        if (s) {
-          void doSave(s.id, s.path, s.content).catch(() => undefined)
-          return
-        }
-
-        if (activeTab?.type === 'file' && activeTab.isDirty) {
-          void doSave(activeTab.id, activeTab.path, activeTab.content ?? '').catch(() => undefined)
-        }
-      }
+  // Ctrl+S 的实际动作（N3）：监听器上收到 WorkspaceView 层，这里只保留保存语义。
+  const saveActiveTab = useCallback(() => {
+    if (saveTimerRef.current) clearTimeout(saveTimerRef.current)
+    const s = savingRef.current
+    if (s) {
+      void doSave(s.id, s.path, s.content).catch(() => undefined)
+      return
     }
-    window.addEventListener('keydown', handler)
-    return () => window.removeEventListener('keydown', handler)
+    if (activeTab?.type === 'file' && activeTab.isDirty) {
+      void doSave(activeTab.id, activeTab.path, activeTab.content ?? '').catch(() => undefined)
+    }
   }, [activeTab, doSave])
 
   const handleEditorChange = useCallback((tabId: string, value: string | undefined) => {
@@ -564,7 +553,9 @@ const ContentPanel = forwardRef<ContentPanelHandle, Props>(function ContentPanel
     openDiffTab,
     handleDiffApprove,
     handleDiffReject,
-  }), [doOpenFile, doOpenFileWithHighlight, clearHighlight, closeAllTabs, openDiffTab, handleDiffApprove, handleDiffReject])
+    saveActiveTab,
+    toggleActivePreview,
+  }), [doOpenFile, doOpenFileWithHighlight, clearHighlight, closeAllTabs, openDiffTab, handleDiffApprove, handleDiffReject, saveActiveTab, toggleActivePreview])
 
 
   // ── 渲染 ────────────────────────────────────────────────

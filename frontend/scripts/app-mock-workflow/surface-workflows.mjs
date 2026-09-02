@@ -927,6 +927,18 @@ export async function verifyEarlyCancelChatWorkflow(browser, url, consoleErrors,
     window.__appMockState.calls.filter((call) => call.method === 'Chat').at(-1) ?? null)
   assert.equal(cancelCalls.length, 1, 'the pending cancel intent must be resent exactly once')
   assert.equal(cancelCalls.at(-1).args[0], chatCall?.result?.session_id, 'the resent cancel must carry the session id delivered by chat:started')
+
+  // O14：切到个人中心再切回来，输入框里未发送的草稿必须还在（ChatPanel 保留挂载）。
+  await input.fill('切面板也不该丢掉的草稿')
+  await page.getByRole('button', { name: '个人中心' }).click()
+  await expectVisible(page.getByText('过去一年', { exact: false }).first(), 'profile view opens')
+  await clickActivity(page, '章节')
+  const draftAfterReturn = await page.evaluate(() => {
+    const textarea = document.querySelector('textarea[placeholder*="输入消息"]')
+    return textarea instanceof HTMLTextAreaElement ? textarea.value : null
+  })
+  assert.equal(draftAfterReturn, '切面板也不该丢掉的草稿', 'chat draft must survive a panel switch')
+
   await page.close()
 }
 
@@ -1056,6 +1068,67 @@ export async function verifyReferenceWorkspaceWorkflow(page) {
   await waitForBridgeCallCountAfter(page, 'AnalyzeReferenceChapterSplit', reanalyzeCount)
   await expectVisible(corpusWorkspace.getByText('待确认 · 3 个章节'), 'fresh pending profile after re-analysis')
   await page.screenshot({ path: path.join(outputDir, 'reference-reanalyze-rematerialize.png'), fullPage: true })
+
+  // O12/O13：运行中的 run —— 候选翻页不被轮询重置；章节进度可分页取全量并按失败筛选。
+  await page.evaluate(() => {
+    const run = window.__appMockState.materializationRuns.at(-1)
+    run.status = 'running'
+    run.total_chapters = 45
+    run.processed_chapters = 20
+  })
+  await corpusWorkspace.getByRole('button', { name: '刷新材料化状态' }).click()
+  await expectVisible(corpusWorkspace.getByText('20 / 45 章节'), 'running run over 45 chapters')
+
+  // 候选：翻到第 2 页后，跨过至少一次轮询刷新仍停留在前 24 条（O12）。
+  await expectVisible(corpusWorkspace.getByTestId('candidate-total'), 'candidate total line while running')
+  await corpusWorkspace.getByTestId('load-more-candidates').click()
+  await expectVisible(corpusWorkspace.getByText('待复核共 30 条，当前显示前 24 条'), 'candidate second page loaded')
+  await page.waitForTimeout(4200)
+  await expectVisible(corpusWorkspace.getByText('待复核共 30 条，当前显示前 24 条'), 'candidate pagination survives polling refresh')
+
+  // 进度：45 章先取 30 条，加载更多拿全量，再筛失败章节（O13）。
+  await expectVisible(corpusWorkspace.getByTestId('load-more-progress'), 'progress pagination appears beyond 30 chapters')
+  await corpusWorkspace.getByTestId('load-more-progress').click()
+  await expectHidden(corpusWorkspace.getByTestId('load-more-progress'), 'all 45 chapters loaded after one more page')
+  await corpusWorkspace.getByTestId('progress-failed-filter').click()
+  const progressRows = corpusWorkspace.locator('ol[aria-label="材料化章节进度"] > li')
+  assert.equal(await progressRows.count(), 6, 'the 45-chapter book must expose its 6 deterministic failed chapters')
+  await page.screenshot({ path: path.join(outputDir, 'reference-progress-filter.png'), fullPage: true })
+
+  // 收尾：把 run 调回终态，停掉轮询，避免影响后续工作流。
+  await corpusWorkspace.getByTestId('progress-failed-filter').click()
+  await page.evaluate(() => {
+    const run = window.__appMockState.materializationRuns.at(-1)
+    run.status = 'cancelled'
+    run.total_chapters = 3
+    run.processed_chapters = 3
+  })
+  await corpusWorkspace.getByRole('button', { name: '刷新材料化状态' }).click()
+  await expectVisible(corpusWorkspace.getByText('3 / 3 章节'), 'run restored to terminal state for later steps')
+
+  // F9：作者在非素材库面板时，材料化完成也必须通过统一通知通道送达（toast + aria-live）。
+  // 监视器在离开素材库页时启动，先让它观察到 running，再翻到完成态并重新启用监视器。
+  await page.evaluate(() => {
+    const run = window.__appMockState.materializationRuns.at(-1)
+    run.status = 'running'
+  })
+  await corpusWorkspace.getByRole('button', { name: '刷新材料化状态' }).click()
+  await clickActivity(page, '章节')
+  await page.waitForTimeout(300)
+  await page.evaluate(() => {
+    const run = window.__appMockState.materializationRuns.at(-1)
+    run.status = 'completed'
+  })
+  await clickActivity(page, '素材库')
+  await clickActivity(page, '章节')
+  const toastHost = page.getByTestId('toast-host')
+  await expectVisible(toastHost, 'toast host appears for materialization completion')
+  await expectVisible(page.getByTestId('toast-success').filter({ hasText: '《全局雨夜参考》材料化完成' }), 'completion toast names the book')
+  assert.ok(await page.locator('[aria-live="polite"]').count() >= 1, 'toast host must be a polite live region')
+  await expectVisible(page.getByTestId('toast-host').getByRole('button', { name: '打开素材库' }), 'completion toast carries a jump action')
+  await page.screenshot({ path: path.join(outputDir, 'materialization-toast.png'), fullPage: true })
+  await page.getByTestId('toast-host').getByRole('button', { name: '打开素材库' }).click()
+  await expectVisible(page.getByTestId('reference-corpus-workspace'), 'toast action returns to the corpus area')
 
   // 蓝图预演已随拼装线退役：右侧恢复 AI 对话，预演面板不再存在。
   await expectHidden(page.getByTestId('blueprint-preview-panel'), 'retired blueprint preview panel')

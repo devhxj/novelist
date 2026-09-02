@@ -31,6 +31,9 @@ type Action = 'analyze' | 'manual-preview' | 'confirm' | 'enqueue' | 'retry' | '
 
 const numberFormatter = new Intl.NumberFormat('zh-CN')
 
+const PROGRESS_PAGE_SIZE = 30
+const CANDIDATE_PAGE_SIZE = 12
+
 // 切分分析结果按锚点缓存于组件外：LLM 分析期间切换页面回来不丢结果。
 const analyzedProfiles = new Map<number, reference.ChapterSplitProfile>()
 
@@ -123,9 +126,15 @@ export default function ReferenceCorpusWorkspace({
   const [candidateTotal, setCandidateTotal] = useState(0)
   const [candidatePage, setCandidatePage] = useState(1)
   const [loadingMore, setLoadingMore] = useState(false)
+  const [progressPage, setProgressPage] = useState(1)
+  const [progressTotal, setProgressTotal] = useState(0)
+  const [loadingMoreProgress, setLoadingMoreProgress] = useState(false)
+  const [failedProgressOnly, setFailedProgressOnly] = useState(false)
+  const [candidateRefreshTick, setCandidateRefreshTick] = useState(0)
   const [showModelSettings, setShowModelSettings] = useState(false)
   const requestIdRef = useRef(0)
   const notifiedCompletedRunRef = useRef<string | null>(null)
+  const loadedRunIdRef = useRef<string | null>(null)
 
   const selectedAnchor = useMemo(() => {
     const selected = new Set(selectedAnchorIds)
@@ -157,37 +166,106 @@ export default function ReferenceCorpusWorkspace({
     }
   }, [app, novelId])
 
-  const loadRunDetail = useCallback(async (status: reference.MaterializationStatus | null) => {
+  const loadRunDetail = useCallback(async (status: reference.MaterializationStatus | null, options: { resetPages: boolean } = { resetPages: true }) => {
     if (!status || !novelId) {
+      loadedRunIdRef.current = null
+      setProgressPage(1)
       setProgress([])
+      setProgressTotal(0)
+      setCandidatePage(1)
       setCandidates([])
+      setCandidateTotal(0)
       return
     }
 
+    // 锚点或 run 切换：所有分页状态归位，候选/进度都从第一页重来。
+    const pagesToLoad = options.resetPages ? 1 : Math.max(1, progressPage)
+    if (options.resetPages) {
+      loadedRunIdRef.current = status.run_id
+      setProgressPage(1)
+      setProgress([])
+      setProgressTotal(0)
+      setCandidatePage(1)
+      setCandidates([])
+      setCandidateTotal(0)
+    }
+
     try {
-      const [nextProgress, nextCandidates] = await Promise.all([
+      // 非重置刷新（轮询）按已加载页数整段重拉：运行中的 run 进度会增长，
+      // 但不能因此把作者已经翻到的章节进度截回第一页。
+      const progressRequests = Array.from({ length: pagesToLoad }, (_, index) => (
         app.ListReferenceMaterializationChapterProgress({
           novel_id: novelId,
           anchor_id: status.anchor_id,
           run_id: status.run_id,
-          page: 1,
-          size: 30,
-        }),
+          page: index + 1,
+          size: PROGRESS_PAGE_SIZE,
+        })
+      ))
+      // run 切换后的首次加载同时取候选第一页；轮询刷新不动候选列表（O12）。
+      const candidateRequest = options.resetPages
+        ? app.ListReferenceMaterializationCandidates({
+            novel_id: novelId,
+            anchor_id: status.anchor_id,
+            run_id: status.run_id,
+            decision: 'review_required',
+            page: 1,
+            size: CANDIDATE_PAGE_SIZE,
+          })
+        : null
+      const [progressResults, candidateResult] = await Promise.all([
+        Promise.all(progressRequests),
+        candidateRequest,
+      ])
+      const mergedProgress: reference.MaterializationChapterProgress[] = []
+      const seenChapters = new Set<number>()
+      for (const result of progressResults) {
+        for (const item of result.items ?? []) {
+          if (seenChapters.has(item.chapter_index)) continue
+          seenChapters.add(item.chapter_index)
+          mergedProgress.push(item)
+        }
+      }
+      setProgress(mergedProgress)
+      setProgressTotal(progressResults.at(-1)?.total ?? mergedProgress.length)
+      if (candidateResult) {
+        setCandidates(candidateResult.items ?? [])
+        setCandidateTotal(candidateResult.total)
+      }
+    } catch (err) {
+      setError(describeBridgeError(err, '材料化进度加载失败。').message)
+      setErrorRetry(() => () => { setStatusTick(t => t + 1) })
+    }
+  }, [app, novelId, progressPage])
+
+  // 复核动作会改变候选队列，但不换 run：只需按已加载页数重拉候选，保留作者所在位置。
+  const refreshCandidatesForCurrentPages = useCallback(async (status: reference.MaterializationStatus, pages: number) => {
+    try {
+      const requests = Array.from({ length: pages }, (_, index) => (
         app.ListReferenceMaterializationCandidates({
           novel_id: novelId,
           anchor_id: status.anchor_id,
           run_id: status.run_id,
           decision: 'review_required',
-          page: 1,
-          size: 12,
-        }),
-      ])
-      setProgress(nextProgress.items ?? [])
-      setCandidates(nextCandidates.items ?? [])
-      setCandidateTotal(nextCandidates.total)
+          page: index + 1,
+          size: CANDIDATE_PAGE_SIZE,
+        })
+      ))
+      const results = await Promise.all(requests)
+      const merged: reference.MaterializationCandidate[] = []
+      const seen = new Set<string>()
+      for (const result of results) {
+        for (const item of result.items ?? []) {
+          if (seen.has(item.candidate_id)) continue
+          seen.add(item.candidate_id)
+          merged.push(item)
+        }
+      }
+      setCandidates(merged)
+      setCandidateTotal(results.at(-1)?.total ?? merged.length)
     } catch (err) {
-      setError(describeBridgeError(err, '材料化进度或候选复核列表加载失败。').message)
-      setErrorRetry(() => () => { setStatusTick(t => t + 1) })
+      setError(describeBridgeError(err, '候选复核列表加载失败。').message)
+      setErrorRetry(() => () => { setCandidateRefreshTick(t => t + 1) })
     }
   }, [app, novelId])
 
@@ -202,7 +280,7 @@ export default function ReferenceCorpusWorkspace({
         run_id: run.run_id,
         decision: 'review_required',
         page: candidatePage + 1,
-        size: 12,
+        size: CANDIDATE_PAGE_SIZE,
       })
       setCandidates((current) => {
         const seen = new Set(current.map((item) => item.candidate_id))
@@ -218,21 +296,66 @@ export default function ReferenceCorpusWorkspace({
     }
   }, [app, novelId, run, loadingMore, candidatePage])
 
+  // 章节进度分页（O13）：同样追加式续拉，配合"仅看失败"筛选定位卡住的章节。
+  const loadMoreProgress = useCallback(async () => {
+    if (!run || !novelId || loadingMoreProgress) return
+    setLoadingMoreProgress(true)
+    try {
+      const next = await app.ListReferenceMaterializationChapterProgress({
+        novel_id: novelId,
+        anchor_id: run.anchor_id,
+        run_id: run.run_id,
+        page: progressPage + 1,
+        size: PROGRESS_PAGE_SIZE,
+      })
+      setProgress((current) => {
+        const seen = new Set(current.map((item) => item.chapter_index))
+        return [...current, ...next.items.filter((item) => !seen.has(item.chapter_index))]
+      })
+      setProgressTotal(next.total)
+      setProgressPage((current) => current + 1)
+    } catch (err) {
+      setError(describeBridgeError(err, '章节进度加载失败。').message)
+      setErrorRetry(() => () => { void loadMoreProgress() })
+    } finally {
+      setLoadingMoreProgress(false)
+    }
+  }, [app, novelId, run, loadingMoreProgress, progressPage])
+
   useEffect(() => {
     const timer = window.setTimeout(() => {
       setError(null)
       setProfile(selectedAnchor ? analyzedProfiles.get(selectedAnchor.anchor_id) ?? null : null)
       setManualTemplate('')
-      setCandidatePage(1)
+      setFailedProgressOnly(false)
       void loadRun(selectedAnchor)
     }, 0)
     return () => window.clearTimeout(timer)
   }, [loadRun, refreshKey, selectedAnchor, statusTick])
 
+  // run 明细加载（O12）：
+  // - 锚点或 run 切换（run_id 变化）→ 全部分页归位，候选与进度从第一页重来；
+  // - 轮询刷新（3s 定时，同一 run_id）→ 只重拉章节进度，候选列表与作者所在页不受打扰。
   useEffect(() => {
-    const timer = window.setTimeout(() => { void loadRunDetail(run) }, 0)
+    const timer = window.setTimeout(() => {
+      if (!run || !novelId) {
+        void loadRunDetail(null)
+        return
+      }
+      const isNewRun = loadedRunIdRef.current !== run.run_id
+      void loadRunDetail(run, { resetPages: isNewRun })
+    }, 0)
     return () => window.clearTimeout(timer)
-  }, [loadRunDetail, run])
+  }, [loadRunDetail, run, novelId])
+
+  // 复核动作（candidateRefreshTick）后的候选刷新：按已加载页数整段重拉，位置不动。
+  useEffect(() => {
+    if (!candidateRefreshTick || !run || !novelId) return
+    const timer = window.setTimeout(() => {
+      void refreshCandidatesForCurrentPages(run, candidatePage)
+    }, 0)
+    return () => window.clearTimeout(timer)
+  }, [candidateRefreshTick, run, novelId, candidatePage, refreshCandidatesForCurrentPages])
 
   useEffect(() => {
     if (!run || run.status !== 'queued' && run.status !== 'running') return
@@ -388,6 +511,8 @@ export default function ReferenceCorpusWorkspace({
         expected_version: candidate.row_version,
       })
       setRun(result.status)
+      // 复核改变了候选队列：触发按当前页数重拉，不重置作者所在页。
+      setCandidateRefreshTick((t) => t + 1)
     } catch (err) {
       setError(describeBridgeError(err, '候选复核未保存。列表已变更时请刷新后再次提交。').message)
       setErrorRetry(() => () => { void reviewCandidate(candidate, nextAction) })
@@ -660,25 +785,65 @@ export default function ReferenceCorpusWorkspace({
 
         {run && (
           <section className="border-b border-border py-4" aria-labelledby="chapters-heading">
-            <div className="flex items-center gap-2">
-              <Workflow className="h-4 w-4 text-muted-foreground" aria-hidden="true" />
-              <h2 id="chapters-heading" className="text-sm font-semibold text-foreground">章节进度</h2>
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div className="flex items-center gap-2">
+                <Workflow className="h-4 w-4 text-muted-foreground" aria-hidden="true" />
+                <h2 id="chapters-heading" className="text-sm font-semibold text-foreground">章节进度</h2>
+              </div>
+              <button
+                type="button"
+                onClick={() => { setFailedProgressOnly((only) => !only) }}
+                aria-pressed={failedProgressOnly}
+                data-testid="progress-failed-filter"
+                className="inline-flex h-7 items-center gap-1 rounded-md border border-border px-2.5 text-[11px] font-medium text-foreground hover:bg-secondary disabled:cursor-not-allowed disabled:opacity-50"
+                disabled={progress.length === 0}
+              >
+                仅看失败章节
+              </button>
             </div>
             {progress.length === 0 ? (
               <p className="mt-3 text-xs text-muted-foreground">尚未取得章节进度。</p>
             ) : (
-              <ol className="mt-3 divide-y divide-border border-y border-border" aria-label="材料化章节进度">
-                {progress.map((item) => (
-                  <li key={item.chapter_index} className="grid grid-cols-[2.5rem_minmax(0,1fr)_auto] items-center gap-3 px-2 py-2 text-xs sm:px-3">
-                    <span className="text-muted-foreground">{item.chapter_index}</span>
-                    <span className="min-w-0">
-                      <span className="block truncate text-foreground">{stageLabel(item.current_stage)}</span>
-                      <span className="mt-0.5 block text-[11px] text-muted-foreground">候选 {formatCount(item.candidate_count)} · 接纳 {formatCount(item.accepted_count)} · 向量 {formatCount(item.vector_count)}</span>
-                    </span>
-                    <span className={runTone(item.status)}>{item.status}</span>
-                  </li>
-                ))}
-              </ol>
+              <>
+                {(() => {
+                  const visibleProgress = failedProgressOnly
+                    ? progress.filter((item) => item.status === 'failed')
+                    : progress
+                  if (failedProgressOnly && visibleProgress.length === 0) {
+                    return <p className="mt-3 text-xs text-muted-foreground" data-testid="no-failed-progress">已加载的章节里没有失败项。</p>
+                  }
+                  return (
+                    <ol className="mt-3 divide-y divide-border border-y border-border" aria-label="材料化章节进度">
+                      {visibleProgress.map((item) => (
+                        <li key={item.chapter_index} className="grid grid-cols-[2.5rem_minmax(0,1fr)_auto] items-center gap-3 px-2 py-2 text-xs sm:px-3">
+                          <span className="text-muted-foreground">{item.chapter_index}</span>
+                          <span className="min-w-0">
+                            <span className="block truncate text-foreground">{stageLabel(item.current_stage)}</span>
+                            <span className="mt-0.5 block text-[11px] text-muted-foreground">候选 {formatCount(item.candidate_count)} · 接纳 {formatCount(item.accepted_count)} · 向量 {formatCount(item.vector_count)}</span>
+                          </span>
+                          <span className={runTone(item.status)}>{item.status}</span>
+                        </li>
+                      ))}
+                    </ol>
+                  )
+                })()}
+                {!failedProgressOnly && progress.length < progressTotal && (
+                  <button
+                    type="button"
+                    onClick={() => { void loadMoreProgress() }}
+                    disabled={loadingMoreProgress}
+                    className="mt-2 inline-flex h-8 items-center rounded-md border border-border px-3 text-xs font-medium text-foreground hover:bg-secondary disabled:cursor-not-allowed disabled:opacity-50"
+                    data-testid="load-more-progress"
+                  >
+                    {loadingMoreProgress ? '加载中…' : `加载更多章节（还有 ${formatCount(progressTotal - progress.length)} 章）`}
+                  </button>
+                )}
+                {failedProgressOnly && (
+                  <p className="mt-2 text-[11px] text-muted-foreground">
+                    筛选范围：已加载的前 {formatCount(progress.length)} 章；全部 {formatCount(progressTotal)} 章里还有未加载的部分时，先取消筛选点「加载更多章节」。
+                  </p>
+                )}
+              </>
             )}
           </section>
         )}

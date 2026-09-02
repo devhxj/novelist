@@ -4,6 +4,7 @@ import { useApp } from '@/hooks/useApp'
 import type { novel, chapter, search } from '@/hooks/useApp'
 import type { novelImport, reference, update } from '@/lib/novelist/types'
 import { useNovelImport } from '@/hooks/useNovelImport'
+import { pushToast } from '@/lib/toast'
 import ActivityBar from '@/components/shell/ActivityBar'
 import StatusBar from '@/components/shell/StatusBar'
 import SidePanel from '@/components/sidebar/SidePanel'
@@ -168,6 +169,26 @@ export default function WorkspaceView({ initialNovelId, initialShowHelp, startup
     setTabTarget({ path: 'novelist.md', title: '故事状态' })
     contentRef.current?.openFile('novelist.md', '故事状态')
   }
+
+  // ── 全局快捷键 ──────────────────────────────────────────
+
+  // N3：Ctrl+S / Ctrl+Shift+V 原来挂在 ContentPanel 上，面板一卸载快捷键就静默失效。
+  // 监听器提升到工作区层；内容面板不在时优雅空操作。
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && !e.shiftKey && e.key.toLowerCase() === 's') {
+        e.preventDefault()
+        contentRef.current?.saveActiveTab()
+        return
+      }
+      if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key.toLowerCase() === 'v') {
+        e.preventDefault()
+        contentRef.current?.toggleActivePreview()
+      }
+    }
+    document.addEventListener('keydown', handler)
+    return () => document.removeEventListener('keydown', handler)
+  }, [])
 
   // ── Approval ────────────────────────────────────────────
 
@@ -376,6 +397,30 @@ export default function WorkspaceView({ initialNovelId, initialShowHelp, startup
   const isCorpusViewActive = activePanel === 'reference'
   const { notifications: materializationNotices, dismiss: dismissMaterializationNotice, activeCount: materializationActiveCount } =
     useMaterializationWatcher(activeNovelId, referenceAnchors, !isCorpusViewActive, handleMaterializationCompleted)
+
+  // 同一批完成通知同步进统一通知通道（F9）：toast 带"打开素材库"动作，
+  // 作者在任意面板都能感知后台结果并一步跳回制作页。
+  const seenNoticeRunIdsRef = useRef<Set<string>>(new Set())
+  useEffect(() => {
+    for (const notice of materializationNotices) {
+      if (seenNoticeRunIdsRef.current.has(notice.run_id)) continue
+      seenNoticeRunIdsRef.current.add(notice.run_id)
+      if (notice.status === 'failed') {
+        pushToast({
+          kind: 'error',
+          message: `《${notice.anchor_title}》材料化失败`,
+          description: notice.error_message ?? undefined,
+        })
+      } else {
+        pushToast({
+          kind: 'success',
+          message: `《${notice.anchor_title}》材料化完成`,
+          action: { label: '打开素材库', run: () => { setActivePanel('reference'); setSidebarPanel(null) } },
+        })
+      }
+    }
+  }, [materializationNotices])
+
   const activeChapterNumber = useMemo(() => {
     const match = tabTarget?.path.match(/^chapters\/(\d+)\.md$/)
     return match ? Number(match[1]) : null
@@ -571,7 +616,12 @@ export default function WorkspaceView({ initialNovelId, initialShowHelp, startup
           <ProfileView />
         ) : null}
 
-        {activePanel !== 'profile' && (
+        {/* 个人中心会整体占住内容区，但聊天不能跟着卸载：
+            ChatInput 的草稿是非受控状态，卸载即丢。挂载保留、仅用 CSS 隐藏（O14）。 */}
+        <div
+          className={activePanel === 'profile' ? 'hidden' : 'contents'}
+          aria-hidden={activePanel === 'profile'}
+        >
           <ChatPanel
             width={layout.chat_panel_width}
             onWidthChange={setChatPanelWidth}
@@ -584,7 +634,7 @@ export default function WorkspaceView({ initialNovelId, initialShowHelp, startup
             onReject={handleReject}
             onApprovalFileEdit={handleApprovalFileEdit}
           />
-        )}
+        </div>
       </div>
 
       <StatusBar

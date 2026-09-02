@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { ChevronLeft, ChevronRight, Gauge, Hammer, LibraryBig, PackageOpen, RefreshCcw } from 'lucide-react'
 import { useApp } from '@/hooks/useApp'
 import { describeBridgeError } from '@/lib/novelist/bridgeErrors'
+import { describeAnchorStatus } from '@/lib/novelist/referenceAnchorStates'
 import type { reference, storage } from '@/lib/novelist/types'
 import { OBSERVATION_FAMILIES, SPECIMEN_FAMILIES } from '@/lib/novelist/corpusFamilies'
 import ReferenceCorpusWorkspace from './ReferenceCorpusWorkspace'
@@ -20,7 +21,7 @@ type BrowseKind = 'observations' | 'specimens'
 const BROWSE_PAGE_SIZE = 10
 
 function isUsableAnchor(anchor: reference.Anchor): boolean {
-  return anchor.status === 'ready' || anchor.status === 'completed'
+  return describeAnchorStatus(anchor.status).usable
 }
 
 export default function CorpusAreaView({ novelId, refreshKey, anchors, selectedAnchorIds, onMaterializationChange }: Props) {

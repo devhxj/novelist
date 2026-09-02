@@ -214,10 +214,19 @@ export default function BookshelfView({
                 className={`group relative flex flex-col rounded-lg border bg-card hover:shadow-md transition-shadow cursor-pointer select-none
                   ${n.id === activeNovelId ? 'ring-2 ring-primary' : ''}`}
               >
-                {/* 点击卡片主体切换书 */}
+                {/* 点击卡片主体切换书：键盘作者用 Enter/Space 同样能进入（N2） */}
                 <div
                   className="flex flex-col flex-1 p-3"
+                  role="button"
+                  tabIndex={0}
+                  aria-label={`打开作品 ${n.title}`}
                   onClick={() => onSelectNovel(n)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' || e.key === ' ') {
+                      e.preventDefault()
+                      onSelectNovel(n)
+                    }
+                  }}
                 >
                   <div className="w-full aspect-[3/4] mb-3 rounded-sm overflow-hidden relative">
                     <BookCover novelId={n.id} refreshKey={coverKeys[n.id]} />
