@@ -35,6 +35,10 @@ export default function GeneralConfigTab() {
   const [gitAuthorSaving, setGitAuthorSaving] = useState(false)
   const [gitAuthorFeedback, setGitAuthorFeedback] = useState<InlineSettingsFeedback | null>(null)
   const [rebuildFeedback, setRebuildFeedback] = useState<InlineSettingsFeedback | null>(null)
+  const [migratingInputVisible, setMigratingInputVisible] = useState(false)
+  const [migrating, setMigrating] = useState(false)
+  const [newDataDir, setNewDataDir] = useState('')
+  const [migrateFeedback, setMigrateFeedback] = useState<InlineSettingsFeedback | null>(null)
   const [updateEnabled, setUpdateEnabled] = useState(false)
   const [updateEndpoint, setUpdateEndpoint] = useState('')
   const [updateDismissedVersion, setUpdateDismissedVersion] = useState('')
@@ -75,6 +79,38 @@ export default function GeneralConfigTab() {
       })
     })
   }, [app])
+
+  async function handleMigrateDataDir() {
+    const target = newDataDir.trim()
+    if (!target || target === dataDir) return
+    // 最后确认：迁移会切换整个工作区数据源，作者必须明确知道即将发生什么（F10）。
+    if (!window.confirm(`确定要把数据目录迁移到：\n${target}\n\n复制完成前不会改动原目录。`)) return
+    setMigrating(true)
+    setMigrateFeedback(null)
+    try {
+      await app.UpdateDataDir(target)
+      const cfg = await app.GetAppConfig().catch(() => null)
+      if (cfg?.data_dir) setDataDir(cfg.data_dir)
+      setMigratingInputVisible(false)
+      setNewDataDir('')
+      setMigrateFeedback({ kind: 'success', message: '数据目录迁移完成，应用已切换到新目录。' })
+    } catch (err) {
+      console.error('Data dir migration failed:', err)
+      setMigrateFeedback({
+        kind: 'error',
+        title: '数据目录迁移失败',
+        message: diagnosticMessage(err, '迁移未能完成，原数据目录未受影响，可重试或更换目标路径。'),
+        diagnostic: buildCopyableDiagnostic({
+          error: err,
+          fallbackMessage: '数据目录迁移失败',
+          operation: 'GeneralConfigTab.UpdateDataDir',
+          bridgeMethod: 'UpdateDataDir',
+        }),
+      })
+    } finally {
+      setMigrating(false)
+    }
+  }
 
   async function handleRebuild() {
     if (!selectedID) return
@@ -311,9 +347,64 @@ export default function GeneralConfigTab() {
           <input
             value={dataDir}
             readOnly
+            aria-label="当前数据目录"
             className="flex-1 h-8 rounded-md border bg-muted/50 px-3 text-xs font-mono focus:outline-none cursor-default"
           />
+          <button
+            type="button"
+            onClick={() => { setNewDataDir(''); setMigratingInputVisible(true); setMigrateFeedback(null) }}
+            className="h-8 shrink-0 rounded-md border border-border px-2.5 text-xs font-medium text-foreground hover:bg-secondary"
+            data-testid="start-data-dir-migration"
+          >
+            更改…
+          </button>
         </div>
+        {migrateFeedback && (
+          migrateFeedback.kind === 'success' ? (
+            <p className="text-[11px] text-emerald-600" role="status">{migrateFeedback.message}</p>
+          ) : (
+            <ErrorCallout
+              title={migrateFeedback.kind === 'error' ? migrateFeedback.title : undefined}
+              message={migrateFeedback.message}
+              diagnostic={migrateFeedback.kind === 'error' ? migrateFeedback.diagnostic : null}
+              className="rounded-md"
+              onClose={() => setMigrateFeedback(null)}
+            />
+          )
+        )}
+        {migratingInputVisible && (
+          <div className="rounded-md border border-border bg-muted/20 p-3 space-y-2" data-testid="migrate-data-dir-form">
+            <p className="text-[11px] leading-4 text-muted-foreground">
+              迁移会把当前数据目录完整复制到新位置（copy-first：复制完成并校验前不动原目录）。
+              大目录可能耗时较长，迁移期间请勿关闭应用。
+            </p>
+            <div className="flex items-center gap-2">
+              <input
+                value={newDataDir}
+                onChange={event => setNewDataDir(event.target.value)}
+                placeholder="输入新的数据目录绝对路径，例如 D:\\NovelistData"
+                aria-label="新的数据目录"
+                className="flex-1 h-8 rounded-md border bg-background px-2.5 text-xs font-mono focus:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              />
+              <button
+                type="button"
+                onClick={() => { void handleMigrateDataDir() }}
+                disabled={migrating || !newDataDir.trim() || newDataDir.trim() === dataDir}
+                className="h-8 shrink-0 rounded-md bg-primary px-3 text-xs font-medium text-primary-foreground hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                {migrating ? '迁移中…' : '开始迁移'}
+              </button>
+              <button
+                type="button"
+                onClick={() => { setMigratingInputVisible(false); setNewDataDir('') }}
+                disabled={migrating}
+                className="h-8 shrink-0 rounded-md border border-border px-2.5 text-xs text-muted-foreground hover:bg-secondary disabled:opacity-50"
+              >
+                取消
+              </button>
+            </div>
+          </div>
+        )}
       </div>
 
       <div className="mt-6 space-y-3">

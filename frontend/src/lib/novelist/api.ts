@@ -261,6 +261,7 @@ export interface NovelistAppApi {
   UpdateArcNode: AppMethod<[number, number, app.UpdateArcNodeInput], void>
   UpdateChapterPlan: AppMethod<[number, app.UpdateChapterPlanInput], void>
   UpdateChapterTitle: AppMethod<[number, number, string], void>
+  DeleteChapter: AppMethod<[chapter.DeleteChapterInput], void>
   UpdateCharacter: AppMethod<[number, number, app.UpdateCharacterInput], void>
   UpdateDataDir: AppMethod<[string], void>
   UpdateLocation: AppMethod<[number, number, app.UpdateLocationInput], void>
@@ -484,6 +485,7 @@ GetReferenceCorpusFeatureAnalysisRun: appMethod<NovelistAppApi['GetReferenceCorp
   UpdateArcNode: appMethod<NovelistAppApi['UpdateArcNode']>('UpdateArcNode'),
   UpdateChapterPlan: appMethod<NovelistAppApi['UpdateChapterPlan']>('UpdateChapterPlan'),
   UpdateChapterTitle: appMethod<NovelistAppApi['UpdateChapterTitle']>('UpdateChapterTitle'),
+  DeleteChapter: appMethod<NovelistAppApi['DeleteChapter']>('DeleteChapter'),
   UpdateCharacter: appMethod<NovelistAppApi['UpdateCharacter']>('UpdateCharacter'),
   UpdateDataDir: appMethod<NovelistAppApi['UpdateDataDir']>('UpdateDataDir'),
   UpdateLocation: appMethod<NovelistAppApi['UpdateLocation']>('UpdateLocation'),

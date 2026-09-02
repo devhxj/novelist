@@ -15,4 +15,6 @@ public interface IChapterContentService
     ValueTask<string> GetContentAsync(long novelId, string path, CancellationToken cancellationToken);
 
     ValueTask SaveContentAsync(SaveContentPayload input, CancellationToken cancellationToken);
+
+    ValueTask DeleteChapterAsync(DeleteChapterPayload input, CancellationToken cancellationToken);
 }

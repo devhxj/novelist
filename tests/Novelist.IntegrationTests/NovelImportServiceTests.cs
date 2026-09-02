@@ -963,6 +963,9 @@ public sealed class NovelImportServiceTests : IDisposable
         public ValueTask UpdateChapterTitleAsync(long novelId, int chapterNumber, string title, CancellationToken cancellationToken) =>
             _inner.UpdateChapterTitleAsync(novelId, chapterNumber, title, cancellationToken);
 
+        public ValueTask DeleteChapterAsync(DeleteChapterPayload input, CancellationToken cancellationToken) =>
+            _inner.DeleteChapterAsync(input, cancellationToken);
+
         public ValueTask<string> GetContentAsync(long novelId, string path, CancellationToken cancellationToken) =>
             _inner.GetContentAsync(novelId, path, cancellationToken);
 
@@ -1008,6 +1011,9 @@ public sealed class NovelImportServiceTests : IDisposable
         public ValueTask UpdateChapterTitleAsync(long novelId, int chapterNumber, string title, CancellationToken cancellationToken) =>
             _inner.UpdateChapterTitleAsync(novelId, chapterNumber, title, cancellationToken);
 
+        public ValueTask DeleteChapterAsync(DeleteChapterPayload input, CancellationToken cancellationToken) =>
+            _inner.DeleteChapterAsync(input, cancellationToken);
+
         public ValueTask<string> GetContentAsync(long novelId, string path, CancellationToken cancellationToken) =>
             _inner.GetContentAsync(novelId, path, cancellationToken);
 
@@ -1036,6 +1042,9 @@ public sealed class NovelImportServiceTests : IDisposable
 
         public ValueTask UpdateChapterTitleAsync(long novelId, int chapterNumber, string title, CancellationToken cancellationToken) =>
             _inner.UpdateChapterTitleAsync(novelId, chapterNumber, title, cancellationToken);
+
+        public ValueTask DeleteChapterAsync(DeleteChapterPayload input, CancellationToken cancellationToken) =>
+            _inner.DeleteChapterAsync(input, cancellationToken);
 
         public ValueTask<string> GetContentAsync(long novelId, string path, CancellationToken cancellationToken) =>
             _inner.GetContentAsync(novelId, path, cancellationToken);
@@ -1074,6 +1083,9 @@ public sealed class NovelImportServiceTests : IDisposable
 
         public ValueTask UpdateChapterTitleAsync(long novelId, int chapterNumber, string title, CancellationToken cancellationToken) =>
             _inner.UpdateChapterTitleAsync(novelId, chapterNumber, title, cancellationToken);
+
+        public ValueTask DeleteChapterAsync(DeleteChapterPayload input, CancellationToken cancellationToken) =>
+            _inner.DeleteChapterAsync(input, cancellationToken);
 
         public ValueTask<string> GetContentAsync(long novelId, string path, CancellationToken cancellationToken) =>
             _inner.GetContentAsync(novelId, path, cancellationToken);

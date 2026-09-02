@@ -191,6 +191,14 @@
 3. **F7 未接线能力分批接入**：按作者价值排序——先「素材检索/详情」（支撑第二轮 O2 的"本章参考范围"与 U4 的指路补书），再「参考书元数据事后编辑」（`UpdateReferenceAnchorMetadata`，解第二轮 U6 的硬编码），再「语料治理/复核队列」；`SearchStoryMemory` 与叙事模式抽取若确认不进本期路线，**应删除死代码**（含 `usePatternProgress.ts`）而非留作悬挂能力。
 4. **承接第二轮遗留**：F1 计划产物 markdown 化 → F2 scene/trope family → O3/O4 证据链与原文定位 → F5 语料包 JSONL 通道 → F3 阈值校准 + F6 真实用户验证。顺序与依赖关系同第二轮文档第五节，不作调整。
 
+#### 第三批落地记录（2026-09-01）
+
+- **O7 章节删除（完成）**：新增 `DeleteChapter` 桥方法（白名单 194 → 195，前后端契约测试同步更新）。实现为软删除：章节条目移入 `deleted_items` 留痕、`next_chapter_number` 高水位保证章号**不重排、不复用**；正文与大纲伴生文件删除并写入 `delete chapter NNN` 版本提交（正文经 git 历史可追溯）；正文/大纲分别触发 RAG 索引 stale 标记。集成测试覆盖不重排、不复用、留痕、索引清理与重复删除报错。前端章节列表新增「删除章节」（确认 + toast 撤销动作，撤销以原标题新建章节恢复）。
+- **F10 数据目录迁移 UI（完成）**：`GeneralConfigTab` 数据目录区新增「更改…」入口——copy-first 语义说明、新目录输入、二次确认、迁移中状态、成功/失败反馈（失败含可复制诊断，原目录不受影响）。体积/耗时预估依赖后端新接口，列为后续增强。
+- **F7 分批接入（首批完成）**：① `UpdateReferenceAnchorMetadata` 接入参考书侧栏（每本书「编辑」入口：书名/作者/标签行内编辑，license/visibility/source_trust 原值保留），工作流断言改名、标签写回与调用参数；② 删除死代码 `src/hooks/usePatternProgress.ts`（0 引用）。「素材检索/详情」「语料治理/复核队列」按计划留待后续迭代。
+- **验证**：build / lint / `test:node`（23）/ `test:app` / `test:phase16` / `--grep=@writing` / `--grep=@reference-workspace` 全绿；`dotnet test` 216 + 703 全部通过（含新增 O7 集成测试）。新增截图：`chapter-delete-undo-toast.png`。
+
+
 ### 不做的事（明确出界）
 
 - **不扩大专家控制面**（AGENTS.md 红线）：F7 的接线一律以"作者动线上需要"为准入，不因"后端已有"而堆叠面板；语料治理 25 个方法不做成管理后台。

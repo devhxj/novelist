@@ -38,6 +38,7 @@ public static class BridgeCompatibilityAppMethods
         "CreateStoryArc",
         "CreateTimelineEntry",
         "DeleteArcNode",
+        "DeleteChapter",
         "DeleteCharacter",
         "DeleteCover",
         "DeleteLocation",

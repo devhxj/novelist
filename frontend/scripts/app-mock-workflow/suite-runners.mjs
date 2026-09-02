@@ -70,11 +70,13 @@ import {
   verifyFixtureFaultModes,
 } from './startup-workflows.mjs'
 import {
+  verifyChapterDeleteWorkflow,
   verifyChapterWorkflow,
   verifyChatWorkflow,
   verifyEarlyCancelChatWorkflow,
   verifyCorpusChatWorkflow,
   verifyCompactViewportSmoke,
+  verifyDataDirMigrationWorkflow,
   verifyEditorSaveWorkflow,
   verifyFileChangeConflictWorkflow,
   verifyImportExportFilePickerWorkflow,
@@ -395,6 +397,16 @@ export async function runFullSuite(browser, url) {
   if (shouldRun('@writing')) {
     logStep('checking early cancel before session id arrives')
     await verifyEarlyCancelChatWorkflow(browser, url, consoleErrors, pageErrors)
+  }
+
+  if (shouldRun('@writing')) {
+    logStep('checking chapter soft delete with undo')
+    await verifyChapterDeleteWorkflow(browser, url, consoleErrors, pageErrors)
+  }
+
+  if (shouldRun('@writing')) {
+    logStep('checking data directory migration entry')
+    await verifyDataDirMigrationWorkflow(browser, url, consoleErrors, pageErrors)
   }
 
   if (shouldRun('@surface')) {

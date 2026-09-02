@@ -995,6 +995,59 @@ export async function verifyFileChangeConflictWorkflow(browser, url, consoleErro
   await page.close()
 }
 
+// O7：章节删除——软删除、章号不复用；撤销动作用原标题新建章节恢复。
+export async function verifyChapterDeleteWorkflow(browser, url, consoleErrors, pageErrors) {
+  const page = await newAppPage(browser, consoleErrors, pageErrors, {
+    initialized: true,
+    allowSaveContent: true,
+    confirmResult: true,
+  }, undefined, 'chapter-delete')
+  await page.goto(url, { waitUntil: 'domcontentloaded' })
+  await expectVisible(page.getByText('全局回归小说'), 'workspace title before chapter delete')
+
+  await page.locator('nav').first().getByTitle('章节').click()
+  await ensureChapterBlockExpanded(page)
+  await expectVisible(chapterButton(page, '雨夜线索'), 'chapter list before delete')
+
+  await page.getByRole('button', { name: '删除章节 雨夜线索' }).click()
+  const deleteToast = page.getByTestId('toast-info').filter({ hasText: '已删除第1章「雨夜线索」' })
+  await expectVisible(deleteToast, 'delete toast appears with undo action')
+  await expectHidden(chapterButton(page, '雨夜线索'), 'deleted chapter leaves the list')
+  await page.screenshot({ path: path.join(outputDir, 'chapter-delete-undo-toast.png'), fullPage: true })
+
+  await deleteToast.getByRole('button', { name: '撤销' }).click()
+  await expectVisible(chapterButton(page, '雨夜线索'), 'undo recreates the chapter in the list')
+  await page.close()
+}
+
+// F10：数据目录迁移入口——设置里可以直接改数据目录，迁移走 copy-first 后端。
+export async function verifyDataDirMigrationWorkflow(browser, url, consoleErrors, pageErrors) {
+  const page = await newAppPage(browser, consoleErrors, pageErrors, {
+    initialized: true,
+    confirmResult: true,
+  }, undefined, 'data-dir-migration')
+  await page.goto(url, { waitUntil: 'domcontentloaded' })
+  await expectVisible(page.getByText('全局回归小说'), 'workspace title before data dir migration')
+
+  await page.locator('header').getByRole('button', { name: '设置' }).click()
+  await expectVisible(page.getByText('基础设置'), 'settings dialog opens')
+  await page.getByTestId('start-data-dir-migration').click()
+
+  const form = page.getByTestId('migrate-data-dir-form')
+  await expectVisible(form, 'migration form opens')
+  await form.getByLabel('新的数据目录').fill('D:\\NovelistMigrated')
+  await form.getByRole('button', { name: '开始迁移' }).click()
+  await expectVisible(page.getByText('数据目录迁移完成，应用已切换到新目录。'), 'migration success feedback')
+  await expectInputValue(page.getByLabel('当前数据目录'), 'D:\\NovelistMigrated')
+
+  const migrateCall = await page.evaluate(() =>
+    window.__appMockState.calls.filter((call) => call.method === 'UpdateDataDir').at(-1) ?? null)
+  assert.equal(migrateCall?.args?.[0], 'D:\\NovelistMigrated', 'the migration must pass the new directory to the backend')
+
+  await page.locator('.fixed').getByRole('button', { name: '✕' }).click()
+  await page.close()
+}
+
 export async function verifyReferenceSmoke(page) {
   await page.getByTitle('素材库').click()
   await expectVisible(page.getByRole('heading', { name: '选择一个参考来源' }), 'reference materialization workspace heading')
@@ -1186,6 +1239,33 @@ export async function verifyReferenceWorkspaceWorkflow(page) {
   await referenceBooks.getByRole('button', { name: '确认删除《蓝图预演测试书》' }).click()
   await waitForBridgeCallCountAfter(page, 'DeleteReferenceAnchor', deleteCallCount)
   await expectHidden(referenceBooks.getByText('蓝图预演测试书'), 'deleted reference book')
+
+  // F7：参考书元数据事后编辑——录错的书名/作者/标签可以直接改，不必删除重导。
+  await referenceBooks.getByRole('button', { name: '添加参考书籍' }).click()
+  await referenceBooks.getByLabel('参考书标题').fill('元数据编辑测试书')
+  await referenceBooks.getByLabel('参考书文件路径').fill('D:\\books\\metadata-edit.md')
+  const metadataCreateCount = await bridgeCallCount(page, 'RegisterReferenceMaterializationSource')
+  await referenceBooks.getByRole('button', { name: /^添加参考书$/ }).click()
+  await waitForBridgeCallCountAfter(page, 'RegisterReferenceMaterializationSource', metadataCreateCount)
+  await expectVisible(referenceBooks.getByText('元数据编辑测试书'), 'metadata edit fixture book created')
+
+  await referenceBooks.getByRole('button', { name: '编辑《元数据编辑测试书》信息' }).click()
+  await referenceBooks.getByLabel('编辑书名 元数据编辑测试书').fill('元数据编辑测试书·修订')
+  await referenceBooks.getByLabel('编辑标签 元数据编辑测试书').fill('悬疑, 雨夜')
+  await referenceBooks.getByRole('button', { name: '保存《元数据编辑测试书》信息' }).click()
+  await expectVisible(referenceBooks.getByText('元数据编辑测试书·修订'), 'metadata edit renames the book')
+
+  const metadataUpdateCalls = await page.evaluate(() =>
+    window.__appMockState.calls.filter((call) => call.method === 'UpdateReferenceAnchorMetadata'))
+  assert.equal(metadataUpdateCalls.length, 1, 'exactly one metadata update call')
+  assert.equal(metadataUpdateCalls.at(-1).args[0].title, '元数据编辑测试书·修订')
+  assert.deepEqual(metadataUpdateCalls.at(-1).args[0].user_tags, ['悬疑', '雨夜'])
+
+  await referenceBooks.getByRole('button', { name: '删除《元数据编辑测试书·修订》' }).click()
+  const metadataDeleteCount = await bridgeCallCount(page, 'DeleteReferenceAnchor')
+  await referenceBooks.getByRole('button', { name: '确认删除《元数据编辑测试书·修订》' }).click()
+  await waitForBridgeCallCountAfter(page, 'DeleteReferenceAnchor', metadataDeleteCount)
+  await expectHidden(referenceBooks.getByText('元数据编辑测试书·修订'), 'edited reference book cleaned up')
 }
 
 export async function verifyCompactViewportSmoke(browser, url, consoleErrors, pageErrors) {

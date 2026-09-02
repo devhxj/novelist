@@ -21,3 +21,7 @@ public sealed record SaveContentPayload(
     [property: JsonPropertyName("novel_id")] long NovelId,
     [property: JsonPropertyName("path")] string Path,
     [property: JsonPropertyName("content")] string Content);
+
+public sealed record DeleteChapterPayload(
+    [property: JsonPropertyName("novel_id")] long NovelId,
+    [property: JsonPropertyName("chapter_id")] long ChapterId);

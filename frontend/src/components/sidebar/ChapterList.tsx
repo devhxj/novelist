@@ -1,11 +1,12 @@
 import { useState, useEffect, useCallback, useMemo } from 'react'
-import { ChevronRight, FileText, Pencil, Plus, Download } from 'lucide-react'
+import { ChevronRight, FileText, Pencil, Plus, Download, Trash2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { useApp } from '@/hooks/useApp'
 import type { chapter } from '@/hooks/useApp'
 import { EventsOn } from '@/lib/novelist/events'
 import ErrorCallout from '@/components/shared/ErrorCallout'
 import { buildCopyableDiagnostic, diagnosticMessage } from '@/lib/diagnostics'
+import { pushToast } from '@/lib/toast'
 import type { diagnostics } from '@/lib/novelist/types'
 
 interface Props {
@@ -118,6 +119,38 @@ export default function ChapterList({ novelId, target, onSelectChapter, onSelect
       await loadChapters()
     } catch (err) {
       setError(buildVisibleError(err, '创建章节失败', '创建章节', 'CreateChapter', { novel_id: novelId, title: chapterTitle.trim() }))
+    }
+  }
+
+  async function handleDeleteChapter(ch: chapter.Chapter) {
+    // O7：软删除——章号不复用；撤销动作用原标题新建章节恢复。
+    if (!confirm(`确定要删除第${ch.chapter_number}章「${ch.title}」吗？章号不会复用，删除后可在通知里选择「撤销」恢复。`)) return
+    try {
+      await app.DeleteChapter({ novel_id: novelId, chapter_id: ch.id })
+      await loadChapters()
+      pushToast({
+        kind: 'info',
+        message: `已删除第${ch.chapter_number}章「${ch.title}」`,
+        description: '通知消失前可撤销（以新章节恢复标题）。',
+        action: {
+          label: '撤销',
+          run: () => {
+            void (async () => {
+              try {
+                await app.CreateChapter({ novel_id: novelId, title: ch.title })
+                await loadChapters()
+              } catch (err) {
+                setError(buildVisibleError(err, '撤销删除失败', '撤销删除', 'CreateChapter', { novel_id: novelId }))
+              }
+            })()
+          },
+        },
+      })
+    } catch (err) {
+      setError(buildVisibleError(err, '删除章节失败', '删除章节', 'DeleteChapter', {
+        novel_id: novelId,
+        chapter_id: ch.id,
+      }))
     }
   }
 
@@ -282,15 +315,25 @@ export default function ChapterList({ novelId, target, onSelectChapter, onSelect
                             </span>
                           )}
                         </button>
-                        {editingId !== ch.id && (
-                          <button
-                            onClick={e => { e.stopPropagation(); startEdit(ch) }}
-                            aria-label={`编辑章节 ${ch.title}`}
-                            className="shrink-0 w-6 h-6 flex items-center justify-center rounded opacity-0 group-hover:opacity-100 hover:bg-muted text-muted-foreground hover:text-foreground transition-all mr-1"
-                          >
-                            <Pencil className="w-3 h-3" />
-                          </button>
-                        )}
+                          {editingId !== ch.id && (
+                            <>
+                              <button
+                                onClick={e => { e.stopPropagation(); startEdit(ch) }}
+                                aria-label={`编辑章节 ${ch.title}`}
+                                className="shrink-0 w-6 h-6 flex items-center justify-center rounded opacity-0 group-hover:opacity-100 hover:bg-muted text-muted-foreground hover:text-foreground transition-all"
+                              >
+                                <Pencil className="w-3 h-3" />
+                              </button>
+                              <button
+                                onClick={e => { e.stopPropagation(); void handleDeleteChapter(ch) }}
+                                aria-label={`删除章节 ${ch.title}`}
+                                data-testid={`delete-chapter-${ch.id}`}
+                                className="shrink-0 w-6 h-6 flex items-center justify-center rounded opacity-0 group-hover:opacity-100 hover:bg-destructive/10 text-muted-foreground hover:text-destructive transition-all mr-1"
+                              >
+                                <Trash2 className="w-3 h-3" />
+                              </button>
+                            </>
+                          )}
                       </div>
                     ))}
                   </div>

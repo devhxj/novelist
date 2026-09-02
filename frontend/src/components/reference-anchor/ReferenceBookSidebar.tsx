@@ -4,6 +4,7 @@ import {
   BookMarked,
   Check,
   CircleAlert,
+  Pencil,
   FileText,
   FolderOpen,
   Loader2,
@@ -84,7 +85,9 @@ export default function ReferenceBookSidebar({
   const [reloadTick, setReloadTick] = useState(0)
   const [form, setForm] = useState<CreateForm>(EMPTY_FORM)
   const [pendingDeleteId, setPendingDeleteId] = useState<number | null>(null)
-  const [activeAction, setActiveAction] = useState<'pick' | 'create' | 'delete' | null>(null)
+  const [activeAction, setActiveAction] = useState<'pick' | 'create' | 'delete' | 'edit' | null>(null)
+  const [editingAnchorId, setEditingAnchorId] = useState<number | null>(null)
+  const [editForm, setEditForm] = useState<{ title: string; author: string; tags: string }>({ title: '', author: '', tags: '' })
   const [error, setError] = useState<string | null>(null)
   const [errorRetry, setErrorRetry] = useState<(() => void) | null>(null)
   const selectedIdsRef = useRef(selectedAnchorIds)
@@ -140,6 +143,43 @@ export default function ReferenceBookSidebar({
       .toLowerCase()
       .includes(normalizedQuery))
   }, [anchors, query])
+
+  // F7：参考书元数据事后编辑——书名/作者/标签录错不再需要删除重导。
+  function startEditMetadata(anchor: reference.Anchor) {
+    setEditingAnchorId(anchor.anchor_id)
+    setEditForm({ title: anchor.title, author: anchor.author, tags: anchor.user_tags.join(', ') })
+  }
+
+  const commitMetadataEdit = async (anchor: reference.Anchor) => {
+    const title = editForm.title.trim()
+    if (!title) {
+      setError('书名不能为空。')
+      setErrorRetry(null)
+      return
+    }
+    setActiveAction('edit')
+    setError(null)
+    try {
+      await app.UpdateReferenceAnchorMetadata({
+        novel_id: novelId,
+        anchor_id: anchor.anchor_id,
+        title,
+        author: editForm.author.trim() ? editForm.author.trim() : null,
+        license_status: anchor.license_status,
+        visibility: anchor.visibility,
+        source_trust: anchor.source_trust,
+        user_tags: editForm.tags.split(/[,，]/).map((tag) => tag.trim()).filter(Boolean),
+      })
+      setEditingAnchorId(null)
+      await loadAnchors()
+      onReferenceMutation()
+    } catch (err) {
+      setError(describeBridgeError(err, '参考书信息保存失败。').message)
+      setErrorRetry(() => () => { void commitMetadataEdit(anchor) })
+    } finally {
+      setActiveAction(null)
+    }
+  }
 
   const toggleAnchor = (anchor: reference.Anchor) => {
     const state = anchorState(anchor)
@@ -462,6 +502,16 @@ export default function ReferenceBookSidebar({
                     </button>
                     <button
                       type="button"
+                      onClick={() => { setError(null); startEditMetadata(anchor) }}
+                      disabled={activeAction !== null}
+                      className="absolute right-8 top-1.5 inline-flex h-6 w-6 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50"
+                      aria-label={`编辑《${anchor.title}》信息`}
+                      title="编辑书名、作者与标签"
+                    >
+                      <Pencil className="h-3.5 w-3.5" aria-hidden="true" />
+                    </button>
+                    <button
+                      type="button"
                       onClick={() => { setError(null); setPendingDeleteId(anchor.anchor_id) }}
                       disabled={activeAction !== null}
                       className="absolute right-1.5 top-1.5 inline-flex h-6 w-6 items-center justify-center rounded-md text-muted-foreground hover:bg-destructive/10 hover:text-destructive disabled:cursor-not-allowed disabled:opacity-50"
@@ -473,6 +523,59 @@ export default function ReferenceBookSidebar({
                         : <Trash2 className="h-3.5 w-3.5" aria-hidden="true" />}
                     </button>
                   </div>
+                  {editingAnchorId === anchor.anchor_id && (
+                    <div className="space-y-2 border-t border-border bg-muted/30 px-2.5 py-2.5" data-testid={`edit-metadata-${anchor.anchor_id}`}>
+                      <label className="block">
+                        <span className="mb-1 block text-xs font-medium text-foreground">书名</span>
+                        <input
+                          value={editForm.title}
+                          onChange={(event) => setEditForm((current) => ({ ...current, title: event.target.value }))}
+                          className="h-8 w-full rounded-md border border-border bg-background px-2 text-xs text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                          aria-label={`编辑书名 ${anchor.title}`}
+                        />
+                      </label>
+                      <label className="block">
+                        <span className="mb-1 block text-xs font-medium text-foreground">作者</span>
+                        <input
+                          value={editForm.author}
+                          onChange={(event) => setEditForm((current) => ({ ...current, author: event.target.value }))}
+                          className="h-8 w-full rounded-md border border-border bg-background px-2 text-xs text-foreground placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                          placeholder="可选"
+                          aria-label={`编辑作者 ${anchor.title}`}
+                        />
+                      </label>
+                      <label className="block">
+                        <span className="mb-1 block text-xs font-medium text-foreground">标签（逗号分隔）</span>
+                        <input
+                          value={editForm.tags}
+                          onChange={(event) => setEditForm((current) => ({ ...current, tags: event.target.value }))}
+                          className="h-8 w-full rounded-md border border-border bg-background px-2 text-xs text-foreground placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                          placeholder="例如：悬疑，雨夜"
+                          aria-label={`编辑标签 ${anchor.title}`}
+                        />
+                      </label>
+                      <div className="flex items-center justify-end gap-1.5">
+                        <button
+                          type="button"
+                          onClick={() => setEditingAnchorId(null)}
+                          disabled={activeAction !== null}
+                          className="h-7 rounded-md px-2 text-xs text-muted-foreground hover:bg-background hover:text-foreground disabled:opacity-50"
+                        >
+                          取消
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => { void commitMetadataEdit(anchor) }}
+                          disabled={activeAction !== null}
+                          className="inline-flex h-7 items-center gap-1 rounded-md bg-primary px-2.5 text-xs font-medium text-primary-foreground hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-50"
+                          aria-label={`保存《${anchor.title}》信息`}
+                        >
+                          {activeAction === 'edit' ? <Loader2 className="h-3 w-3 animate-spin" aria-hidden="true" /> : <Check className="h-3 w-3" aria-hidden="true" />}
+                          保存
+                        </button>
+                      </div>
+                    </div>
+                  )}
                   {deletePending && (
                     <div className="flex items-center justify-between gap-2 border-t border-border bg-muted/45 px-2.5 py-2">
                       <p className="text-xs text-foreground">

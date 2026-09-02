@@ -106,6 +106,55 @@ public sealed class ChapterContentServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task DeleteChapterSoftDeletesWithoutRenumberingOrReusingNumbers()
+    {
+        var options = CreateOptions();
+        await InitializeAsync(options);
+        var novelService = new FileSystemNovelService(options, new FileSystemAppSettingsService(options));
+        var novel = await novelService.CreateNovelAsync(new CreateNovelPayload("删除留痕", "", ""), CancellationToken.None);
+        var notifier = new RecordingRagIndexRefreshNotifier();
+        var versionControl = new GitVersionControlService(options);
+        var service = new FileSystemChapterContentService(
+            options,
+            novelService,
+            ragRefreshNotifier: notifier,
+            versionControl: versionControl);
+
+        var first = await service.CreateChapterAsync(new CreateChapterPayload(novel.Id, "雾中来信"), CancellationToken.None);
+        var second = await service.CreateChapterAsync(new CreateChapterPayload(novel.Id, "旧城暗号"), CancellationToken.None);
+        await service.CreateChapterAsync(new CreateChapterPayload(novel.Id, "未读的名字"), CancellationToken.None);
+
+        await service.DeleteChapterAsync(new DeleteChapterPayload(novel.Id, second.Id), CancellationToken.None);
+
+        // 列表隐藏被删章节，剩余章号保持原样（不重排）。
+        var chapters = await service.GetChaptersAsync(novel.Id, CancellationToken.None);
+        Assert.Equal(2, chapters.Count);
+        Assert.Equal(1, chapters[0].ChapterNumber);
+        Assert.Equal(3, chapters[1].ChapterNumber);
+        Assert.Equal(first.Id, chapters[0].Id);
+
+        // 正文文件与大纲伴生文件一并移除。
+        Assert.False(File.Exists(Path.Combine(options.DefaultDataDirectory, "novels", novel.Id.ToString(), "chapters", "002.md")));
+        Assert.False(File.Exists(Path.Combine(options.DefaultDataDirectory, "novels", novel.Id.ToString(), "outlines", "002.md")));
+
+        // 版本历史留有删除提交，正文可追溯。
+        var log = await versionControl.GetLogAsync(novel.Id, null, 10, CancellationToken.None);
+        Assert.Contains(log, commit => commit.Message == "delete chapter 002");
+
+        // 索引清理：正文与大纲两条 stale 标记。
+        Assert.Contains(notifier.Notifications, notification => notification.NovelId == novel.Id && notification.Reason.Contains("chapters/002.md", StringComparison.Ordinal));
+        Assert.Contains(notifier.Notifications, notification => notification.Reason.Contains("outlines/002.md", StringComparison.Ordinal));
+
+        // 新章节不复用被删章号，也永不重排。
+        var fresh = await service.CreateChapterAsync(new CreateChapterPayload(novel.Id, "新增章节"), CancellationToken.None);
+        Assert.Equal(4, fresh.ChapterNumber);
+
+        // 重复删除同一章必须报错。
+        await Assert.ThrowsAsync<ArgumentException>(
+            () => service.DeleteChapterAsync(new DeleteChapterPayload(novel.Id, second.Id), CancellationToken.None).AsTask());
+    }
+
+    [Fact]
     public async Task SaveContentDoesNotFailWhenRagStaleNotificationFails()
     {
         var options = CreateOptions();

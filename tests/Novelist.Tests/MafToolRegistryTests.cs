@@ -542,6 +542,9 @@ public sealed class MafToolRegistryTests
             Files[input.Path] = input.Content;
             return ValueTask.CompletedTask;
         }
+
+        public ValueTask DeleteChapterAsync(DeleteChapterPayload input, CancellationToken cancellationToken) =>
+            throw new NotImplementedException();
     }
 
     private sealed class RecordingSubagentRunner : ISubagentRunner

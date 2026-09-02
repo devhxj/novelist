@@ -188,6 +188,81 @@ public sealed class FileSystemChapterContentService : IChapterContentService
         }
     }
 
+    public async ValueTask DeleteChapterAsync(
+        DeleteChapterPayload input,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(input);
+        ValidateNovelId(input.NovelId);
+        await EnsureNovelExistsAsync(input.NovelId, cancellationToken);
+
+        string? contentRelativePath = null;
+        string? outlineRelativePath = null;
+        string? contentFullPath = null;
+        string? outlineFullPath = null;
+
+        await _mutex.WaitAsync(cancellationToken);
+        try
+        {
+            var store = await LoadOrCreateAsync(input.NovelId, cancellationToken);
+            var index = store.Items.FindIndex(chapter => chapter.Id == input.ChapterId);
+            if (index < 0)
+            {
+                throw new ArgumentException($"Chapter '{input.ChapterId}' does not exist.", nameof(input));
+            }
+
+            var chapter = store.Items[index];
+            store.Items.RemoveAt(index);
+
+            // 软删除留痕 + 高水位：章节号永不重排、永不复用（O7 产品决策）。
+            store.DeletedItems.Add(new ChapterStoreDocument.DeletedChapterRecord(
+                chapter.Id,
+                chapter.ChapterNumber,
+                chapter.Title,
+                chapter.FilePath,
+                DateTimeOffset.UtcNow));
+            if (chapter.ChapterNumber >= store.NextChapterNumber)
+            {
+                store.NextChapterNumber = chapter.ChapterNumber + 1;
+            }
+
+            contentRelativePath = chapter.FilePath;
+            outlineRelativePath = $"outlines/{chapter.ChapterNumber.ToString("D3", CultureInfo.InvariantCulture)}.md";
+            contentFullPath = await ResolveWorkspaceFilePathAsync(input.NovelId, contentRelativePath, cancellationToken);
+            outlineFullPath = await ResolveWorkspaceFilePathAsync(input.NovelId, outlineRelativePath, cancellationToken);
+
+            await SaveAsync(input.NovelId, store, cancellationToken);
+
+            try
+            {
+                if (File.Exists(contentFullPath))
+                {
+                    File.Delete(contentFullPath);
+                }
+                if (File.Exists(outlineFullPath))
+                {
+                    File.Delete(outlineFullPath);
+                }
+            }
+            catch
+            {
+                // 文件删除失败不回滚元数据：列表已经隐藏该章，孤文件可由索引清理兜底。
+            }
+
+            await _versionControl.CommitIfChangedAsync(
+                input.NovelId,
+                $"delete chapter {chapter.ChapterNumber.ToString("D3", CultureInfo.InvariantCulture)}",
+                cancellationToken);
+        }
+        finally
+        {
+            _mutex.Release();
+        }
+
+        await TryMarkRagIndexStaleAsync(input.NovelId, contentRelativePath!);
+        await TryMarkRagIndexStaleAsync(input.NovelId, outlineRelativePath!);
+    }
+
     public async ValueTask<string> GetContentAsync(
         long novelId,
         string path,
@@ -419,7 +494,9 @@ public sealed class FileSystemChapterContentService : IChapterContentService
 
     private static int AllocateChapterNumber(ChapterStoreDocument store)
     {
-        var next = store.Items.Count == 0 ? 1 : store.Items.Max(chapter => chapter.ChapterNumber) + 1;
+        // 删除留下的章节号进入高水位（NextChapterNumber），保证不重排也不复用。
+        var highWater = Math.Max(store.NextChapterNumber, store.Items.Count == 0 ? 0 : store.Items.Max(chapter => chapter.ChapterNumber));
+        var next = highWater + 1;
         if (next > MaxChapterNumber)
         {
             throw new InvalidOperationException("Chapter number allocation is exhausted.");
@@ -678,5 +755,19 @@ public sealed class FileSystemChapterContentService : IChapterContentService
 
         [JsonPropertyName("items")]
         public List<ChapterPayload> Items { get; set; } = [];
+
+        [JsonPropertyName("next_chapter_number")]
+        public int NextChapterNumber { get; set; }
+
+        [JsonPropertyName("deleted_items")]
+        public List<DeletedChapterRecord> DeletedItems { get; set; } = [];
+
+        // 软删除留痕：章节号与元数据保留在案，正文经版本历史（git）可追溯。
+        public sealed record DeletedChapterRecord(
+            long ChapterId,
+            int ChapterNumber,
+            string Title,
+            string FilePath,
+            DateTimeOffset DeletedAt);
     }
 }

@@ -767,6 +767,7 @@ referenceCorpusTechniqueSpecimenAnalysisRuns: [],
     nextReferenceOrchestrationRunId: 1,
     contentByPath: options.contentByPath ?? defaultContentByPath,
     initialized: options.initialized ?? true,
+    dataDirOverride: null,
     novels: options.novels ?? [defaultNovel],
     chaptersByNovelId: options.chaptersByNovelId ?? { 42: defaultChapters },
     settings: options.settings ?? persistedSettings ?? defaultSettings,
@@ -1049,6 +1050,9 @@ referenceCorpusTechniqueSpecimenAnalysisRuns: [],
       case 'runtime.window.isMaximized': return state.runtimeWindowMaximized === true
       case 'runtime.window.minimize':
       case 'runtime.app.quit':
+      case 'UpdateDataDir':
+        state.dataDirOverride = String(args[0] ?? '')
+        return null
       case 'CancelChat':
       case 'ApproveTool':
       case 'RebuildNovelIndex':
@@ -1083,7 +1087,7 @@ referenceCorpusTechniqueSpecimenAnalysisRuns: [],
         return null
       case 'GetAppConfig': return {
         initialized: state.initialized,
-        data_dir: options.platformDefaultPath ?? 'D:\\NovelistData',
+        data_dir: state.dataDirOverride ?? options.platformDefaultPath ?? 'D:\\NovelistData',
         update_check: {
           endpoint_url: state.settings.update_check_endpoint_url ?? '',
           default_enabled: state.settings.update_check_enabled === true,
@@ -1127,6 +1131,9 @@ referenceCorpusTechniqueSpecimenAnalysisRuns: [],
       case 'CreateChapter': return createChapter(args[0])
       case 'UpdateChapterTitle':
         updateChapterTitle(args[0], args[1], args[2])
+        return null
+      case 'DeleteChapter':
+        deleteChapter(args[0])
         return null
       case 'GetContent': return content(args[1])
       case 'SaveContent': return saveContent(args[0])
@@ -1242,6 +1249,7 @@ referenceCorpusTechniqueSpecimenAnalysisRuns: [],
       case 'DeleteReferenceAnchor':
         deleteReferenceAnchor(args[0], args[1])
         return null
+      case 'UpdateReferenceAnchorMetadata': return updateReferenceAnchorMetadata(args[0])
       case 'RebuildReferenceAnchor': return rebuildReferenceAnchor(args[1])
       case 'AnalyzeReferenceChapterSplit': return analyzeReferenceChapterSplit(args[0])
       case 'PreviewReferenceChapterSplit': return previewReferenceChapterSplit(args[0])
@@ -1891,6 +1899,20 @@ case 'ListReferenceCorpusTechniqueSpecimens': return listReferenceCorpusTechniqu
     )
   }
 
+  // O7：软删除语义——列表移除该章、保留元数据留痕，不重排其余章号。
+  function deleteChapter(input) {
+    const novelId = Number(input?.novel_id ?? state.activeNovelId)
+    const chapterId = Number(input?.chapter_id ?? 0)
+    const key = String(novelId)
+    const list = state.chaptersByNovelId[key] ?? []
+    const target = list.find((chapter) => chapter.id === chapterId)
+    if (!target) throw new Error('Chapter was not found.')
+    state.chaptersByNovelId[key] = list.filter((chapter) => chapter.id !== chapterId)
+    for (const path of [target.file_path, 'outlines/' + String(target.chapter_number).padStart(3, '0') + '.md']) {
+      delete state.contentByPath[path]
+    }
+    return null
+  }
   function content(filePath) {
     return state.contentByPath[filePath] ?? ''
   }
@@ -3811,6 +3833,23 @@ function referenceAnchors() {
 
     state.referenceAnchors = state.referenceAnchors.filter((anchor) => anchor.anchor_id !== id)
     state.createdReferenceAnchors = state.createdReferenceAnchors.filter((anchor) => anchor.anchor_id !== id)
+  }
+
+  // F7：参考书元数据事后编辑的 mock。
+  function updateReferenceAnchorMetadata(input = {}) {
+    const anchorId = Number(input?.anchor_id ?? 0)
+    const pools = [state.referenceAnchors, state.createdReferenceAnchors]
+    for (const pool of pools) {
+      const anchor = pool.find((item) => item.anchor_id === anchorId)
+      if (anchor) {
+        anchor.title = String(input?.title ?? anchor.title)
+        anchor.author = input?.author == null ? '' : String(input.author)
+        anchor.user_tags = Array.isArray(input?.user_tags) ? input.user_tags.map(String) : anchor.user_tags
+        anchor.updated_at = now
+        return { ...anchor }
+      }
+    }
+    throw new Error('Reference anchor was not found.')
   }
 
   function createChapterSplitProfile(input = {}, mode = 'auto') {

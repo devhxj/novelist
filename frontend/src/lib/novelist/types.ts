@@ -275,6 +275,11 @@ export namespace chapter {
     updated_at: Timestamp
     file_path: string
   }
+
+  export interface DeleteChapterInput {
+    novel_id: number
+    chapter_id: number
+  }
 }
 
 export namespace character {

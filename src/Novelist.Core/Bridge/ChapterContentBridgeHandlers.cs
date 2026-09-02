@@ -49,6 +49,14 @@ public static class ChapterContentBridgeHandlers
             return null;
         });
 
+        dispatcher.Register("DeleteChapter", async (context, cancellationToken) =>
+        {
+            await service.DeleteChapterAsync(
+                ReadObjectArg<DeleteChapterPayload>(context.Payload, 0, "input"),
+                cancellationToken);
+            return null;
+        });
+
         return dispatcher;
     }
 
