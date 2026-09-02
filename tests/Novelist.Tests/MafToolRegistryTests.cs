@@ -1621,6 +1621,11 @@ DateTimeOffset.UtcNow));
             return ValueTask.CompletedTask;
         }
 
+        public ValueTask<AdvanceChapterPlanResult> AdvanceChapterPlanAsync(AdvanceChapterPlanPayload input, CancellationToken cancellationToken)
+        {
+            return ValueTask.FromResult(new AdvanceChapterPlanResult(NextPlanCleared: false, FarPlanAppended: false));
+        }
+
         public ValueTask<IReadOnlyList<TimelineEntryPayload>> GetTimelineEntriesAsync(long novelId, int fromChapter, int toChapter, CancellationToken cancellationToken)
         {
             return ValueTask.FromResult<IReadOnlyList<TimelineEntryPayload>>([]);

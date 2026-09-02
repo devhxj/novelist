@@ -2,6 +2,7 @@
 
 > 对 `user-perspective-review-2026-09-02.md` 三批改进计划的落地复评：逐项对账 U/O/F 共 15 个问题的实现与证据，并记录复评中发现并已修复的新引入缺陷。行号以复评修复后工作区为准。
 > 验证基线：`dotnet test` 216/216 单测 + 698/698 集成全绿；前端 lint、`test:choices`、`verify`、`test:app:full`、`test:app:stress` 全绿。
+> 第二轮使用者视角修复（#1–#7）与其独立验证基线见第六节。
 
 ## 一、复评发现并修复的新缺陷（先说问题）
 
@@ -80,3 +81,31 @@ R3–R5 由新增的集成测试 `ReferenceCorpusPackageServiceTests.ImportPacka
 ## 五、结论
 
 三批 15 项（U×6、O×6、F×6，其中 U5 拆为①②）全部落地，无一以"未做"关闭；两处按务实边界实现并显式记录（F1 镜像 v1、F5 备份恢复语义）。复评的核心价值在第一节的 5 个新缺陷——全部是"mock 全绿但真实链路必坏"或"文档承诺与 SQLite 语义不符"的类型，其中 R1（novel_id=0）与 R3（evidence_text 列）在真实桌面应用中会直接让语料包功能不可用。这印证了一条工程教训并已落实：**新增 bridge 功能的真实数据库集成测试必须在 mock 工作流之外同步存在**（本复评补上了语料包的这条测试）。
+
+## 六、第二轮使用者视角修复（#1–#7）
+
+复评之后又做了一轮纯使用者视角走查（便利性 / 可操作性 / 完整性），发现 7 个"功能在、但作者用不顺"的问题，全部已修复。
+
+**#1 浏览关键字搜不到东西。** 原本"关键字"只匹配内部枚举 `feature_key`，作者想搜「压抑」「追车」一无所获。新增 `keyword_contains` 过滤，对 `feature_key` / `value_text` / `explanation` 三列做包含匹配，`EscapeLikePattern` 转义 `\ % _` 防通配符注入；输入框文案改为「搜索内容或说明…」。证据：`SqliteReferenceCorpusAnalysisService`（含服务自身的过滤白名单，与 bridge 白名单是两套）+ `ReferenceCorpusAnalysisBridgeHandlers.ObservationFilterKeys` + 集成测试 `ListFeatureObservationsKeywordFilterMatchesValueTextAndExplanationByContainment`（取值命中、部分词命中、字面量 `%` 不误伤）。
+
+**#2 锁定章号无上限。** 可填任意长数字并落到会话上。前端输入截断 6 位，后端 `MaxChapterNumber = 999_999`，越界即视为未绑定——不抛错、不写脏值。证据：`ChatPanel.tsx` + `FileSystemChatSessionService`。
+
+**#3 待复核候选只有首页。** 作者既不知道队列总量，也拉不到后面的条目。面板显示「待复核共 N 条，当前显示前 M 条」，并提供「加载更多（还有 K 条）」按页续拉、按 `candidate_id` 去重追加。证据：`ReferenceCorpusWorkspace.tsx`（`candidate-total` / `load-more-candidates`）。
+
+**#4 材料化跑完覆盖度不刷新。** 后台终态到达后聊天侧仍是旧数字，要手动切页。`useMaterializationWatcher` 增加 `onCompleted` 回调，由 `WorkspaceView` 触发语料刷新 tick，覆盖度与总览自动跟上。
+
+**#5 标本卡看不到证据原文。** 观察卡已有原文上下文，标本卡只有 `evidence_preview` 片段，判断不了这条手法值不值得用。标本卡展开时按 `source_node_id` 拉 `GetReferenceCorpusNodeWindow` 展示上下文，失败降级为占位文案。证据：`CorpusAreaView.tsx`（`specimen-evidence-context`）。
+
+**#6 三层计划不会推进——本轮最伤的日常摩擦。** 写完一章后作者得手工把细纲剪到部纲、部纲剪到大纲。新增 bridge `AdvanceChapterPlan`：细纲并入部纲尾部、部纲并入大纲尾部并清空细纲，一次轮转；空细纲上调用为无副作用幂等。聊天工具栏「完成本章」按钮直达，同时把徽章与提示文案统一为「细纲取『下一章』槽」，消除三层命名与槽位命名的错位。证据：`PlanningPayloads.cs` / `IPlanningService.cs` / `FileSystemPlanningService.AdvanceChapterPlanAsync` / `PlanningBridgeHandlers` / `BridgeCompatibilityAppMethods`（193→194）+ 集成测试 `AdvanceChapterPlanRotatesScopesAndIsIdempotent`（轮转、重复调用幂等、`plans/细纲.md` 镜像清空）+ `finish-chapter-button` 工作流断言。
+
+**#7 注入语料没有表态通道。** 好不好用作者说不上，质量信号积累不起来。用量卡每条语料加好评/差评（`aria-pressed` + 已表态态），写入 `RecordReferenceUserFeedback`（`target_type=material`、`origin=chat_usage_card`），失败静默回退不打断写作流。工作流断言 `decision=accepted` 与 `target_type=material`。
+
+顺带修掉一处**长期静默失败的存量测试**：`frontend/tests/reference-materialization-api.test.mjs` 仍断言 `api.ts` 绑定了 `GenerateReferenceMaterializationBlueprintPreview`，而该方法在 `a8593cd`（装配线退役）就已删除，且 `bridge-guardrails.mjs:151` 明确断言它不得复活。改为 `assert.doesNotMatch` 守住退役状态，并补上语料包导出/导入两条正向断言。它一直红着没被发现的原因是 `npm run verify` 不含这些独立 node 测试——已同时新增 `npm run test:node`（`node --test "tests/*.test.mjs"`，6 个文件 10 条断言，<1s）并接入 `verify`，堵住这条覆盖缺口。
+
+同时把导入对话框「完成」按钮的工作流选择器全部改为 `exact: true`（4 个文件 13 处）。根因是 Playwright 的 `getByRole(name)` 默认子串匹配，新增的「完成本章」按钮让「完成」变成二义；`NovelImportDialog.tsx` 的可及名就是精确的「完成」，所以精确匹配是正解而非绕过。
+
+### 本轮验证基线
+
+- 后端：`dotnet test Novelist.slnx` 216/216 单测通过；集成 698/700，2 个失败（`WarmRetrievalAcrossOneThousandNodesStaysWithinControlledBudget`、`RealWorkerLoopReclaimsExpiredLeaseAndFencesLostWorkerCommit`）经 `--filter` 单独重跑 4 秒内全绿，确认为浏览器套件刚跑完时的机器争用超时抖动，非回归。
+- 前端：`npm run build`（仅存量 >650kB chunk 警告）、`npm run lint` 0 error；`test:app --suite=full`、`test:phase15`（9 子套件）、`test:phase16`、`test:app:stress`、`test:app:usability` 全绿；独立 node 测试 chapter-range、reference-materialization-api（修复后）、time、choices、layout、diagnostics 全绿。
+

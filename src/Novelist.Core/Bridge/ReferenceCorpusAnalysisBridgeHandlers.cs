@@ -21,6 +21,7 @@ public static class ReferenceCorpusAnalysisBridgeHandlers
     {
         "feature_family",
         "feature_key",
+        "keyword_contains",
         "node_type",
         "review_state",
         "validity_state",

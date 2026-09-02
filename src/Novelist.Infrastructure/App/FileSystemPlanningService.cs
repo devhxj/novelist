@@ -100,6 +100,72 @@ public sealed class FileSystemPlanningService : IPlanningService
         }
     }
 
+    public async ValueTask<AdvanceChapterPlanResult> AdvanceChapterPlanAsync(
+        AdvanceChapterPlanPayload input,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(input);
+        await EnsureNovelExistsAsync(input.NovelId, cancellationToken);
+
+        await _mutex.WaitAsync(cancellationToken);
+        try
+        {
+            var store = await LoadOrCreateAsync(cancellationToken);
+            var next = store.ChapterPlans.SingleOrDefault(plan =>
+                plan.NovelId == input.NovelId && string.Equals(plan.Scope, "next", StringComparison.Ordinal));
+            // 幂等：细纲已空则本章已完成过推进，直接返回不做轮转。
+            if (next is null || string.IsNullOrWhiteSpace(next.Content))
+            {
+                return new AdvanceChapterPlanResult(NextPlanCleared: false, FarPlanAppended: false);
+            }
+
+            var near = store.ChapterPlans.SingleOrDefault(plan =>
+                plan.NovelId == input.NovelId && string.Equals(plan.Scope, "near", StringComparison.Ordinal));
+            var far = store.ChapterPlans.SingleOrDefault(plan =>
+                plan.NovelId == input.NovelId && string.Equals(plan.Scope, "far", StringComparison.Ordinal));
+
+            var nearContent = string.IsNullOrWhiteSpace(near?.Content) ? next.Content : $"{near!.Content}{LineSeparator}{next.Content}";
+            var farContent = near is null || string.IsNullOrWhiteSpace(near.Content)
+                ? far?.Content
+                : string.IsNullOrWhiteSpace(far?.Content) ? near.Content : $"{far!.Content}{LineSeparator}{near.Content}";
+
+            var plans = new List<ChapterPlanPayload>(3)
+            {
+                new(input.NovelId, "next", string.Empty),
+                new(input.NovelId, "near", nearContent),
+            };
+            if (farContent is not null)
+            {
+                plans.Add(new(input.NovelId, "far", farContent));
+            }
+
+            foreach (var plan in plans)
+            {
+                var index = store.ChapterPlans.FindIndex(candidate =>
+                    candidate.NovelId == input.NovelId &&
+                    string.Equals(candidate.Scope, plan.Scope, StringComparison.Ordinal));
+                if (index < 0)
+                {
+                    store.ChapterPlans.Add(plan);
+                }
+                else
+                {
+                    store.ChapterPlans[index] = plan;
+                }
+            }
+
+            await SaveAsync(store, cancellationToken);
+            await WritePlanMirrorsAsync(input.NovelId, store, cancellationToken);
+            return new AdvanceChapterPlanResult(NextPlanCleared: true, FarPlanAppended: farContent is not null);
+        }
+        finally
+        {
+            _mutex.Release();
+        }
+    }
+
+    private const string LineSeparator = "\n";
+
     // 把三层计划镜像到书目录 plans/ 大纲.md / 部纲.md / 细纲.md：
     // 作者可在编辑器直接查看（git/diff 自动覆盖）；镜像为单向导出，槽位保存仍是唯一权威入口。
     private async ValueTask WritePlanMirrorsAsync(

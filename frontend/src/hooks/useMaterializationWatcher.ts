@@ -23,6 +23,7 @@ export function useMaterializationWatcher(
   novelId: number,
   anchors: reference.Anchor[],
   enabled: boolean,
+  onCompleted?: () => void,
 ): { notifications: MaterializationCompletion[]; dismiss: (runId: string) => void; activeCount: number } {
   const app = useApp()
   const [notifications, setNotifications] = useState<MaterializationCompletion[]>([])
@@ -76,8 +77,10 @@ export function useMaterializationWatcher(
     setActiveCount(active)
     if (arrivals.length > 0) {
       setNotifications((current) => [...arrivals, ...current.filter(item => !arrivals.some(a => a.run_id === item.run_id))].slice(0, 3))
+      // 材料化产物（观察/标本/覆盖面）变化：通知调用方刷新依赖语料数据的视图（覆盖度、总览等）。
+      onCompleted?.()
     }
-  }, [app, novelId, anchors])
+  }, [app, novelId, anchors, onCompleted])
 
   useEffect(() => {
     if (!enabled || !novelId || anchors.length === 0) {

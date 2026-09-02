@@ -1164,6 +1164,8 @@ referenceCorpusTechniqueSpecimenAnalysisRuns: [],
       case 'GetMaxChapterNumber': return maxChapterNumber(args[0])
       case 'GetChapterPlans': return chapterPlans(args[0])
       case 'GetChapterCorpusCoverage': return getChapterCorpusCoverage(args[0])
+      case 'AdvanceChapterPlan': return advanceChapterPlan(args[0])
+      case 'RecordReferenceUserFeedback': return { feedback_id: `fb-${Date.now().toString(36)}`, decision: String(args[0]?.decision ?? 'accepted') }
       case 'UpdateChapterPlan':
         updateChapterPlan(args[0], args[1])
         return null
@@ -4522,6 +4524,23 @@ function referenceAnchors() {
       source_trust: 'user_verified',
       user_tags: [],
     })
+  }
+
+  async function advanceChapterPlan(input = {}) {
+    const novelId = Number(input?.novel_id ?? state.activeNovelId ?? 42)
+    const plans = state.chapterPlans.filter((plan) => Number(plan.novel_id) === novelId)
+    const next = plans.find((plan) => plan.scope === 'next')
+    const near = plans.find((plan) => plan.scope === 'near')
+    const far = plans.find((plan) => plan.scope === 'far')
+    if (!next || !String(next.content ?? '').trim()) {
+      return { next_plan_cleared: false, far_plan_appended: false }
+    }
+    const mergedNear = [String(near?.content ?? '').trim(), String(next.content ?? '').trim()].filter(Boolean).join('\n')
+    const mergedFar = [String(far?.content ?? '').trim(), String(near?.content ?? '').trim()].filter(Boolean).join('\n')
+    updateChapterPlan(novelId, { scope: 'next', content: '' })
+    updateChapterPlan(novelId, { scope: 'near', content: mergedNear })
+    if (mergedFar) updateChapterPlan(novelId, { scope: 'far', content: mergedFar })
+    return { next_plan_cleared: true, far_plan_appended: Boolean(mergedFar) }
   }
 
   async function exportReferenceCorpusPackage(input = {}) {

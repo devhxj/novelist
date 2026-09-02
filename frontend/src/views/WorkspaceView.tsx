@@ -355,10 +355,15 @@ export default function WorkspaceView({ initialNovelId, initialShowHelp, startup
 
   const activeNovel = novels.find(n => n.id === activeNovelId)
 
+  // 材料化在语料区之外完成时，同样推进 refreshKey：覆盖横幅与语料区数据自动失效重取。
+  const handleMaterializationCompleted = useCallback(() => {
+    setReferenceRefreshKey((current) => current + 1)
+  }, [])
+
   // 材料化全局监视：素材库页之外也能收到 run 完成/失败通知（状态栏展示）。
   const isCorpusViewActive = activePanel === 'reference'
   const { notifications: materializationNotices, dismiss: dismissMaterializationNotice, activeCount: materializationActiveCount } =
-    useMaterializationWatcher(activeNovelId, referenceAnchors, !isCorpusViewActive)
+    useMaterializationWatcher(activeNovelId, referenceAnchors, !isCorpusViewActive, handleMaterializationCompleted)
   const activeChapterNumber = useMemo(() => {
     const match = tabTarget?.path.match(/^chapters\/(\d+)\.md$/)
     return match ? Number(match[1]) : null

@@ -10,5 +10,8 @@ test('materialization source registration and model-backed operations do not inh
 
   assert.match(source, /RegisterReferenceMaterializationSource:\s*\(\(\.\.\.args\)\s*=>\s*invokeAppArgs\('RegisterReferenceMaterializationSource', args, \{ timeoutMs: null \}\)/)
   assert.match(source, /AnalyzeReferenceChapterSplit:\s*\(\(\.\.\.args\)\s*=>\s*invokeAppArgs\('AnalyzeReferenceChapterSplit', args, \{ timeoutMs: null \}\)/)
-  assert.match(source, /GenerateReferenceMaterializationBlueprintPreview:\s*\(\(\.\.\.args\)\s*=>\s*invokeAppArgs\('GenerateReferenceMaterializationBlueprintPreview', args, \{ timeoutMs: null \}\)/)
+  assert.match(source, /ExportReferenceCorpusPackage:\s*\(\(\.\.\.args\)\s*=>\s*invokeAppArgs\('ExportReferenceCorpusPackage', args, \{ timeoutMs: null \}\)/)
+  assert.match(source, /ImportReferenceCorpusPackage:\s*\(\(\.\.\.args\)\s*=>\s*invokeAppArgs\('ImportReferenceCorpusPackage', args, \{ timeoutMs: null \}\)/)
+  // 蓝图预览随装配线退役，bridge-guardrails.mjs 已断言桥接方法不得复活，这里守住前端适配层。
+  assert.doesNotMatch(source, /GenerateReferenceMaterializationBlueprintPreview/)
 })

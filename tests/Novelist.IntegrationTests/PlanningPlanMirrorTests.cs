@@ -50,6 +50,43 @@ public sealed class PlanningPlanMirrorTests : IDisposable
         Assert.True(File.Exists(Path.Combine(plansDirectory, "部纲.md")));
     }
 
+    [Fact]
+    public async Task AdvanceChapterPlanRotatesScopesAndIsIdempotent()
+    {
+        var options = CreateOptions();
+        Directory.CreateDirectory(options.DefaultDataDirectory);
+        var initialization = new FileSystemAppInitializationService(options);
+        await initialization.InitializeAsync(options.DefaultDataDirectory, CancellationToken.None);
+        var settings = new FileSystemAppSettingsService(options);
+        var novels = new FileSystemNovelService(options, settings);
+        var novel = await novels.CreateNovelAsync(new CreateNovelPayload("章节推进", "", ""), CancellationToken.None);
+        var planning = new FileSystemPlanningService(options, novels);
+        await planning.UpdateChapterPlanAsync(novel.Id, new UpdateChapterPlanPayload("far", "全书大纲卷一"), CancellationToken.None);
+        await planning.UpdateChapterPlanAsync(novel.Id, new UpdateChapterPlanPayload("near", "部纲：旧城门线"), CancellationToken.None);
+        await planning.UpdateChapterPlanAsync(novel.Id, new UpdateChapterPlanPayload("next", "- 本章细纲 beat"), CancellationToken.None);
+
+        var result = await planning.AdvanceChapterPlanAsync(new AdvanceChapterPlanPayload(novel.Id), CancellationToken.None);
+
+        // 轮转：细纲清空，旧细纲上移进部纲，旧部纲上移进大纲。
+        Assert.True(result.NextPlanCleared);
+        var plans = await planning.GetChapterPlansAsync(novel.Id, CancellationToken.None);
+        Assert.Equal(string.Empty, plans.Single(plan => plan.Scope == "next").Content);
+        Assert.Contains("- 本章细纲 beat", plans.Single(plan => plan.Scope == "near").Content, StringComparison.Ordinal);
+        Assert.Contains("部纲：旧城门线", plans.Single(plan => plan.Scope == "near").Content, StringComparison.Ordinal);
+        Assert.Contains("全书大纲卷一", plans.Single(plan => plan.Scope == "far").Content, StringComparison.Ordinal);
+        Assert.Contains("部纲：旧城门线", plans.Single(plan => plan.Scope == "far").Content, StringComparison.Ordinal);
+
+        // 幂等：细纲已空，重复调用无副作用。
+        var repeat = await planning.AdvanceChapterPlanAsync(new AdvanceChapterPlanPayload(novel.Id), CancellationToken.None);
+        Assert.False(repeat.NextPlanCleared);
+        plans = await planning.GetChapterPlansAsync(novel.Id, CancellationToken.None);
+        Assert.Equal(string.Empty, plans.Single(plan => plan.Scope == "next").Content);
+
+        // 镜像同步：细纲镜像为空内容。
+        var fine = await File.ReadAllTextAsync(Path.Combine(options.DefaultDataDirectory, "novels", novel.Id.ToString(), "plans", "细纲.md"));
+        Assert.Equal(string.Empty, fine);
+    }
+
     public void Dispose()
     {
         try

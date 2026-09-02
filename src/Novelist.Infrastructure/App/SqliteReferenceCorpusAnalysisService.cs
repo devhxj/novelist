@@ -477,6 +477,7 @@ public sealed partial class SqliteReferenceCorpusAnalysisService : IReferenceCor
         {
             "feature_family",
             "feature_key",
+            "keyword_contains",
             "node_type",
             "review_state",
             "validity_state",
@@ -1381,6 +1382,15 @@ public sealed partial class SqliteReferenceCorpusAnalysisService : IReferenceCor
 
         AppendOptionalFilter(builder, parameters, filters, "feature_family", "o.feature_family", "$feature_family");
         AppendOptionalFilter(builder, parameters, filters, "feature_key", "o.feature_key", "$feature_key");
+        // 作者级关键字搜索：对枚举键、取值文本与说明做包含匹配，避免要求作者拼写内部枚举词。
+        if (filters.TryGetValue("keyword_contains", out var keyword) && !string.IsNullOrWhiteSpace(keyword))
+        {
+            builder.AppendLine();
+            builder.Append("  AND (o.feature_key LIKE $keyword_pattern ESCAPE '\\' ");
+            builder.Append("OR COALESCE(o.value_text, '') LIKE $keyword_pattern ESCAPE '\\' ");
+            builder.Append("OR COALESCE(o.explanation, '') LIKE $keyword_pattern ESCAPE '\\')");
+            parameters.Add(("$keyword_pattern", $"%{EscapeLikePattern(keyword.Trim())}%"));
+        }
         AppendOptionalFilter(builder, parameters, filters, "node_type", "o.node_type", "$node_type");
         AppendOptionalFilter(builder, parameters, filters, "review_state", "o.review_state", "$review_state");
         AppendOptionalFilter(builder, parameters, filters, "run_id", "o.run_id", "$run_id");
@@ -1427,6 +1437,14 @@ public sealed partial class SqliteReferenceCorpusAnalysisService : IReferenceCor
         }
 
         return (builder.ToString(), parameters);
+    }
+
+    private static string EscapeLikePattern(string value)
+    {
+        return value
+            .Replace("\\", "\\\\")
+            .Replace("%", "\\%")
+            .Replace("_", "\\_");
     }
 
     private static void AppendOptionalFilter(

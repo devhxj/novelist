@@ -181,6 +181,7 @@ public static class BridgeCompatibilityAppMethods
         "TestEmbeddingConnection",
         "TestConnection",
         "UpdateArcNode",
+        "AdvanceChapterPlan",
         "UpdateChapterPlan",
         "UpdateChapterTitle",
         "UpdateCharacter",

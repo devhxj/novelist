@@ -120,6 +120,9 @@ export default function ReferenceCorpusWorkspace({
   const [errorRetry, setErrorRetry] = useState<(() => void) | null>(null)
   const [sampleLimit, setSampleLimit] = useState<number | null>(null)
   const [statusTick, setStatusTick] = useState(0)
+  const [candidateTotal, setCandidateTotal] = useState(0)
+  const [candidatePage, setCandidatePage] = useState(1)
+  const [loadingMore, setLoadingMore] = useState(false)
   const [showModelSettings, setShowModelSettings] = useState(false)
   const requestIdRef = useRef(0)
   const notifiedCompletedRunRef = useRef<string | null>(null)
@@ -181,17 +184,46 @@ export default function ReferenceCorpusWorkspace({
       ])
       setProgress(nextProgress.items ?? [])
       setCandidates(nextCandidates.items ?? [])
+      setCandidateTotal(nextCandidates.total)
     } catch (err) {
       setError(describeBridgeError(err, '材料化进度或候选复核列表加载失败。').message)
       setErrorRetry(() => () => { setStatusTick(t => t + 1) })
     }
   }, [app, novelId])
 
+  // 候选队列分页：固定页大小续拉下一页，追加到现有列表。
+  const loadMoreCandidates = useCallback(async () => {
+    if (!run || !novelId || loadingMore) return
+    setLoadingMore(true)
+    try {
+      const next = await app.ListReferenceMaterializationCandidates({
+        novel_id: novelId,
+        anchor_id: run.anchor_id,
+        run_id: run.run_id,
+        decision: 'review_required',
+        page: candidatePage + 1,
+        size: 12,
+      })
+      setCandidates((current) => {
+        const seen = new Set(current.map((item) => item.candidate_id))
+        return [...current, ...next.items.filter((item) => !seen.has(item.candidate_id))]
+      })
+      setCandidateTotal(next.total)
+      setCandidatePage((current) => current + 1)
+    } catch (err) {
+      setError(describeBridgeError(err, '候选复核列表加载失败。').message)
+      setErrorRetry(() => () => { void loadMoreCandidates() })
+    } finally {
+      setLoadingMore(false)
+    }
+  }, [app, novelId, run, loadingMore, candidatePage])
+
   useEffect(() => {
     const timer = window.setTimeout(() => {
       setError(null)
       setProfile(selectedAnchor ? analyzedProfiles.get(selectedAnchor.anchor_id) ?? null : null)
       setManualTemplate('')
+      setCandidatePage(1)
       void loadRun(selectedAnchor)
     }, 0)
     return () => window.clearTimeout(timer)
@@ -605,6 +637,9 @@ export default function ReferenceCorpusWorkspace({
                 <p className="mt-1 text-xs text-muted-foreground">确认或拒绝后，候选会重新经过大模型准入与向量处理。</p>
               </div>
             </div>
+            <p className="mt-1 text-[11px] text-muted-foreground" data-testid="candidate-total">
+              待复核共 {formatCount(candidateTotal)} 条{candidates.length < candidateTotal ? `，当前显示前 ${formatCount(candidates.length)} 条` : ''}
+            </p>
             <div className="mt-2 flex items-center gap-1.5" role="group" aria-label="复核抽样">
               <span className="text-[11px] text-muted-foreground">抽样复核：</span>
               {([null, 5, 10] as const).map((limit) => (
@@ -629,6 +664,17 @@ export default function ReferenceCorpusWorkspace({
                 />
               ))}
             </ol>
+            {candidates.length < candidateTotal && (
+              <button
+                type="button"
+                onClick={() => { void loadMoreCandidates() }}
+                disabled={loadingMore || isBusy}
+                className="mt-2 inline-flex h-8 items-center rounded-md border border-border px-3 text-xs font-medium text-foreground hover:bg-secondary disabled:cursor-not-allowed disabled:opacity-50"
+                data-testid="load-more-candidates"
+              >
+                {loadingMore ? '加载中…' : `加载更多（还有 ${formatCount(candidateTotal - candidates.length)} 条）`}
+              </button>
+            )}
           </section>
         )}
       </div>

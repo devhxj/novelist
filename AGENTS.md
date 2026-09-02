@@ -14,7 +14,8 @@ Novelist is a .NET 10 + Photino.NET desktop app with a React/Vite frontend. The 
 - `dotnet test Novelist.slnx --no-restore -v minimal`: run the .NET test suite used by CI.
 - `cd frontend && npm ci && npm run build`: install frontend dependencies, then run TypeScript and Vite build.
 - `cd frontend && npm run lint`: run ESLint for TypeScript/React files.
-- `npm --prefix frontend run verify`: run frontend build, lint, corpus/chapter/reference workflows, and the app smoke suite.
+- `npm --prefix frontend run verify`: run frontend build, lint, the standalone node unit tests, corpus/chapter/reference workflows, and the app smoke suite.
+- `npm --prefix frontend run test:node`: run the standalone `frontend/tests/*.test.mjs` unit tests only.
 - `npm --prefix frontend run test:reference-workspace`: run the focused reference-book management and transient blueprint-preview browser workflow.
 
 ## Coding Style & Naming Conventions

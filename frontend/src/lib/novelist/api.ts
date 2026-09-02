@@ -158,6 +158,7 @@ export interface NovelistAppApi {
   GetReferenceCorpusTechniqueSpecimenAnalysisRun: AppMethod<[reference.GetCorpusTechniqueSpecimenAnalysisRunInput], reference.CorpusTechniqueSpecimenAnalysisRun | null>
   GetReferenceCorpusAssetTotals: AppMethod<[reference.GetReferenceCorpusAssetTotalsInput], reference.ReferenceCorpusAssetTotals>
   RegisterReferenceMaterializationSourceFromContent: AppMethod<[reference.CreateReferenceAnchorFromContentInput], reference.Anchor>
+  AdvanceChapterPlan: AppMethod<[{ novel_id: number }], reference.AdvanceChapterPlanResult>
   ExportReferenceCorpusPackage: AppMethod<[reference.ExportReferenceCorpusPackageInput], reference.ReferenceCorpusPackageExportResult>
   ImportReferenceCorpusPackage: AppMethod<[reference.ImportReferenceCorpusPackageInput], reference.ReferenceCorpusPackageImportResult>
   ListReferenceCorpusFeatureObservations: AppMethod<[reference.ListCorpusFeatureObservationsInput], storage.PageResult_reference_CorpusFeatureObservation_>
@@ -413,6 +414,7 @@ GetReferenceCorpusFeatureAnalysisRun: appMethod<NovelistAppApi['GetReferenceCorp
   GetReferenceMaterialCoverage: appMethod<NovelistAppApi['GetReferenceMaterialCoverage']>('GetReferenceMaterialCoverage'),
   GetReferenceCorpusAssetTotals: appMethod<NovelistAppApi['GetReferenceCorpusAssetTotals']>('GetReferenceCorpusAssetTotals'),
   RegisterReferenceMaterializationSourceFromContent: appMethod<NovelistAppApi['RegisterReferenceMaterializationSourceFromContent']>('RegisterReferenceMaterializationSourceFromContent'),
+  AdvanceChapterPlan: appMethod<NovelistAppApi['AdvanceChapterPlan']>('AdvanceChapterPlan'),
   ExportReferenceCorpusPackage: ((...args) => invokeAppArgs('ExportReferenceCorpusPackage', args, { timeoutMs: null })) as NovelistAppApi['ExportReferenceCorpusPackage'],
   ImportReferenceCorpusPackage: ((...args) => invokeAppArgs('ImportReferenceCorpusPackage', args, { timeoutMs: null })) as NovelistAppApi['ImportReferenceCorpusPackage'],
   GetChapterCorpusCoverage: ((...args) => invokeAppArgs('GetChapterCorpusCoverage', args, { timeoutMs: 90_000 })) as NovelistAppApi['GetChapterCorpusCoverage'],

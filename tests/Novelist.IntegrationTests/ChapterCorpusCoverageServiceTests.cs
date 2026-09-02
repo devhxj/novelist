@@ -123,6 +123,10 @@ public class ChapterCorpusCoverageServiceTests
         public ValueTask<IReadOnlyList<ChapterPlanPayload>> GetChapterPlansAsync(long novelId, CancellationToken cancellationToken)
             => ValueTask.FromResult(plans);
 
+        public ValueTask<AdvanceChapterPlanResult> AdvanceChapterPlanAsync(
+            AdvanceChapterPlanPayload input,
+            CancellationToken cancellationToken) => throw new NotSupportedException();
+
         public ValueTask UpdateChapterPlanAsync( long novelId, UpdateChapterPlanPayload input, CancellationToken cancellationToken) => throw new NotSupportedException();
         public ValueTask<IReadOnlyList<TimelineEntryPayload>> GetTimelineEntriesAsync( long novelId, int fromChapter, int toChapter, CancellationToken cancellationToken) => throw new NotSupportedException();
         public ValueTask<TimelineEntryPayload> CreateTimelineEntryAsync( long novelId, CreateTimelineEntryPayload input, CancellationToken cancellationToken) => throw new NotSupportedException();

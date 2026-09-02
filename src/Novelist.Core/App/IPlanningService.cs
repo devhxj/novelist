@@ -8,6 +8,14 @@ public interface IPlanningService
         long novelId,
         CancellationToken cancellationToken);
 
+    /// <summary>
+    /// 本章完成：把「下一章」（细纲）内容并入「近期」（部纲）尾部并清空细纲；近期内容并入「远期」（大纲）尾部并清空。
+    /// 队列轮转一次；在空细纲上调用为无副作用幂等。
+    /// </summary>
+    ValueTask<AdvanceChapterPlanResult> AdvanceChapterPlanAsync(
+        AdvanceChapterPlanPayload input,
+        CancellationToken cancellationToken);
+
     ValueTask UpdateChapterPlanAsync(
         long novelId,
         UpdateChapterPlanPayload input,

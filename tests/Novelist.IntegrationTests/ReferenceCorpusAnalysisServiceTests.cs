@@ -371,6 +371,64 @@ await service.StartTechniqueSpecimenAnalysisAsync(
     }
 
     [Fact]
+    public async Task ListFeatureObservationsKeywordFilterMatchesValueTextAndExplanationByContainment()
+    {
+        var options = CreateOptions();
+        await InitializeAsync(options);
+        await SeedAnalysisFixtureAsync(options);
+        var service = new SqliteReferenceCorpusAnalysisService(
+            options,
+            new FixedAppSettingsService("fake/fake-model", "medium"),
+            new EmptyObservationFeatureFamilyAnalyzer(tokensPerCall: 1));
+
+        // 作者级搜索：自然语言片段命中 value_text（压抑）。
+        var byValue = await service.ListFeatureObservationsAsync(
+            new ListReferenceCorpusFeatureObservationsPayload(
+                NovelId: 42,
+                AnchorId: 101,
+                NodeId: "node-b",
+                PageRequest: new PageRequestPayload(
+                    Cursor: null,
+                    PageSize: 10,
+                    SortBy: "created_at",
+                    SortDir: "asc",
+                    Filters: new Dictionary<string, string> { ["keyword_contains"] = "压抑" })),
+            CancellationToken.None);
+        Assert.True(byValue.Total >= 1);
+        Assert.All(byValue.Items, item => Assert.Contains("压抑", item.Explanation ?? item.ValuePreview ?? string.Empty, StringComparison.Ordinal));
+
+        // 部分词也命中（LIKE 包含，不要求全词）。
+        var partial = await service.ListFeatureObservationsAsync(
+            new ListReferenceCorpusFeatureObservationsPayload(
+                NovelId: 42,
+                AnchorId: 101,
+                NodeId: "node-b",
+                PageRequest: new PageRequestPayload(
+                    Cursor: null,
+                    PageSize: 10,
+                    SortBy: "created_at",
+                    SortDir: "asc",
+                    Filters: new Dictionary<string, string> { ["keyword_contains"] = "动作" })),
+            CancellationToken.None);
+        Assert.True(partial.Total >= 1);
+
+        // LIKE 通配符按字面匹配，不注入模式。
+        var literal = await service.ListFeatureObservationsAsync(
+            new ListReferenceCorpusFeatureObservationsPayload(
+                NovelId: 42,
+                AnchorId: 101,
+                NodeId: "node-b",
+                PageRequest: new PageRequestPayload(
+                    Cursor: null,
+                    PageSize: 10,
+                    SortBy: "created_at",
+                    SortDir: "asc",
+                    Filters: new Dictionary<string, string> { ["keyword_contains"] = "%" })),
+            CancellationToken.None);
+        Assert.Equal(0, literal.Total);
+    }
+
+    [Fact]
     public async Task StartFeatureAnalysisRoutesLowConfidenceObservationsToReviewList()
     {
         var options = CreateOptions();

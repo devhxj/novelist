@@ -17,6 +17,7 @@
     "test:choices": "node tests/choices.test.mjs",
     "test:layout": "node tests/layout.test.mjs",
     "test:diagnostics": "node tests/diagnostics.test.mjs",
+    "test:node": "node --test \"tests/*.test.mjs\"",
     "test:layout-ui": "node scripts/app-mock-workflow.mjs --suite=full --target=vite --grep=@layout",
     "test:git": "node scripts/app-mock-workflow.mjs --suite=full --target=vite --grep=@git",
     "test:relative-time": "node scripts/app-mock-workflow.mjs --suite=full --target=vite --grep=@time",
@@ -32,7 +33,7 @@
     "test:app:stress": "node scripts/app-mock-workflow.mjs --suite=stress --target=vite",
     "test:app:usability": "node scripts/app-mock-workflow.mjs --suite=usability --target=vite",
     "test:app:dist": "node scripts/app-mock-workflow.mjs --suite=smoke --target=dist",
-    "verify": "npm run build && npm run lint && npm run test:phase16 && npm run test:app"
+    "verify": "npm run build && npm run lint && npm run test:node && npm run test:phase16 && npm run test:app"
   },
   "dependencies": {
     "@antv/g6": "^5.1.1",

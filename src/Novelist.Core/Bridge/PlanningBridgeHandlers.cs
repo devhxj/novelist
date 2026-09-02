@@ -17,6 +17,11 @@ public static class PlanningBridgeHandlers
         dispatcher.Register("GetChapterPlans", async (context, cancellationToken) =>
             await service.GetChapterPlansAsync(ReadLongArg(context.Payload, 0, "novelId"), cancellationToken));
 
+        dispatcher.Register("AdvanceChapterPlan", async (context, cancellationToken) =>
+            await service.AdvanceChapterPlanAsync(
+                ReadObjectArg<AdvanceChapterPlanPayload>(context.Payload, 0, "input"),
+                cancellationToken));
+
         dispatcher.Register("UpdateChapterPlan", async (context, cancellationToken) =>
         {
             await service.UpdateChapterPlanAsync(

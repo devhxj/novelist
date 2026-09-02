@@ -76,7 +76,7 @@ export async function verifyErrorFeedbackWorkflow(context) {
   await expectVisible(importAlert, 'novel import error callout')
   await assertNoSensitiveDiagnosticsVisible(page)
   await assertCopyableDiagnostic(page, importAlert, 'StartNovelImport')
-  await page.getByRole('button', { name: '完成' }).click()
+  await page.getByRole('button', { name: '完成', exact: true }).click()
 
   const createNovelBefore = await bridgeCallCount(page, 'CreateNovel')
   await page.getByRole('button', { name: '新建作品' }).last().click()

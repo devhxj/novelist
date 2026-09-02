@@ -120,3 +120,10 @@ public sealed record UpdateReaderPerspectivePayload(
     [property: JsonPropertyName("planted_chapter")] int? PlantedChapter = null,
     [property: JsonPropertyName("related_truth")] string? RelatedTruth = null,
     [property: JsonPropertyName("revealed_chapter")] int? RevealedChapter = null);
+
+public sealed record AdvanceChapterPlanPayload(
+    [property: JsonPropertyName("novel_id")] long NovelId);
+
+public sealed record AdvanceChapterPlanResult(
+    [property: JsonPropertyName("next_plan_cleared")] bool NextPlanCleared,
+    [property: JsonPropertyName("far_plan_appended")] bool FarPlanAppended);

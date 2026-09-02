@@ -1953,6 +1953,11 @@ safe_diagnostics?: string[] | null
     specimen_count: number
   }
 
+  export interface AdvanceChapterPlanResult {
+    next_plan_cleared: boolean
+    far_plan_appended: boolean
+  }
+
   export interface GetReferenceCorpusAssetTotalsInput {
     novel_id: number
   }

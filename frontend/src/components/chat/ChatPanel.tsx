@@ -1,6 +1,6 @@
 import { useState, useCallback, useRef, useEffect } from 'react'
 import type { KeyboardEvent as ReactKeyboardEvent, MouseEvent as ReactMouseEvent } from 'react'
-import { MessageSquare, Loader2, History, Plus, PenLine, ChevronDown, Link2, Link2Off, Lock } from 'lucide-react'
+import { MessageSquare, Loader2, History, Plus, PenLine, ChevronDown, Link2, Link2Off, Lock, CheckCircle2 } from 'lucide-react'
 import { EventsOn } from '@/lib/novelist/events'
 import { useApp } from '@/hooks/useApp'
 import type { llm, app, reference } from '@/hooks/useApp'
@@ -108,6 +108,7 @@ export default function ChatPanel({
   const [chapterBinding, setChapterBinding] = useState<ChapterBinding>({ mode: 'auto' })
   const [bindingMenuOpen, setBindingMenuOpen] = useState(false)
   const [pinnedDraft, setPinnedDraft] = useState('')
+  const [advancingChapter, setAdvancingChapter] = useState(false)
   const coverageRequestSeqRef = useRef(0)
   // 生效章号：锁定优先，其次跟随编辑器 tab；off 显式为空。
   const effectiveChapterNumber = chapterBinding.mode === 'pinned'
@@ -175,6 +176,20 @@ export default function ChatPanel({
     coverageRefreshKeyRef.current = referenceRefreshKey
     loadCoverage({ refresh: true })
   }, [referenceRefreshKey, loadCoverage])
+
+  // 本章完成：轮转三层计划（细纲并入部纲、部纲并入大纲），随后刷新覆盖度信号。
+  const handleFinishChapter = useCallback(async () => {
+    if (!novelId || advancingChapter) return
+    setAdvancingChapter(true)
+    try {
+      await app.AdvanceChapterPlan({ novel_id: novelId })
+      loadCoverage({ refresh: true })
+    } catch {
+      // 轮转失败静默恢复按钮；作者可重试或到时间线面板手动调整。
+    } finally {
+      setAdvancingChapter(false)
+    }
+  }, [app, novelId, advancingChapter, loadCoverage])
 
   // 加载模型列表并恢复持久化设置
   useEffect(() => {
@@ -1115,7 +1130,7 @@ export default function ChatPanel({
                         }
                         if (seg.toolName === 'corpus_injection' && seg.toolStatus === 'completed' && seg.result?.automatic) {
                           const materials = (seg.result.materials as CorpusUsageMaterial[] | undefined) ?? []
-                          return <CorpusUsageCard key={seg.id} materials={materials} />
+                          return <CorpusUsageCard key={seg.id} materials={materials} novelId={novelId} />
                         }
 
                         return (
@@ -1255,7 +1270,7 @@ export default function ChatPanel({
         >
           {effectiveChapterNumber
             ? chapterBinding.mode === 'pinned'
-              ? (<><Lock className="h-3 w-3" aria-hidden="true" />第 {effectiveChapterNumber} 章 · 已锁定</>)
+              ? (<><Lock className="h-3 w-3" aria-hidden="true" />第 {effectiveChapterNumber} 章 · 已锁定（细纲取「下一章」槽）</>)
               : (<><Link2 className="h-3 w-3" aria-hidden="true" />第 {effectiveChapterNumber} 章 · 语料注入开启</>)
             : (<><Link2Off className="h-3 w-3" aria-hidden="true" />未绑定章节 · 注入关闭</>)}
           <ChevronDown className="h-3 w-3 opacity-60" aria-hidden="true" />
@@ -1273,6 +1288,19 @@ export default function ChatPanel({
             直接开写
           </button>
         )}
+        {hasNovel && (
+          <button
+            type="button"
+            onClick={() => { void handleFinishChapter() }}
+            disabled={isLoading || advancingChapter}
+            title="本章已完成：把细纲并入部纲、部纲并入大纲，腾出下一章细纲"
+            className="inline-flex h-6 items-center gap-1 rounded-md border border-border bg-background px-2 text-[11px] text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
+            data-testid="finish-chapter-button"
+          >
+            <CheckCircle2 className="h-3 w-3" aria-hidden="true" />
+            {advancingChapter ? '推进中…' : '完成本章'}
+          </button>
+        )}
 
         {bindingMenuOpen && (
           <div
@@ -1284,7 +1312,7 @@ export default function ChatPanel({
             <div className="flex items-center gap-1.5">
               <input
                 value={pinnedDraft}
-                onChange={(event) => { setPinnedDraft(event.target.value.replace(/[^0-9]/g, '')) }}
+                onChange={(event) => { setPinnedDraft(event.target.value.replace(/[^0-9]/g, '').slice(0, 6)) }}
                 placeholder="章号，如 3"
                 inputMode="numeric"
                 aria-label="锁定章号"
@@ -1320,6 +1348,7 @@ export default function ChatPanel({
             </div>
             <p className="mt-1.5 px-1 text-[10px] leading-relaxed text-muted-foreground">
               「跟随编辑器」按当前打开的章节 tab 自动绑定；锁定后切走 tab 仍保持注入。
+              语料注入与覆盖度始终依据时间线中的「细纲」（下一章计划槽）。
             </p>
           </div>
         )}

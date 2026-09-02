@@ -2068,6 +2068,7 @@ public sealed class FileSystemChatSessionService : IChatSessionService, ISubagen
         return model;
     }
 
+    private const int MaxChapterNumber = 999_999;
     private const int CorpusInjectionMaxMaterials = 5;
     private const int CorpusInjectionQueryMaxLength = 160;
     private const int CorpusInjectionPreviewMaxLength = 160;
@@ -2797,7 +2798,7 @@ public sealed class FileSystemChatSessionService : IChatSessionService, ISubagen
             ProviderName = NormalizeProviderName(input.ProviderName),
             ModelId = NormalizeRequiredText(input.ModelId, nameof(input.ModelId), MaxModelIdLength, allowLineBreaks: false),
             ReasoningEffort = NormalizeOptionalText(input.ReasoningEffort, nameof(input.ReasoningEffort), MaxReasoningEffortLength),
-            ChapterNumber = input.ChapterNumber is null || input.ChapterNumber > 0 ? input.ChapterNumber : null
+            ChapterNumber = input.ChapterNumber is > 0 and <= MaxChapterNumber ? input.ChapterNumber : null
         };
     }
 

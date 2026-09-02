@@ -426,7 +426,7 @@ export async function verifyImportExportFilePickerWorkflow(browser, url, console
   await page.locator('.fixed').getByRole('button', { name: '导出' }).click()
   await expectVisible(page.getByText('✓ 导出成功'), 'chapter export success')
   await waitForBridgeCallArg(page, 'ExportNovel', 1, 'markdown')
-  await page.locator('.fixed').getByRole('button', { name: '完成' }).click()
+  await page.locator('.fixed').getByRole('button', { name: '完成', exact: true }).click()
   await assertExportedNovels(page, [{ novel_id: 42, format: 'markdown' }])
 
   await clickActivity(page, '书架')
@@ -436,7 +436,7 @@ export async function verifyImportExportFilePickerWorkflow(browser, url, console
   await page.locator('.fixed').getByRole('button', { name: '导出' }).click()
   await expectVisible(page.getByText('✓ 导出成功'), 'bookshelf export success')
   await waitForBridgeCallArg(page, 'ExportNovel', 1, 'txt')
-  await page.locator('.fixed').getByRole('button', { name: '完成' }).click()
+  await page.locator('.fixed').getByRole('button', { name: '完成', exact: true }).click()
   await assertExportedNovels(page, [
     { novel_id: 42, format: 'markdown' },
     { novel_id: 42, format: 'txt' },
@@ -453,7 +453,7 @@ export async function verifyImportExportFilePickerWorkflow(browser, url, console
   await expectVisible(page.getByText('导入开篇').first(), 'file-picker novel import current chapter')
   await expectVisible(page.getByText('已导入：picker-import'), 'file-picker novel import success')
   await expectHidden(page.getByText('旧导入不应显示'), 'stale novel import progress ignored')
-  await page.getByRole('button', { name: '完成' }).click()
+  await page.getByRole('dialog', { name: '小说导入完成' }).getByRole('button', { name: '完成', exact: true }).click()
   await expectVisible(page.getByText('导入开篇').first(), 'first imported chapter opens after file-picker import')
   await clickActivity(page, '书架')
   await expectVisible(novelCard(page, 'picker-import'), 'file-picker imported novel card')
@@ -493,7 +493,7 @@ export async function verifyImportExportFilePickerWorkflow(browser, url, console
   await waitForBridgeCallCountAfter(page, 'StartNovelImport', dropImportBefore)
   await expectVisible(page.getByRole('dialog', { name: '小说导入完成' }), 'file URI novel import dialog')
   await expectVisible(page.getByText('已导入：drop-import-uri'), 'file URI novel import drop success')
-  await page.getByRole('button', { name: '完成' }).click()
+  await page.getByRole('dialog', { name: '小说导入完成' }).getByRole('button', { name: '完成', exact: true }).click()
   await clickActivity(page, '书架')
   await expectVisible(novelCard(page, 'drop-import-uri'), 'file URI imported novel card')
   await assertLastBridgeCallInput(page, 'StartNovelImport', {
@@ -512,7 +512,7 @@ export async function verifyImportExportFilePickerWorkflow(browser, url, console
   await waitForBridgeCallCountAfter(page, 'StartNovelImport', fileDropImportBefore)
   await expectVisible(page.getByRole('dialog', { name: '小说导入完成' }), 'drag-drop novel import dialog')
   await expectVisible(page.getByText('已导入：drop-import'), 'drag-drop novel import success')
-  await page.getByRole('button', { name: '完成' }).click()
+  await page.getByRole('dialog', { name: '小说导入完成' }).getByRole('button', { name: '完成', exact: true }).click()
   await clickActivity(page, '书架')
   await expectVisible(novelCard(page, 'drop-import'), 'drag-drop imported novel card')
   await assertLastBridgeCallInput(page, 'StartNovelImport', {
@@ -534,7 +534,7 @@ export async function verifyImportExportFilePickerWorkflow(browser, url, console
   await waitForBridgeCallCountAfter(page, 'CancelNovelImport', cancelCallBefore)
   await expectVisible(page.getByRole('dialog', { name: '小说导入已取消' }), 'user cancel import terminal dialog')
   await expectVisible(page.getByText('导入已取消').nth(1), 'user cancel import message')
-  await page.getByRole('button', { name: '完成' }).click()
+  await page.getByRole('button', { name: '完成', exact: true }).click()
   await clickActivity(page, '书架')
   await expectHidden(novelCard(page, 'cancel-import'), 'cancelled import must not leave a novel card')
   await assertNoBridgeCallArgValue(page, 'GetContent', cancelNovelImportFile, 'Cancelled novel import paths must not route through generic content reads.')
@@ -548,7 +548,7 @@ export async function verifyImportExportFilePickerWorkflow(browser, url, console
   await expectVisible(page.getByRole('dialog', { name: '小说导入失败' }), 'parser failure import dialog')
   await expectVisible(page.getByText('解析失败', { exact: true }), 'parser failure stage')
   await expectVisible(page.getByText('源文件解析失败').first(), 'parser failure message')
-  await page.getByRole('button', { name: '完成' }).click()
+  await page.getByRole('button', { name: '完成', exact: true }).click()
   await clickActivity(page, '书架')
   await expectHidden(novelCard(page, 'parser-failure'), 'parser failure must not leave a novel card')
   await assertNoBridgeCallArgValue(page, 'GetContent', parserFailureImportFile, 'Parser failure import paths must not route through generic content reads.')
@@ -562,7 +562,7 @@ export async function verifyImportExportFilePickerWorkflow(browser, url, console
   await expectVisible(page.getByRole('dialog', { name: '小说导入失败' }), 'write failure cleanup dialog')
   await expectVisible(page.getByText('清理完成', { exact: true }), 'write failure cleanup stage')
   await expectVisible(page.getByText('导入写入失败，已清理未完成数据。').first(), 'write failure cleanup message')
-  await page.getByRole('button', { name: '完成' }).click()
+  await page.getByRole('button', { name: '完成', exact: true }).click()
   await clickActivity(page, '书架')
   await expectHidden(novelCard(page, 'write-failure'), 'write failure cleanup must not leave a novel card')
   await assertNoBridgeCallArgValue(page, 'GetContent', writeFailureImportFile, 'Write failure import paths must not route through generic content reads.')
@@ -576,7 +576,7 @@ export async function verifyImportExportFilePickerWorkflow(browser, url, console
   await expectVisible(page.getByRole('dialog', { name: '小说导入完成，有警告' }), 'git warning import dialog')
   await expectVisible(page.getByText('导入警告'), 'git warning section')
   await expectVisible(page.getByText('导入已完成，但 Git 提交失败。'), 'git warning message')
-  await page.getByRole('button', { name: '完成' }).click()
+  await page.getByRole('button', { name: '完成', exact: true }).click()
   await expectVisible(page.getByText('导入开篇').first(), 'git warning import opens first chapter')
   await clickActivity(page, '书架')
   await expectVisible(novelCard(page, 'git-warning'), 'git warning import keeps imported novel card')
@@ -592,7 +592,7 @@ export async function verifyImportExportFilePickerWorkflow(browser, url, console
   await expectVisible(page.getByText('跳过 2 章'), 'skipped EPUB chapter count')
   await expectVisible(page.getByText(/#2 空白章节 · empty_content/), 'skipped EPUB empty chapter detail')
   await expectVisible(page.getByText(/#3 缺失章节 · missing_spine_item/), 'skipped EPUB missing chapter detail')
-  await page.getByRole('button', { name: '完成' }).click()
+  await page.getByRole('button', { name: '完成', exact: true }).click()
   await clickActivity(page, '书架')
   await expectVisible(novelCard(page, 'skipped-chapters'), 'skipped EPUB import keeps imported novel card')
   await assertNoBridgeCallArgValue(page, 'GetContent', skippedEpubImportFile, 'Skipped EPUB import paths must not route through generic content reads.')
@@ -761,6 +761,20 @@ export async function verifyCorpusChatWorkflow(page) {
   await expectVisible(page.getByTestId('corpus-usage-card'), 'corpus usage card')
   await expectVisible(page.getByText('本章语料注入'), 'corpus usage card heading')
   await expectVisible(page.getByTestId('corpus-usage-card').getByText('《全局雨夜参考》').first(), 'corpus usage material source book')
+
+  // 语料使用反馈：好/差评写入 RecordReferenceUserFeedback（accepted），按钮进入已表态态。
+  await page.getByTestId('corpus-usage-card').locator('[data-testid^=feedback-up-]').first().click()
+  await waitForBridgeCall(page, 'RecordReferenceUserFeedback')
+  const feedbackCalls = await page.evaluate(() =>
+    window.__appMockState.calls.filter((call) => call.method === 'RecordReferenceUserFeedback'))
+  assert.equal(feedbackCalls.at(-1).args?.[0]?.decision, 'accepted', 'usage feedback must record acceptance')
+  assert.equal(feedbackCalls.at(-1).args?.[0]?.target_type, 'material', 'usage feedback must target the material')
+
+  // 完成本章：轮转三层计划后细纲清空，覆盖度回到无细纲空态。
+  await page.getByRole('button', { name: '发送消息' }).waitFor({ state: 'visible', timeout: 12_000 })
+  await page.getByTestId('finish-chapter-button').click()
+  await waitForBridgeCall(page, 'AdvanceChapterPlan')
+  await expectVisible(page.getByText('本章还没有细纲'), 'coverage empty state after advancing plan')
 
   // 访谈选择题：AI 以 choices 块提问，点击选项即作为作者回答发送。
   await page.getByRole('button', { name: '发送消息' }).waitFor({ state: 'visible', timeout: 12_000 })

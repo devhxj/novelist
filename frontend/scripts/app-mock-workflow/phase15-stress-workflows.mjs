@@ -132,7 +132,7 @@ async function verifyLargeImport(page, importPath) {
   )
   await assertBridgeCallCount(page, 'SaveContent', 0)
 
-  await importDialog.getByRole('button', { name: '完成' }).click()
+  await importDialog.getByRole('button', { name: '完成', exact: true }).click()
   await expectVisible(page.getByText('导入开篇').first(), 'Phase 15 imported opening chapter')
   await clickActivity(page, '书架')
   await expectVisible(novelCard(page, IMPORT_TITLE), 'Phase 15 imported novel card')

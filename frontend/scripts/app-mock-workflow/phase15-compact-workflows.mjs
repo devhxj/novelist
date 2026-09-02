@@ -65,7 +65,7 @@ async function verifyCompactImport(page, importFixture) {
   await expectVisible(page.getByRole('dialog', { name: '小说导入完成' }), 'compact import completion dialog')
   await expectVisible(page.getByText('100%'), 'compact import completion percent')
   await expectVisible(page.getByText('已导入：phase15-compact-import'), 'compact import completion message')
-  await page.getByRole('button', { name: '完成' }).click()
+  await page.getByRole('button', { name: '完成', exact: true }).click()
 
   await clickActivity(page, '书架')
   await expectVisible(novelCard(page, 'phase15-compact-import'), 'compact imported novel card')

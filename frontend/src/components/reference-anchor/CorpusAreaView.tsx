@@ -224,7 +224,7 @@ function CorpusBrowse({ novelId, anchors, refreshKey }: {
       if (kind === 'observations') {
         const filters: Record<string, string> = {}
         if (family) filters.feature_family = family
-        if (keyword.trim()) filters.feature_key = keyword.trim()
+        if (keyword.trim()) filters.keyword_contains = keyword.trim()
         if (reviewFilter) filters.review_state = reviewFilter
         const page: storage.PageRequest = {
           cursor,
@@ -308,8 +308,9 @@ function CorpusBrowse({ novelId, anchors, refreshKey }: {
           <input
             value={keyword}
             onChange={(event) => { setKeyword(event.target.value) }}
-            placeholder={kind === 'observations' ? 'feature_key' : '—'}
+            placeholder={kind === 'observations' ? '搜索内容或说明…' : '—'}
             disabled={kind !== 'observations'}
+            title="对取值文本与说明做包含匹配"
             className="h-8 w-28 rounded-md border border-border bg-background px-2 text-xs text-foreground placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50"
             aria-label="按关键字筛选"
           />
@@ -492,6 +493,33 @@ function SpecimenCard({ specimen, isExpanded, onToggle }: {
   isExpanded: boolean
   onToggle: () => void
 }) {
+  const app = useApp()
+  const [context, setContext] = useState<string | null>(null)
+  const [contextError, setContextError] = useState(false)
+
+  useEffect(() => {
+    if (!isExpanded || context || contextError || !specimen.source_node_id) return
+    let cancelled = false
+    void (async () => {
+      try {
+        const window = await app.GetReferenceCorpusNodeWindow({
+          anchor_id: specimen.source_anchor_id,
+          node_id: specimen.source_node_id,
+          max_nodes: 3,
+        })
+        if (cancelled) return
+        const text = (window?.chapter_nodes ?? [])
+          .map((item) => item.text)
+          .filter(Boolean)
+          .join('\n……\n')
+        setContext(text || null)
+      } catch {
+        if (!cancelled) setContextError(true)
+      }
+    })()
+    return () => { cancelled = true }
+  }, [app, isExpanded, context, contextError, specimen.source_anchor_id, specimen.source_node_id])
+
   return (
     <div className="rounded-md border border-border bg-background">
       <button
@@ -517,6 +545,11 @@ function SpecimenCard({ specimen, isExpanded, onToggle }: {
             <dd className="mt-0.5 whitespace-pre-wrap break-words">
               {specimen.evidence.map((entry) => entry.evidence_preview).filter(Boolean).join('\n') || '（无证据预览）'}
             </dd>
+            {isExpanded && (
+              <dd className="mt-1 whitespace-pre-wrap break-words rounded border border-border bg-muted/20 px-2 py-1.5" data-testid="specimen-evidence-context">
+                {context ?? (contextError ? '（证据上下文不可用）' : '正在加载证据原文…')}
+              </dd>
+            )}
           </div>
           <div>
             <dt className="font-medium text-foreground">触发语境</dt>
