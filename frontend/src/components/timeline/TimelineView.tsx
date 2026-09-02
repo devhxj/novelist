@@ -6,7 +6,7 @@ import ErrorCallout from '@/components/shared/ErrorCallout'
 import { buildCopyableDiagnostic, diagnosticMessage } from '@/lib/diagnostics'
 import type { diagnostics } from '@/lib/novelist/types'
 
-interface Props { novelId: number; focusEntryId?: number; onOpenInEditor?: (path: string, title: string) => void }
+interface Props { novelId: number; focusEntryId?: number; onOpenInEditor?: (path: string, title: string, readOnly?: boolean) => void }
 
 type Tab = 'next' | 'near' | 'far'
 type Filter = 'all' | 'pending' | 'resolved' | 'abandoned'
@@ -457,7 +457,7 @@ export default function TimelineView({ novelId, focusEntryId, onOpenInEditor }: 
               {onOpenInEditor && (
                 <button
                   type="button"
-                  onClick={() => onOpenInEditor('plans/细纲.md', '细纲')}
+                  onClick={() => onOpenInEditor('plans/细纲.md', '细纲', true)}
                   className="ml-auto rounded border border-border px-2 py-0.5 text-[11px] text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                   data-testid="open-plan-in-editor"
                 >

@@ -66,7 +66,7 @@ export default function CorpusAreaView({ novelId, refreshKey, anchors, selectedA
         />
       )}
       {tab === 'browse' && <CorpusBrowse novelId={novelId} anchors={anchors} refreshKey={refreshKey} />}
-      {tab === 'pack' && <CorpusPack anchors={anchors} />}
+      {tab === 'pack' && <CorpusPack novelId={novelId} anchors={anchors} />}
     </section>
   )
 }
@@ -532,7 +532,7 @@ function SpecimenCard({ specimen, isExpanded, onToggle }: {
   )
 }
 
-function CorpusPack({ anchors }: { anchors: reference.Anchor[] }) {
+function CorpusPack({ novelId, anchors }: { novelId: number; anchors: reference.Anchor[] }) {
   const app = useApp()
   const usableAnchors = useMemo(() => anchors.filter(isUsableAnchor), [anchors])
   const [anchorId, setAnchorId] = useState<number | null>(null)
@@ -552,10 +552,14 @@ function CorpusPack({ anchors }: { anchors: reference.Anchor[] }) {
     setBusy('export')
     setMessage(null)
     try {
-      const result = await app.ExportReferenceCorpusPackage({ novel_id: 0, anchor_id: anchorId })
+      const result = await app.ExportReferenceCorpusPackage({ novel_id: novelId, anchor_id: anchorId })
       setMessage({ tone: 'ok', text: `已导出 ${result.observation_count} 条观察、${result.specimen_count} 条标本 → ${result.file_path}` })
     } catch (err) {
-      setMessage({ tone: 'error', text: describeBridgeError(err, '语料包导出失败。').message })
+      const diagnostic = describeBridgeError(err, '语料包导出失败。')
+      setMessage({
+        tone: diagnostic.code === 'materialization_cancelled' ? 'ok' : 'error',
+        text: diagnostic.message,
+      })
     } finally {
       setBusy(null)
     }
@@ -566,10 +570,14 @@ function CorpusPack({ anchors }: { anchors: reference.Anchor[] }) {
     setBusy('import')
     setMessage(null)
     try {
-      const result = await app.ImportReferenceCorpusPackage({ novel_id: 0, anchor_id: anchorId })
+      const result = await app.ImportReferenceCorpusPackage({ novel_id: novelId, anchor_id: anchorId })
       setMessage({ tone: 'ok', text: `导入完成：新增 ${result.imported_count} 条，跳过已存在 ${result.skipped_count} 条（观察 ${result.observation_count} / 标本 ${result.specimen_count}）。` })
     } catch (err) {
-      setMessage({ tone: 'error', text: describeBridgeError(err, '语料包导入失败。').message })
+      const diagnostic = describeBridgeError(err, '语料包导入失败。')
+      setMessage({
+        tone: diagnostic.code === 'materialization_cancelled' ? 'ok' : 'error',
+        text: diagnostic.message,
+      })
     } finally {
       setBusy(null)
     }

@@ -93,14 +93,14 @@ public static class ReferenceCorpusAnalysisBridgeHandlers
         });
 
         dispatcher.Register("ExportReferenceCorpusPackage", async (context, cancellationToken) =>
-            await service.ExportPackageAsync(
+            await ExecutePackageExportAsync(() => service.ExportPackageAsync(
                 ReadObjectArg<ExportReferenceCorpusPackagePayload>(context.Payload, 0, "input"),
-                cancellationToken));
+                cancellationToken)));
 
         dispatcher.Register("ImportReferenceCorpusPackage", async (context, cancellationToken) =>
-            await service.ImportPackageAsync(
+            await ExecutePackageImportAsync(() => service.ImportPackageAsync(
                 ReadObjectArg<ImportReferenceCorpusPackagePayload>(context.Payload, 0, "input"),
-                cancellationToken));
+                cancellationToken)));
 
         dispatcher.Register("GetReferenceCorpusAssetTotals", async (context, cancellationToken) =>
             await service.GetAssetTotalsAsync(
@@ -108,6 +108,40 @@ public static class ReferenceCorpusAnalysisBridgeHandlers
                 cancellationToken));
 
         return dispatcher;
+    }
+
+    private static async ValueTask<ReferenceCorpusPackageExportResult> ExecutePackageExportAsync(
+        Func<ValueTask<ReferenceCorpusPackageExportResult>> operation)
+    {
+        try
+        {
+            return await operation();
+        }
+        catch (ReferenceMaterializationException exception)
+        {
+            throw new BridgeRequestException(
+                exception.ErrorCode,
+                exception.Message,
+                new { error_code = exception.ErrorCode },
+                retryable: true);
+        }
+    }
+
+    private static async ValueTask<ReferenceCorpusPackageImportResult> ExecutePackageImportAsync(
+        Func<ValueTask<ReferenceCorpusPackageImportResult>> operation)
+    {
+        try
+        {
+            return await operation();
+        }
+        catch (ReferenceMaterializationException exception)
+        {
+            throw new BridgeRequestException(
+                exception.ErrorCode,
+                exception.Message,
+                new { error_code = exception.ErrorCode },
+                retryable: true);
+        }
     }
 
     private static void ValidatePageRequest(

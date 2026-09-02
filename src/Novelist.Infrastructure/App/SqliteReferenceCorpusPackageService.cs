@@ -92,9 +92,27 @@ public sealed partial class SqliteReferenceCorpusAnalysisService
             .Where(line => !string.IsNullOrWhiteSpace(line))
             .ToArray();
 
-        var (observations, specimens) = ParsePackageLines(lines);
+        var (allObservations, allSpecimens) = ParsePackageLines(lines);
+        // 证据原文列是导出附带的展示字段，不属于表结构；插入前剥离。
+        foreach (var row in allObservations)
+        {
+            row.Remove("evidence_text");
+        }
+
+        foreach (var row in allSpecimens)
+        {
+            row.Remove("evidence_text");
+        }
+
         var databasePath = await DatabasePathAsync(cancellationToken);
         await using var connection = await OpenConnectionAsync(databasePath, cancellationToken);
+
+        // SQLite 的 INSERT OR IGNORE 不忽略外键冲突：证据节点缺失的行先过滤掉，保证“跳过”语义。
+        var observations = await FilterRowsWithExistingNodesAsync(
+            connection, allObservations, nodeIdColumn: "node_id", cancellationToken);
+        var specimens = await FilterRowsWithExistingNodesAsync(
+            connection, allSpecimens, nodeIdColumn: "source_node_id", cancellationToken);
+
         await using var transaction = (SqliteTransaction)await connection.BeginTransactionAsync(cancellationToken);
         var importedObservations = 0;
         foreach (var row in observations)
@@ -111,9 +129,9 @@ public sealed partial class SqliteReferenceCorpusAnalysisService
         await transaction.CommitAsync(cancellationToken);
         return new ReferenceCorpusPackageImportResult(
             importedObservations + importedSpecimens,
-            observations.Count + specimens.Count - importedObservations - importedSpecimens,
-            observations.Count,
-            specimens.Count);
+            allObservations.Count + allSpecimens.Count - importedObservations - importedSpecimens,
+            allObservations.Count,
+            allSpecimens.Count);
     }
 
     private async ValueTask<(List<string> Observations, List<string> Specimens)> ReadPackageRowsAsync(
@@ -197,6 +215,37 @@ public sealed partial class SqliteReferenceCorpusAnalysisService
         return JsonSerializer.Serialize(payload);
     }
 
+    // System.Text.Json 反序列化 object? 得到 JsonElement 装箱值；转成 CLR 原语便于后续绑定与判断。
+    private static Dictionary<string, object?>? DeserializeRow(JsonElement data)
+    {
+        var raw = JsonSerializer.Deserialize<Dictionary<string, object?>>(data.GetRawText());
+        if (raw is null)
+        {
+            return null;
+        }
+
+        var result = new Dictionary<string, object?>(raw.Count, StringComparer.Ordinal);
+        foreach (var (key, value) in raw)
+        {
+            result[key] = value is JsonElement element ? ConvertElement(element) : value;
+        }
+
+        return result;
+    }
+
+    private static object? ConvertElement(JsonElement element)
+    {
+        return element.ValueKind switch
+        {
+            JsonValueKind.String => element.GetString(),
+            JsonValueKind.Number => element.TryGetInt64(out var integer) ? integer : element.GetDouble(),
+            JsonValueKind.True => true,
+            JsonValueKind.False => false,
+            JsonValueKind.Null => null,
+            _ => element.GetRawText(),
+        };
+    }
+
     private static (List<Dictionary<string, object?>> Observations, List<Dictionary<string, object?>> Specimens) ParsePackageLines(
         string[] lines)
     {
@@ -214,7 +263,7 @@ public sealed partial class SqliteReferenceCorpusAnalysisService
                 throw new ArgumentException("语料包行格式无效（应为 {type, data} JSON 对象）。");
             }
 
-            var payload = JsonSerializer.Deserialize<Dictionary<string, object?>>(data.GetRawText())
+            var payload = DeserializeRow(data)
                 ?? throw new ArgumentException("语料包行数据无效。");
             var typeName = type.GetString();
             if (string.Equals(typeName, "observation", StringComparison.Ordinal))
@@ -232,6 +281,31 @@ public sealed partial class SqliteReferenceCorpusAnalysisService
         }
 
         return (observations, specimens);
+    }
+
+    private static async ValueTask<List<Dictionary<string, object?>>> FilterRowsWithExistingNodesAsync(
+        SqliteConnection connection,
+        List<Dictionary<string, object?>> rows,
+        string nodeIdColumn,
+        CancellationToken cancellationToken)
+    {
+        var kept = new List<Dictionary<string, object?>>(rows.Count);
+        foreach (var row in rows)
+        {
+            if (row.TryGetValue(nodeIdColumn, out var nodeId) && nodeId is string id && !string.IsNullOrEmpty(id))
+            {
+                await using var command = connection.CreateCommand();
+                command.CommandText = "SELECT COUNT(*) FROM reference_text_nodes WHERE node_id = $node_id;";
+                command.Parameters.AddWithValue("$node_id", id);
+                var count = Convert.ToInt32(await command.ExecuteScalarAsync(cancellationToken), CultureInfo.InvariantCulture);
+                if (count > 0)
+                {
+                    kept.Add(row);
+                }
+            }
+        }
+
+        return kept;
     }
 
     private static async ValueTask<int> InsertOrIgnoreAsync(

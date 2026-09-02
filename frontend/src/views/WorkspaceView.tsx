@@ -534,7 +534,7 @@ export default function WorkspaceView({ initialNovelId, initialShowHelp, startup
         ) : activePanel === 'storyarcs' ? (
           <ArcListView novelId={activeNovelId} focusArcId={arcFocusId} />
         ) : activePanel === 'timeline' ? (
-          <TimelineView novelId={activeNovelId} focusEntryId={timelineFocusId} onOpenInEditor={(path, title) => contentRef.current?.openFile(path, title)} />
+          <TimelineView novelId={activeNovelId} focusEntryId={timelineFocusId} onOpenInEditor={(path, title, readOnly) => contentRef.current?.openFile(path, title, readOnly)} />
         ) : activePanel === 'reader' ? (
           <ReaderView novelId={activeNovelId} focusId={readerFocusId} />
         ) : activePanel === 'preferences' ? (
