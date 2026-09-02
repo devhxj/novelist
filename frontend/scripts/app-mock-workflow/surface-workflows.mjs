@@ -878,6 +878,13 @@ export async function verifyChatWorkflow(page) {
   await expectVisible(page.getByText('对话已停止'), 'chat stopped state')
   await waitForBridgeCall(page, 'CancelChat')
   await page.getByRole('button', { name: '发送消息' }).waitFor({ state: 'visible', timeout: 12_000 })
+  // O18：停止必须取消"正在流式输出的那一轮"的会话（chat:started 送达的 id），
+  // 而不是此刻 sessionId state 可能指向的别的会话。
+  const stopCancelCalls = await page.evaluate(() =>
+    window.__appMockState.calls.filter((call) => call.method === 'CancelChat'))
+  const stopChatCall = await page.evaluate(() =>
+    window.__appMockState.calls.filter((call) => call.method === 'Chat').at(-1) ?? null)
+  assert.equal(stopCancelCalls.at(-1)?.args?.[0], stopChatCall?.result?.session_id, 'stop must cancel the active streaming session (O18)')
 
   await input.fill('触发失败态')
   await input.press('Enter')
@@ -891,13 +898,14 @@ export async function verifyChatWorkflow(page) {
   await input.press('Enter')
   await expectVisible(page.getByText('生成长文本 Markdown 报告'), 'long markdown prompt')
   await expectVisible(page.getByRole('button', { name: '停止生成' }), 'streaming control during long chat')
-  await expectVisible(page.getByRole('heading', { name: '约束检查' }), 'streamed markdown heading')
+  // 共享长驻页面上 corpus 与 chat 工作流各留一份同文 markdown；这里只断言存在性，用 first 消解严格模式二义。
+  await expectVisible(page.getByRole('heading', { name: '约束检查' }).first(), 'streamed markdown heading')
   await expectVisible(page.getByRole('button', { name: '停止生成' }), 'streaming control after partial markdown render')
-  await expectVisible(page.getByText('不要直接写入章节正文'), 'markdown bullet content')
-  await expectVisible(page.getByText('scene_guard:'), 'markdown code block')
+  await expectVisible(page.getByText('不要直接写入章节正文').first(), 'markdown bullet content')
+  await expectVisible(page.getByText('scene_guard:').first(), 'markdown code block')
   await expectVisible(page.getByRole('button', { name: '复制代码' }).first(), 'markdown code copy affordance')
-  await expectVisible(page.getByText('第十二段：雨声压住脚步声，回复仍保持可读宽度。'), 'long generated text tail')
-  await expectVisible(page.getByText('最终建议：先读后改，不越过审批。'), 'long markdown final marker')
+  await expectVisible(page.getByText('第十二段：雨声压住脚步声，回复仍保持可读宽度。').first(), 'long generated text tail')
+  await expectVisible(page.getByText('最终建议：先读后改，不越过审批。').first(), 'long markdown final marker')
   const longMarkdownContentEvents = await page.evaluate(() =>
     window.__appMockState.emittedEvents.filter((event) =>
       event.name.startsWith('agent:') &&
@@ -1209,6 +1217,8 @@ export async function verifyReferenceWorkspaceWorkflow(page) {
   await page.screenshot({ path: path.join(outputDir, 'materialization-toast.png'), fullPage: true })
   await page.getByTestId('toast-host').getByRole('button', { name: '打开素材库' }).click()
   await expectVisible(page.getByTestId('reference-corpus-workspace'), 'toast action returns to the corpus area')
+  // U15：live region 容器必须常驻——通知清空后仍在 DOM，空闲后的首条通知才能被读屏可靠播报。
+  assert.equal(await page.locator('[data-testid="toast-host"]').count(), 1, 'toast host stays mounted when empty (U15)')
 
   // 蓝图预演已随拼装线退役：右侧恢复 AI 对话，预演面板不再存在。
   await expectHidden(page.getByTestId('blueprint-preview-panel'), 'retired blueprint preview panel')

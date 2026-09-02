@@ -186,9 +186,21 @@
 
 ### 验证基线
 
-`dotnet test Novelist.slnx`：216/216 单测 + 708/708 集成全绿（净增 5：迁移 ×3、章节守卫/统计/高水位 ×3、元数据部分更新 ×1，移除 2 个随桥退役的 dispatch 测试）。前端：`build`（仅存量 chunk 警告）、`lint` 0 error 0 warning、`test:node`（22 例）、`test:app`、`test:app:full`、`test:phase16`、`test:app:stress` 全绿——其中 `test:app:full` 在本轮开始时于 HEAD 基线即为红（O21 的 mock 规避所致），修复后首次全绿。新增截图：`cover-remove-button.png`；更新场景：`chapter-delete-undo-toast.png`（含 tab 关闭与内容恢复断言）、数据目录迁移（断言复制统计与清单路径文案）。
+`dotnet test Novelist.slnx`：216/216 单测 + 708/708 集成全绿（净增 5：迁移 ×3、章节守卫/统计/高水位 ×3、元数据部分更新 ×1，移除 2 个随桥退役的 dispatch 测试）。前端：`build`（仅存量 chunk 警告）、`lint` 0 error 0 warning、`test:node`（23 例，含新增 toast 单测）、`test:app`、`test:app:full`、`test:phase16`、`test:app:stress`、`test:error-ui` 全绿——其中 `test:app:full` 在本轮开始时于 HEAD 基线即为红（O21 的 mock 规避所致），修复后首次全绿。新增截图：`cover-remove-button.png`；更新场景：`chapter-delete-undo-toast.png`（含 tab 关闭与内容恢复断言）、数据目录迁移（断言复制统计与清单路径文案）。
 
 排查纪律备注：本轮对 `test:app:full` 的三段式定位（带改动失败 → 单文件回退仍失败 → 全量回退到 HEAD 仍失败）确认了 chat 断言断裂属第三轮遗留而非本轮回归，随后按"mock 应模拟真实后端"的原则修复了被规避的前端缺陷本身。
+
+### 验收审计补全（2026-09-03）
+
+对照第六节验收口径复核落地状态，发现并闭合 4 处缺口——教训是"跑了 test:app:full ≠ 覆盖全部套件"：`verifyApprovalSubmitErrorRecovery` 只挂在 `@error` grep 下，初次验证基线漏跑了它，导致两处断言失效未被发现：
+
+1. **O17 文案断裂 + 场景补全**：慢路径提示改为常驻型文案（`审批等待已超过 6 秒没有进展`）后，`@error` 工作流仍断言旧文案（`提交已超过 6 秒没有回应`）——套件红。已同步文案；并在第一页（提交成功后）扩展文档要求的"提交成功但无后续事件"场景：等 6 秒断言慢提示与「结束本轮」出现，点击后卡片转 failed、无残留等待卡（`test:error-ui` 全绿）。
+2. **U16/U14 单测**：新增 `tests/toast.test.mjs`（esbuild 打包 toast store）：无动作条 4 条上限从最老挤出；带动作条入队零定时器、不被挤出；触发全部定时器后动作条仍在、无动作条消失；dismissToast 可移除动作条。
+3. **U15 空态断言**：材料化通知工作流在动作点击、通知清空后断言 `toast-host` 容器仍恰有 1 个（live region 常驻）。
+4. **O18 停止参数断言**：chat 工作流停止路径断言 `CancelChat` 的参数等于本轮 `chat:started` 送达的 session id（`Chat` 结果回填后比对）。
+5. **既有断言加固**：chat 工作流的长 markdown 断言在共享长驻页面上会命中 corpus 与 chat 两轮同文内容（严格模式冲突），按文件既有惯例加 `.first()`（断言意图不变）。
+
+补跑结果：`test:error-ui`、`test:app:full`、`test:phase16`、`test:node`（23）、`lint` 全绿。
 
 ### 残余事项（不阻塞）
 

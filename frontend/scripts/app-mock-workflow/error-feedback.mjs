@@ -842,6 +842,16 @@ async function verifyApprovalSubmitErrorRecovery(context) {
   await expectHidden(approvalAlert, 'approval failure error cleared after successful retry')
   assert.equal(await feedbackBox(failurePage).inputValue(), '', 'feedback cleared after successful approval')
   await expectVisible(approvalCard(failurePage).getByText('等待审批', { exact: true }), 'approval card still awaiting after successful submit')
+
+  // O17 验收场景：提交成功但后端不再发后续工具事件（轮次已死）——慢路径提示必须在
+  // "等待审批"常态下照样出现（而不是只在提交瞬间），作者由此拿到「结束本轮」出路。
+  const deadTurnHint = failurePage.getByRole('status').filter({ hasText: '审批等待已超过 6 秒没有进展' })
+  await expectVisible(deadTurnHint, 'slow hint appears after a successful submit with no follow-up event')
+  await expectVisible(approvalCard(failurePage).getByRole('button', { name: '结束本轮' }), 'end-turn escape hatch on a dead turn')
+  await approvalCard(failurePage).getByRole('button', { name: '结束本轮' }).click()
+  const deadTurnCard = failurePage.locator('.tool-card.failed').filter({ hasText: '确认删除角色' })
+  await expectVisible(deadTurnCard, 'dead-turn approval card switched to failed after ending the turn')
+  await expectHidden(approvalCard(failurePage), 'no awaiting_approval card remains after ending the dead turn')
   await failurePage.close()
 
   // 第二页：ApproveTool 永久挂起 → 软超时提示 + 结束本轮 → 卡片离开等待审批，不再卡死。
@@ -857,7 +867,7 @@ async function verifyApprovalSubmitErrorRecovery(context) {
 
   await approvalCard(hangPage).getByRole('button', { name: '批准' }).click()
   await expectVisible(approvalCard(hangPage).getByText('提交中', { exact: true }), 'submitting badge while approval hangs')
-  const slowHint = hangPage.getByRole('status').filter({ hasText: '提交已超过 6 秒没有回应' })
+  const slowHint = hangPage.getByRole('status').filter({ hasText: '审批等待已超过 6 秒没有进展' })
   await expectVisible(slowHint, 'soft timeout hint after 6 seconds without approval response')
   await expectVisible(approvalCard(hangPage).getByRole('button', { name: '结束本轮' }), 'end-turn escape hatch on approval hang')
 
