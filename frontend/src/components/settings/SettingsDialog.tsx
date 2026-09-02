@@ -3,6 +3,7 @@ import { Settings, Cpu } from 'lucide-react'
 import ModelConfigTab from './ModelConfigTab'
 import GeneralConfigTab from './GeneralConfigTab'
 import { useDialogA11y } from '@/hooks/useDialogA11y'
+import { pushToast } from '@/lib/toast'
 
 type Tab = 'general' | 'model'
 
@@ -15,7 +16,17 @@ interface Props {
 
 export default function SettingsDialog({ open, onClose, onSaved, initialTab = 'model' }: Props) {
   const [activeTab, setActiveTab] = useState<Tab>(initialTab)
-  const dialogProps = useDialogA11y(open, onClose, '设置')
+  // 数据目录迁移等独占操作进行中时，对话框不可被关闭（U13）：
+  // 半途关掉会把进行中的迁移留在后台、成功/失败反馈随组件卸载丢失。
+  const [busy, setBusy] = useState(false)
+  const guardedClose = () => {
+    if (busy) {
+      pushToast({ kind: 'info', message: '操作正在进行中，完成前无法关闭设置。' })
+      return
+    }
+    onClose()
+  }
+  const dialogProps = useDialogA11y(open, guardedClose, '设置')
 
   if (!open) return null
 
@@ -27,7 +38,7 @@ export default function SettingsDialog({ open, onClose, onSaved, initialTab = 'm
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center">
       {/* 遮罩 */}
-      <div className="absolute inset-0 bg-black/40" onClick={onClose} />
+      <div className="absolute inset-0 bg-black/40" onClick={guardedClose} />
 
       {/* 弹窗 */}
       <div
@@ -57,8 +68,9 @@ export default function SettingsDialog({ open, onClose, onSaved, initialTab = 'm
         <div className="min-h-0 flex-1 overflow-y-auto p-5 pr-6 flex flex-col min-w-0">
           {/* 关闭按钮 */}
           <button
-            onClick={onClose}
-            className="absolute top-3 right-3 w-7 h-7 flex items-center justify-center rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
+            onClick={guardedClose}
+            aria-disabled={busy}
+            className="absolute top-3 right-3 w-7 h-7 flex items-center justify-center rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-colors disabled:opacity-50"
           >
             ✕
           </button>
@@ -66,7 +78,7 @@ export default function SettingsDialog({ open, onClose, onSaved, initialTab = 'm
           {activeTab === 'model' ? (
             <ModelConfigTab onSaved={onSaved} />
           ) : (
-            <GeneralConfigTab />
+            <GeneralConfigTab onBusyChange={setBusy} />
           )}
         </div>
       </div>

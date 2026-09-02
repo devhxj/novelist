@@ -2631,10 +2631,6 @@ public sealed partial class SqliteReferenceAnchorService : IReferenceAnchorServi
 
         var title = NormalizeRequiredText(input.Title, nameof(input.Title), maxLength: 200);
         var author = NormalizeOptionalText(input.Author, nameof(input.Author), maxLength: 200);
-        var licenseStatus = ValidateAllowedText(input.LicenseStatus, nameof(input.LicenseStatus), AllowedLicenseStatuses);
-        var visibility = ValidateAllowedText(input.Visibility, nameof(input.Visibility), AllowedCorpusVisibilities);
-        var sourceTrust = ValidateAllowedText(input.SourceTrust, nameof(input.SourceTrust), AllowedSourceTrustLevels);
-        var userTags = NormalizeUserTags(input.UserTags);
         var now = DateTimeOffset.UtcNow;
 
         await _mutex.WaitAsync(cancellationToken);
@@ -2644,6 +2640,17 @@ public sealed partial class SqliteReferenceAnchorService : IReferenceAnchorServi
             await EnsureSchemaAsync(databasePath, cancellationToken);
             await using var connection = await OpenConnectionAsync(databasePath, cancellationToken);
             var current = await ReadAnchorAsync(connection, input.NovelId, input.AnchorId, cancellationToken);
+            // O20：null = 保持现值。编辑表单不再回传快照，并发变更不会被整体回写静默回滚。
+            var licenseStatus = input.LicenseStatus is null
+                ? current.LicenseStatus
+                : ValidateAllowedText(input.LicenseStatus, nameof(input.LicenseStatus), AllowedLicenseStatuses);
+            var visibility = input.Visibility is null
+                ? current.Visibility
+                : ValidateAllowedText(input.Visibility, nameof(input.Visibility), AllowedCorpusVisibilities);
+            var sourceTrust = input.SourceTrust is null
+                ? current.SourceTrust
+                : ValidateAllowedText(input.SourceTrust, nameof(input.SourceTrust), AllowedSourceTrustLevels);
+            var userTags = input.UserTags is null ? current.UserTags : NormalizeUserTags(input.UserTags);
             if (current.OwnerScope == ReferenceAnchorOwnerScopes.WorkspaceCorpus &&
                 visibility != ReferenceCorpusVisibilities.Workspace)
             {

@@ -204,39 +204,6 @@ export async function verifyChapterReferenceBridgeCalls(page) {
   assert.deepEqual(unexpected, [], `chapter editor must not invoke retired assembly bridge methods, got ${unexpected.join(', ')}`)
 }
 
-export async function verifyPatternBridgeCalls(page) {
-  const calls = await page.evaluate(() => window.__appMockState.calls)
-  const methods = calls.map((call) => call.method)
-  const requiredMethods = [
-    'IsInitialized',
-    'GetSettings',
-    'GetNovels',
-    'GetChapters',
-    'GetModels',
-    'StartNarrativePatternExtraction',
-    'GetNarrativePatternTrace',
-    'CancelNarrativePatternExtraction',
-    'SaveContent',
-  ]
-
-  for (const method of requiredMethods) {
-    assert(methods.includes(method), `Expected pattern bridge method ${method} to be called.`)
-  }
-
-  const chapterSaves = calls.filter((call) =>
-    call.method === 'SaveContent' &&
-    String(call.args?.[0]?.path ?? '').startsWith('chapters/'))
-  assert.deepEqual(chapterSaves, [], 'pattern workflow must not save chapter content')
-
-  const skillSaves = calls.filter((call) =>
-    call.method === 'SaveContent' &&
-    String(call.args?.[0]?.path ?? '').startsWith('skills/'))
-  assert(skillSaves.length >= 1, 'pattern workflow must save generated skills through the skill catalog path')
-  assert(!methods.includes('runtime.shell.openExternal'), 'pattern workflow must not open external URLs')
-  assert(!methods.includes('ApproveReferenceChapterBlueprint'), 'pattern workflow must not approve reference blueprints')
-  assert(!methods.includes('BindReferenceBlueprintMaterials'), 'pattern workflow must not bind reference materials')
-}
-
 export async function verifyRelativeTimeBridgeCalls(page) {
   const calls = await page.evaluate(() => window.__appMockState.calls)
   const methods = calls.map((call) => call.method)

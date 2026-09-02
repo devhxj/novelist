@@ -24,7 +24,7 @@ type InlineSettingsFeedback =
     diagnostic: diagnostics.CopyableDiagnostic | null
   }
 
-export default function GeneralConfigTab() {
+export default function GeneralConfigTab({ onBusyChange }: { onBusyChange?: (busy: boolean) => void }) {
   const app = useApp()
   const [dataDir, setDataDir] = useState('')
   const [novels, setNovels] = useState<novel.Novel[]>([])
@@ -80,20 +80,34 @@ export default function GeneralConfigTab() {
     })
   }, [app])
 
+  useEffect(() => {
+    // 迁移进行中要向上报告 busy：SettingsDialog 据此阻止 Escape/遮罩/✕ 关闭（U13）。
+    onBusyChange?.(migrating)
+  }, [migrating, onBusyChange])
+
   async function handleMigrateDataDir() {
     const target = newDataDir.trim()
     if (!target || target === dataDir) return
     // 最后确认：迁移会切换整个工作区数据源，作者必须明确知道即将发生什么（F10）。
-    if (!window.confirm(`确定要把数据目录迁移到：\n${target}\n\n复制完成前不会改动原目录。`)) return
+    if (!window.confirm(`确定要把数据目录迁移到：\n${target}\n\n复制完成前不会改动原目录；迁移期间请勿关闭应用。`)) return
     setMigrating(true)
     setMigrateFeedback(null)
     try {
-      await app.UpdateDataDir(target)
+      const result = await app.UpdateDataDir(target)
       const cfg = await app.GetAppConfig().catch(() => null)
       if (cfg?.data_dir) setDataDir(cfg.data_dir)
       setMigratingInputVisible(false)
       setNewDataDir('')
-      setMigrateFeedback({ kind: 'success', message: '数据目录迁移完成，应用已切换到新目录。' })
+      // 如实呈现复制结果（U13）：copy-first 完成后才切换指针，原目录保持原样。
+      const copied = result?.copied_files ?? 0
+      const skipped = result?.skipped_files ?? 0
+      setMigrateFeedback({
+        kind: 'success',
+        message: `数据目录迁移完成：已复制 ${copied} 个文件` +
+          (skipped > 0 ? `（${skipped} 个已存在的相同/冲突文件跳过）` : '') +
+          `，应用已切换到新目录。原目录未做任何改动，确认无误后可自行备份清理。` +
+          (result?.manifest_path ? `迁移清单：${result.manifest_path}` : ''),
+      })
     } catch (err) {
       console.error('Data dir migration failed:', err)
       setMigrateFeedback({

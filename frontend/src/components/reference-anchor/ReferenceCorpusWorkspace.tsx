@@ -2,7 +2,6 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   BookOpenCheck,
   CheckCircle2,
-  CircleAlert,
   ClipboardCheck,
   FileStack,
   Loader2,
@@ -17,6 +16,7 @@ import { useApp } from '@/hooks/useApp'
 import SettingsDialog from '@/components/settings/SettingsDialog'
 import { BridgeError } from '@/lib/novelist/bridge'
 import { describeBridgeError } from '@/lib/novelist/bridgeErrors'
+import ReferenceErrorStrip from './ReferenceErrorStrip'
 import type { reference } from '@/lib/novelist/types'
 
 type Props = {
@@ -119,7 +119,11 @@ export default function ReferenceCorpusWorkspace({
   const [batchSize, setBatchSize] = useState<5 | 10>(5)
   const [manualTemplate, setManualTemplate] = useState('')
   const [action, setAction] = useState<Action>(null)
-  const [error, setError] = useState<string | null>(null)
+  const [error, setError] = useState<{ message: string; detail: string | null } | null>(null)
+  const showError = useCallback((err: unknown, fallback: string) => {
+    const diagnostic = describeBridgeError(err, fallback)
+    setError({ message: diagnostic.message, detail: diagnostic.detail })
+  }, [])
   const [errorRetry, setErrorRetry] = useState<(() => void) | null>(null)
   const [sampleLimit, setSampleLimit] = useState<number | null>(null)
   const [statusTick, setStatusTick] = useState(0)
@@ -160,11 +164,11 @@ export default function ReferenceCorpusWorkspace({
       setRun(status)
     } catch (err) {
       if (requestId === requestIdRef.current) {
-          setError(describeBridgeError(err, '无法读取该来源的材料化状态。').message)
+          showError(err, '无法读取该来源的材料化状态。')
         setErrorRetry(() => () => { setStatusTick(t => t + 1) })
       }
     }
-  }, [app, novelId])
+  }, [showError, app, novelId])
 
   const loadRunDetail = useCallback(async (status: reference.MaterializationStatus | null, options: { resetPages: boolean } = { resetPages: true }) => {
     if (!status || !novelId) {
@@ -233,10 +237,10 @@ export default function ReferenceCorpusWorkspace({
         setCandidateTotal(candidateResult.total)
       }
     } catch (err) {
-      setError(describeBridgeError(err, '材料化进度加载失败。').message)
+      showError(err, '材料化进度加载失败。')
       setErrorRetry(() => () => { setStatusTick(t => t + 1) })
     }
-  }, [app, novelId, progressPage])
+  }, [showError, app, novelId, progressPage])
 
   // 复核动作会改变候选队列，但不换 run：只需按已加载页数重拉候选，保留作者所在位置。
   const refreshCandidatesForCurrentPages = useCallback(async (status: reference.MaterializationStatus, pages: number) => {
@@ -264,10 +268,10 @@ export default function ReferenceCorpusWorkspace({
       setCandidates(merged)
       setCandidateTotal(results.at(-1)?.total ?? merged.length)
     } catch (err) {
-      setError(describeBridgeError(err, '候选复核列表加载失败。').message)
+      showError(err, '候选复核列表加载失败。')
       setErrorRetry(() => () => { setCandidateRefreshTick(t => t + 1) })
     }
-  }, [app, novelId])
+  }, [showError, app, novelId])
 
   // 候选队列分页：固定页大小续拉下一页，追加到现有列表。
   const loadMoreCandidates = useCallback(async () => {
@@ -289,12 +293,12 @@ export default function ReferenceCorpusWorkspace({
       setCandidateTotal(next.total)
       setCandidatePage((current) => current + 1)
     } catch (err) {
-      setError(describeBridgeError(err, '候选复核列表加载失败。').message)
+      showError(err, '候选复核列表加载失败。')
       setErrorRetry(() => () => { void loadMoreCandidates() })
     } finally {
       setLoadingMore(false)
     }
-  }, [app, novelId, run, loadingMore, candidatePage])
+  }, [showError, app, novelId, run, loadingMore, candidatePage])
 
   // 章节进度分页（O13）：同样追加式续拉，配合"仅看失败"筛选定位卡住的章节。
   const loadMoreProgress = useCallback(async () => {
@@ -315,12 +319,12 @@ export default function ReferenceCorpusWorkspace({
       setProgressTotal(next.total)
       setProgressPage((current) => current + 1)
     } catch (err) {
-      setError(describeBridgeError(err, '章节进度加载失败。').message)
+      showError(err, '章节进度加载失败。')
       setErrorRetry(() => () => { void loadMoreProgress() })
     } finally {
       setLoadingMoreProgress(false)
     }
-  }, [app, novelId, run, loadingMoreProgress, progressPage])
+  }, [showError, app, novelId, run, loadingMoreProgress, progressPage])
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
@@ -383,7 +387,7 @@ export default function ReferenceCorpusWorkspace({
       analyzedProfiles.set(selectedAnchor.anchor_id, nextProfile)
       setProfile(nextProfile)
     } catch (error) {
-      setError(chapterSplitErrorMessage(error))
+      setError({ message: chapterSplitErrorMessage(error), detail: error instanceof BridgeError ? error.message : null })
       setErrorRetry(() => () => { void analyze() })
     } finally {
       setAction(null)
@@ -412,7 +416,7 @@ export default function ReferenceCorpusWorkspace({
       analyzedProfiles.set(selectedAnchor.anchor_id, nextProfile)
       setProfile(nextProfile)
     } catch (err) {
-      setError(describeBridgeError(err, '章节分隔模板无法应用到整本来源。').message)
+      showError(err, '章节分隔模板无法应用到整本来源。')
       setErrorRetry(() => () => { void previewManual() })
     } finally {
       setAction(null)
@@ -434,7 +438,7 @@ export default function ReferenceCorpusWorkspace({
       analyzedProfiles.set(selectedAnchor.anchor_id, confirmed)
       setProfile(confirmed)
     } catch (err) {
-      setError(describeBridgeError(err, '章节边界确认失败。来源可能已变化。').message)
+      showError(err, '章节边界确认失败。来源可能已变化。')
       setErrorRetry(() => () => { void confirmProfile() })
     } finally {
       setAction(null)
@@ -454,7 +458,7 @@ export default function ReferenceCorpusWorkspace({
       })
       setRun(status)
     } catch (err) {
-      setError(describeBridgeError(err, '材料化未能启动。大模型、向量模型和索引均必须可用。').message)
+      showError(err, '材料化未能启动。大模型、向量模型和索引均必须可用。')
       setErrorRetry(() => () => { void enqueue() })
     } finally {
       setAction(null)
@@ -485,11 +489,11 @@ export default function ReferenceCorpusWorkspace({
           })
           setRun(status)
         } catch (enqueueErr) {
-          setError(describeBridgeError(enqueueErr, '旧 run 已无法续跑，新建材料化 run 也未能启动。请检查模型与索引后重试。').message)
+          showError(enqueueErr, '旧 run 已无法续跑，新建材料化 run 也未能启动。请检查模型与索引后重试。')
           setErrorRetry(() => () => { void enqueue() })
         }
       } else {
-        setError(describeBridgeError(err, '材料化重试未能启动。请先修复模型或索引问题。').message)
+        showError(err, '材料化重试未能启动。请先修复模型或索引问题。')
         setErrorRetry(() => () => { void retry() })
       }
     } finally {
@@ -514,7 +518,7 @@ export default function ReferenceCorpusWorkspace({
       // 复核改变了候选队列：触发按当前页数重拉，不重置作者所在页。
       setCandidateRefreshTick((t) => t + 1)
     } catch (err) {
-      setError(describeBridgeError(err, '候选复核未保存。列表已变更时请刷新后再次提交。').message)
+      showError(err, '候选复核未保存。列表已变更时请刷新后再次提交。')
       setErrorRetry(() => () => { void reviewCandidate(candidate, nextAction) })
     } finally {
       setAction(null)
@@ -578,26 +582,23 @@ export default function ReferenceCorpusWorkspace({
         </header>
 
         {error && (
-          <div className="mt-4 flex items-start gap-2 border border-destructive/30 bg-destructive/5 px-3 py-2.5 text-xs text-destructive" role="alert">
-            <CircleAlert className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
-            <span className="min-w-0 flex-1 break-words">{error}</span>
-            {errorRetry && (
+          <div className="mt-4 flex flex-col gap-1.5">
+            <ReferenceErrorStrip
+              message={error.message}
+              detail={error.detail}
+              onRetry={errorRetry ? () => { setError(null); setErrorRetry(null); errorRetry() } : undefined}
+              onClose={() => { setError(null); setErrorRetry(null) }}
+            />
+            <div>
               <button
                 type="button"
-                onClick={() => { setError(null); setErrorRetry(null); errorRetry() }}
-                className="shrink-0 self-center rounded border border-destructive/40 px-2 py-0.5 text-[11px] font-medium hover:bg-destructive/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                onClick={() => { setShowModelSettings(true) }}
+                className="rounded border border-destructive/40 px-2 py-0.5 text-[11px] font-medium text-destructive hover:bg-destructive/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                data-testid="open-model-settings"
               >
-                重试
+                去配置模型
               </button>
-            )}
-            <button
-              type="button"
-              onClick={() => { setShowModelSettings(true) }}
-              className="shrink-0 self-center rounded border border-destructive/40 px-2 py-0.5 text-[11px] font-medium hover:bg-destructive/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-              data-testid="open-model-settings"
-            >
-              去配置模型
-            </button>
+            </div>
           </div>
         )}
 

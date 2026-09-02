@@ -20,6 +20,7 @@ public sealed class FileSystemAppInitializationService : IAppInitializationServi
     private readonly ILegacyDataMigrationService? _legacyMigration;
     private readonly INovelImportRecoveryService _importRecovery;
     private readonly IReferenceAnchorProcessingRecoveryService? _referenceAnchorRecovery;
+    private readonly IDataDirectoryRelocationService _relocation;
     private readonly SemaphoreSlim _startupRecoveryMutex = new(1, 1);
     private NovelImportReconciliationResultPayload? _lastImportRecoveryResult;
     private bool _referenceAnchorRecoveryCompleted;
@@ -28,13 +29,15 @@ public sealed class FileSystemAppInitializationService : IAppInitializationServi
         AppInitializationOptions? options = null,
         ILegacyDataMigrationService? legacyMigration = null,
         INovelImportRecoveryService? importRecovery = null,
-        IReferenceAnchorProcessingRecoveryService? referenceAnchorRecovery = null)
+        IReferenceAnchorProcessingRecoveryService? referenceAnchorRecovery = null,
+        IDataDirectoryRelocationService? relocation = null)
     {
         _options = options ?? new AppInitializationOptions();
         _legacyMigration = legacyMigration ??
             (_options.EnableLegacyMigration ? new LegacyDataMigrationService(_options) : null);
         _importRecovery = importRecovery ?? new FileSystemNovelImportRecoveryService(_options);
         _referenceAnchorRecovery = referenceAnchorRecovery;
+        _relocation = relocation ?? new DataDirectoryRelocationService();
     }
 
     public async ValueTask<bool> IsInitializedAsync(CancellationToken cancellationToken)
@@ -84,10 +87,24 @@ throw;
             : new AppConfigPayload(true, config.DataDir, CreateUpdateCheckConfiguration(), importRecovery);
     }
 
-public async ValueTask UpdateDataDirectoryAsync(string dataDirectory, CancellationToken cancellationToken)
+public async ValueTask<UpdateDataDirResultPayload> UpdateDataDirectoryAsync(string dataDirectory, CancellationToken cancellationToken)
 {
  var previousConfig = await CaptureConfigAsync(cancellationToken);
-await SaveConfigAsync(dataDirectory, cancellationToken);
+ // copy-first（U13）：先把当前数据目录完整复制到新位置并写清单，复制完成后才重指指针。
+ // 未初始化（无 config）时没有可复制的数据源，行为退化为直接写入新指针。
+ var currentConfig = await TryLoadConfigAsync(cancellationToken);
+ UpdateDataDirResultPayload? relocation = null;
+ if (currentConfig is not null)
+ {
+  var relocationResult = await _relocation.RelocateAsync(currentConfig.DataDir, dataDirectory, cancellationToken);
+  relocation = new UpdateDataDirResultPayload(
+   relocationResult.CopiedFiles,
+   relocationResult.SkippedFiles,
+   relocationResult.WarningCount,
+   relocationResult.ManifestPath);
+ }
+
+ await SaveConfigAsync(dataDirectory, cancellationToken);
  ResetRecoveryState();
  try
  {
@@ -101,7 +118,9 @@ await SaveConfigAsync(dataDirectory, cancellationToken);
  await ReconcileAfterRollbackAsync();
  throw;
  }
-    }
+
+ return relocation ?? new UpdateDataDirResultPayload(0, 0, 0, string.Empty);
+}
 
     public ValueTask<PlatformPayload> GetPlatformAsync(CancellationToken cancellationToken)
     {
@@ -110,6 +129,18 @@ await SaveConfigAsync(dataDirectory, cancellationToken);
     }
 
     private async ValueTask<AppPointerConfig?> LoadConfigAsync(CancellationToken cancellationToken)
+    {
+        var config = await TryLoadConfigAsync(cancellationToken);
+        if (config is not null)
+        {
+            Directory.CreateDirectory(config.DataDir);
+        }
+
+        return config;
+    }
+
+    /// <summary>读取当前 config（不做目录创建等副作用）——迁移用它确定复制源。</summary>
+    private async ValueTask<AppPointerConfig?> TryLoadConfigAsync(CancellationToken cancellationToken)
     {
         var path = ConfigPath;
         if (!File.Exists(path))
@@ -128,9 +159,7 @@ await SaveConfigAsync(dataDirectory, cancellationToken);
             throw new InvalidOperationException("App initialization config is empty or malformed.");
         }
 
-        var normalized = NormalizePath(config.DataDir);
-        Directory.CreateDirectory(normalized);
-        return new AppPointerConfig(normalized);
+        return new AppPointerConfig(NormalizePath(config.DataDir));
     }
 
     private async ValueTask SaveConfigAsync(string dataDirectory, CancellationToken cancellationToken)

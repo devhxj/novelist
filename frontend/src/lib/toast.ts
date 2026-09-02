@@ -46,9 +46,23 @@ export function pushToast(input: ToastInput): number {
   const id = nextId++
   const kind = input.kind ?? 'info'
   const item: ToastItem = { id, kind, message: input.message, description: input.description, action: input.action }
-  toasts = [...toasts, item].slice(-MAX_VISIBLE)
+  if (item.action) {
+    // U14/U16：带动作的通知（撤销、跳转、重试）不自动消失——动作没被处理就消失等于吞掉作者的出路。
+    toasts = [...toasts, item]
+  } else {
+    const plain = toasts.filter((toast) => !toast.action)
+    // 上限只约束无动作条：挤出顺序从最老的无动作条开始，动作条永不因拥挤被丢弃。
+    const overflow = plain.length + 1 - MAX_VISIBLE
+    if (overflow > 0) {
+      const evictable = new Set(plain.slice(0, overflow).map((toast) => toast.id))
+      toasts = toasts.filter((toast) => toast.action || !evictable.has(toast.id))
+    }
+    toasts = [...toasts, item]
+  }
   emit()
-  scheduleAutoDismiss(id, kind)
+  if (!item.action) {
+    scheduleAutoDismiss(id, kind)
+  }
   return id
 }
 

@@ -142,6 +142,12 @@ export default function ChatPanel({
   // 停止按钮可能在 chat:started 之前按下，此时会话 id 还是空串，
   // 直接发取消会被后端的空 id 分支丢弃，只能先记意图、等 id 到手再补发。
   const pendingCancelRef = useRef(false)
+  // O18：当前流式轮次的会话 id（chat:started 时记录，轮次收尾时清除）。
+  const activeTurnSessionIdRef = useRef<string | null>(null)
+  // O21：当前 turns 已经属于哪个"本端流式过"的会话。真实后端的 chat:started 总是携带
+  // session_id，它会置 activeSessionId 并触发"加载历史消息" effect——若不区分，
+  // 首轮流式输出会在中途被 rebuildTurns 整体冲掉（第三轮 mock 规避记录的真实缺陷）。
+  const liveTurnsSessionIdRef = useRef<string | null>(null)
   const onApprovalFileEditRef = useRef(onApprovalFileEdit)
   useEffect(() => { onApprovalFileEditRef.current = onApprovalFileEdit }, [onApprovalFileEdit])
   // 待恢复的上次会话 ID：设置加载完成后由恢复 effect 消费（F12）。
@@ -257,6 +263,7 @@ export default function ChatPanel({
     setActiveSessionId(undefined)
     setTurns([])
     setSessionId('')
+    liveTurnsSessionIdRef.current = null
     app.GetSessions({ novel_id: novelId, page: 1, size: 5, search: '' }).then(r => {
       if (r) {
         setSessions(r.items)
@@ -285,6 +292,9 @@ export default function ChatPanel({
   // 加载历史消息
   useEffect(() => {
     if (!activeSessionId || !novelId) return
+    // O21：会话就是刚流式完/正在流式的这一场，turns 已是权威状态，
+    // 重放历史只会把流式气泡冲掉——只有切换到别的会话才走重放。
+    if (liveTurnsSessionIdRef.current === activeSessionId) return
     setSessionId(activeSessionId)
     setHistoryLoadError(false)
     setIsLoadingHistory(true)
@@ -389,6 +399,9 @@ export default function ChatPanel({
   }, [])
 
   const handleSelectSession = useCallback((sid: string) => {
+    if (liveTurnsSessionIdRef.current !== sid) {
+      liveTurnsSessionIdRef.current = null
+    }
     setActiveSessionId(sid)
     app.SetLastSession(sid).catch(() => {})
     app.GetSession(sid).then(detail => {
@@ -404,6 +417,7 @@ export default function ChatPanel({
     setActiveSessionId(null)
     setTurns([])
     setSessionId('')
+    liveTurnsSessionIdRef.current = null
     setLastUsage(null)
     app.GetSessions({ novel_id: novelId, page: 1, size: 5, search: '' }).then(r => {
       if (r) { setSessions(r.items); setSessionsTotal(r.total) }
@@ -923,11 +937,14 @@ export default function ChatPanel({
     // 上一轮遗留的"待取消"意图不能顺延到新一轮
     pendingCancelRef.current = false
     activeCountRef.current++
-    if (activeCountRef.current > 1 && sessionId) {
-      app.CancelChat(sessionId).catch(err => {
-        console.error('Cancel previous chat failed', err)
-        notifyChatFailure('停止上一轮的请求未送达', err)
-      })
+    if (activeCountRef.current > 1) {
+      const previousSessionId = activeTurnSessionIdRef.current ?? sessionId
+      if (previousSessionId) {
+        app.CancelChat(previousSessionId).catch(err => {
+          console.error('Cancel previous chat failed', err)
+          notifyChatFailure('停止上一轮的请求未送达', err)
+        })
+      }
     }
     setIsLoading(true)
 
@@ -959,6 +976,11 @@ export default function ChatPanel({
       if (data.session_id) {
         setSessionId(data.session_id)
         setActiveSessionId(data.session_id)
+        // O18：记录"正在流式输出的这一轮"的会话 id——作者中途切换历史会话后，
+        // sessionId state 已不是本轮的会话，停止必须以这个引用为准。
+        activeTurnSessionIdRef.current = data.session_id
+        // O21：标记 turns 属于本场流式，历史加载 effect 不得在中途重放。
+        liveTurnsSessionIdRef.current = data.session_id
         app.SetLastSession(data.session_id).catch(() => {})
         // 作者在会话 id 到手之前就按了停止：此刻补发，否则取消请求会被后端空 id 分支丢弃
         if (pendingCancelRef.current) {
@@ -1024,6 +1046,7 @@ export default function ChatPanel({
       activeCountRef.current--
       if (activeCountRef.current === 0) {
         setIsLoading(false)
+        activeTurnSessionIdRef.current = null
       }
       turnSubsRef.current.delete(turnId)
       subs.started?.()
@@ -1039,9 +1062,12 @@ export default function ChatPanel({
         ? { ...t, status: 'stopped' as const }
         : t
     ))
-    if (sessionId) {
+    // O18：取消目标是"正在流式输出的那一轮"的会话，而不是 sessionId state——
+    // 作者可能在中途把左侧会话切到了别的历史会话。
+    const targetSessionId = activeTurnSessionIdRef.current ?? sessionId
+    if (targetSessionId) {
       pendingCancelRef.current = false
-      app.CancelChat(sessionId).catch(err => {
+      app.CancelChat(targetSessionId).catch(err => {
         console.error('Cancel chat failed', err)
         notifyChatFailure('停止会话的请求未送达', err)
       })

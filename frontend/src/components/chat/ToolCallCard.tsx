@@ -110,11 +110,14 @@ export default memo(function ToolCallCard({ displayText, status, activityKind, e
   const [slow, setSlow] = useState(false)
   const [submitError, setSubmitError] = useState<{ decision: 'approve' | 'reject'; message: string } | null>(null)
 
+  // O17：慢路径计时覆盖整个"等待审批"时长（含提交成功后后端已死、
+  // 后续工具事件永远不来的场景），不只盯提交瞬间——否则作者会被钉死在
+  // "等待审批"常态里，唯一出路是故意制造一次提交失败。
   useEffect(() => {
-    if (!submitting) return
+    if (status !== 'awaiting_approval') return
     const timer = window.setTimeout(() => setSlow(true), APPROVAL_SLOW_MS)
     return () => window.clearTimeout(timer)
-  }, [submitting])
+  }, [status, submitting])
 
   // 审批中状态
   if (status === 'awaiting_approval' && onApprove && onReject) {
@@ -168,7 +171,7 @@ export default memo(function ToolCallCard({ displayText, status, activityKind, e
             </div>
           ) : slow ? (
             <div className="approval-hint" role="status">
-              提交已超过 6 秒没有回应，可以继续等，也可以结束本轮。
+              审批等待已超过 6 秒没有进展，可以继续等，也可以结束本轮。
             </div>
           ) : null}
           <div className="approval-actions">

@@ -7,6 +7,7 @@ import { EventsOn } from '@/lib/novelist/events'
 import ErrorCallout from '@/components/shared/ErrorCallout'
 import { buildCopyableDiagnostic, diagnosticMessage } from '@/lib/diagnostics'
 import { pushToast } from '@/lib/toast'
+import { outlinePath } from '@/components/content/types'
 import type { diagnostics } from '@/lib/novelist/types'
 
 interface Props {
@@ -15,6 +16,8 @@ interface Props {
   onSelectChapter: (ch: chapter.Chapter) => void
   onSelectNovelist: () => void
   onExportNovel: () => void
+  /** O15：章节删除成功后回调（携带被删章节），用于关闭编辑器里的对应 tab。 */
+  onChapterDeleted?: (ch: chapter.Chapter) => void
 }
 
 const BLOCK_SIZE = 100
@@ -29,7 +32,7 @@ type VisibleError = {
   diagnostic?: diagnostics.CopyableDiagnostic | null
 }
 
-export default function ChapterList({ novelId, target, onSelectChapter, onSelectNovelist, onExportNovel }: Props) {
+export default function ChapterList({ novelId, target, onSelectChapter, onSelectNovelist, onExportNovel, onChapterDeleted }: Props) {
   const app = useApp()
 
   const [chapters, setChapters] = useState<chapter.Chapter[]>([])
@@ -123,22 +126,39 @@ export default function ChapterList({ novelId, target, onSelectChapter, onSelect
   }
 
   async function handleDeleteChapter(ch: chapter.Chapter) {
-    // O7：软删除——章号不复用；撤销动作用原标题新建章节恢复。
-    if (!confirm(`确定要删除第${ch.chapter_number}章「${ch.title}」吗？章号不会复用，删除后可在通知里选择「撤销」恢复。`)) return
+    // O7：软删除——章号不复用；U14：撤销恢复正文与大纲（以新章号），
+    // 因此删除前先把内容读进内存，删除是本地操作，读取不会引入等待。
+    if (!confirm(`确定要删除第${ch.chapter_number}章「${ch.title}」吗？\n\n章号不会复用。删除后可在通知里选择「撤销」，正文与大纲将以新章号恢复。`)) return
     try {
+      const [content, outline] = await Promise.all([
+        app.GetContent(novelId, ch.file_path).catch(() => ''),
+        app.GetContent(novelId, outlinePath(ch.chapter_number)).catch(() => ''),
+      ])
       await app.DeleteChapter({ novel_id: novelId, chapter_id: ch.id })
+      // O15：编辑器里开着的正文/大纲 tab 随删除关闭，残留 tab 的保存会被后端守卫拒绝。
+      onChapterDeleted?.(ch)
       await loadChapters()
       pushToast({
         kind: 'info',
         message: `已删除第${ch.chapter_number}章「${ch.title}」`,
-        description: '通知消失前可撤销（以新章节恢复标题）。',
+        description: '撤销会把正文与大纲恢复为一个新章节（章号不复用）。',
         action: {
           label: '撤销',
           run: () => {
             void (async () => {
               try {
-                await app.CreateChapter({ novel_id: novelId, title: ch.title })
+                const created = await app.CreateChapter({ novel_id: novelId, title: ch.title })
+                if (content) {
+                  await app.SaveContent({ novel_id: novelId, path: created.file_path, content })
+                }
+                if (outline) {
+                  await app.SaveContent({ novel_id: novelId, path: outlinePath(created.chapter_number), content: outline })
+                }
                 await loadChapters()
+                pushToast({
+                  kind: 'success',
+                  message: `已恢复「${ch.title}」为第${created.chapter_number}章，正文与大纲已还原。`,
+                })
               } catch (err) {
                 setError(buildVisibleError(err, '撤销删除失败', '撤销删除', 'CreateChapter', { novel_id: novelId }))
               }

@@ -10,7 +10,6 @@ import type {
   location,
   novel,
   novelImport,
-  pattern,
   reader,
   reference,
   search,
@@ -50,33 +49,6 @@ export interface SqliteVecStatusView {
   error: string
 }
 
-export interface SearchStoryMemoryInput {
-  novel_id: number
-  query: string
-  top_k: number
-  min_relevance: number
-  chapter_numbers: number[]
-  chunk_types: string[]
-}
-
-export interface StoryMemoryHit {
-  chunk_id: string
-  chapter_number: number
-  chapter_title: string
-  chunk_type: string
-  relevance: number
-  content: string
-}
-
-export interface SearchStoryMemoryResult {
-  query: string
-  total: number
-  message: string
-  max_relevance: string
-  content: string
-  results: StoryMemoryHit[]
-}
-
 export interface NovelistAppApi {
   ApproveTool: AppMethod<[string, boolean, string], void>
   AnalyzeReferenceChapterSplit: AppMethod<[reference.AnalyzeChapterSplitInput], reference.ChapterSplitProfile>
@@ -85,7 +57,6 @@ export interface NovelistAppApi {
   BuildReferenceStyleProfile: AppMethod<[reference.BuildStyleProfileInput], reference.StyleProfile>
   CancelNovelImport: AppMethod<[novelImport.CancelNovelImportInput], novelImport.ImportRun>
   CancelChat: AppMethod<[string], void>
-  CancelNarrativePatternExtraction: AppMethod<[pattern.CancelNarrativePatternExtractionInput], pattern.NarrativePatternRun>
  CancelReferenceCorpusAnalysisJob: AppMethod<[{ job_id: string; expected_version: number }], reference.CorpusAnalysisJob>
   CancelReferenceStyleProfileBuild: AppMethod<[reference.CancelStyleProfileBuildInput], reference.StyleProfileBuildStatus>
   CancelStyleSkillExtraction: AppMethod<[styleSample.CancelStyleSkillExtractionInput], styleSample.StyleSkillExtractionRun>
@@ -182,8 +153,6 @@ export interface NovelistAppApi {
   GetLocations: AppMethod<[number], location.Location[]>
   GetMaxChapterNumber: AppMethod<[number], number>
   GetModels: AppMethod<[], llm.AvailableModel[]>
-  GetNarrativePatternRun: AppMethod<[pattern.GetNarrativePatternRunInput], pattern.NarrativePatternRun | null>
-  GetNarrativePatternTrace: AppMethod<[pattern.GetNarrativePatternRunInput], pattern.NarrativePatternTrace | null>
   GetNovelImportRecoveryStatus: AppMethod<[], novelImport.ImportRecoveryStatus>
   GetNovelImportRun: AppMethod<[novelImport.GetNovelImportRunInput], novelImport.ImportRun | null>
   GetNovels: AppMethod<[], novel.Novel[]>
@@ -238,7 +207,6 @@ export interface NovelistAppApi {
   SaveGitAuthorSettings: AppMethod<[git.SaveGitAuthorSettingsInput], git.GitAuthorSettings>
   SaveLayoutSettings: AppMethod<[layout.SaveLayoutSettingsInput], layout.LayoutSettings>
   SaveLLMConfig: AppMethod<[llm.LLMConfigView], void>
-  SaveSettings: AppMethod<[app.SaveSettingsInput], void>
   SaveUpdateCheckSettings: AppMethod<[update.SaveUpdateCheckSettingsInput], update.UpdateCheckSettings>
   SaveUserName: AppMethod<[string], void>
   SaveWindowSettings: AppMethod<[layout.SaveWindowSettingsInput], layout.WindowSettings>
@@ -246,14 +214,11 @@ export interface NovelistAppApi {
   SearchReferenceCorpusCandidates: AppMethod<[reference.SearchCorpusCandidatesInput], storage.PageResult_reference_CorpusCandidate_>
   SearchReferenceMaterials: AppMethod<[reference.SearchMaterialsInput], storage.PageResult_reference_MaterialSummary_>
   SearchStyleSamples: AppMethod<[styleSample.SearchStyleSamplesInput], storage.PageResult_styleSample_StyleSample_>
-  SearchStoryMemory: AppMethod<[SearchStoryMemoryInput], SearchStoryMemoryResult>
   SetActiveNovel: AppMethod<[app.SetActiveNovelInput], void>
   SetApprovalMode: AppMethod<[string], void>
-  SetChatPanelWidth: AppMethod<[number], void>
   SetLastSession: AppMethod<[string], void>
   SetReasoningEffort: AppMethod<[string], void>
   SetSelectedModel: AppMethod<[string, string], void>
-  StartNarrativePatternExtraction: AppMethod<[pattern.StartNarrativePatternExtractionInput], pattern.NarrativePatternRun>
   StartNovelImport: AppMethod<[novelImport.StartNovelImportInput], novelImport.ImportRun>
   UpdateStyleSample: AppMethod<[styleSample.UpdateStyleSampleInput], styleSample.StyleSample>
   TestEmbeddingConnection: AppMethod<[EmbeddingConfigView], void>
@@ -263,7 +228,7 @@ export interface NovelistAppApi {
   UpdateChapterTitle: AppMethod<[number, number, string], void>
   DeleteChapter: AppMethod<[chapter.DeleteChapterInput], void>
   UpdateCharacter: AppMethod<[number, number, app.UpdateCharacterInput], void>
-  UpdateDataDir: AppMethod<[string], void>
+  UpdateDataDir: AppMethod<[string], config.UpdateDataDirResult>
   UpdateLocation: AppMethod<[number, number, app.UpdateLocationInput], void>
   UpdateNovel: AppMethod<[number, app.UpdateNovelInput], novel.Novel>
   UpdatePreference: AppMethod<[number, app.UpdatePreferenceInput], novel.PreferenceItem>
@@ -309,7 +274,6 @@ export const appApi: NovelistAppApi = {
   BuildReferenceStyleProfile: ((...args) => invokeAppArgs('BuildReferenceStyleProfile', args, { timeoutMs: null })) as NovelistAppApi['BuildReferenceStyleProfile'],
   CancelNovelImport: appMethod<NovelistAppApi['CancelNovelImport']>('CancelNovelImport'),
   CancelChat: appMethod<NovelistAppApi['CancelChat']>('CancelChat'),
-  CancelNarrativePatternExtraction: appMethod<NovelistAppApi['CancelNarrativePatternExtraction']>('CancelNarrativePatternExtraction'),
  CancelReferenceCorpusAnalysisJob: appMethod<NovelistAppApi['CancelReferenceCorpusAnalysisJob']>('CancelReferenceCorpusAnalysisJob'),
   CancelReferenceStyleProfileBuild: appMethod<NovelistAppApi['CancelReferenceStyleProfileBuild']>('CancelReferenceStyleProfileBuild'),
   CancelStyleSkillExtraction: appMethod<NovelistAppApi['CancelStyleSkillExtraction']>('CancelStyleSkillExtraction'),
@@ -401,8 +365,6 @@ GetReferenceCorpusFeatureAnalysisRun: appMethod<NovelistAppApi['GetReferenceCorp
   GetLocations: appMethod<NovelistAppApi['GetLocations']>('GetLocations'),
   GetMaxChapterNumber: appMethod<NovelistAppApi['GetMaxChapterNumber']>('GetMaxChapterNumber'),
   GetModels: appMethod<NovelistAppApi['GetModels']>('GetModels'),
-  GetNarrativePatternRun: appMethod<NovelistAppApi['GetNarrativePatternRun']>('GetNarrativePatternRun'),
-  GetNarrativePatternTrace: appMethod<NovelistAppApi['GetNarrativePatternTrace']>('GetNarrativePatternTrace'),
   GetNovelImportRecoveryStatus: appMethod<NovelistAppApi['GetNovelImportRecoveryStatus']>('GetNovelImportRecoveryStatus'),
   GetNovelImportRun: appMethod<NovelistAppApi['GetNovelImportRun']>('GetNovelImportRun'),
   GetNovels: appMethod<NovelistAppApi['GetNovels']>('GetNovels'),
@@ -462,7 +424,6 @@ GetReferenceCorpusFeatureAnalysisRun: appMethod<NovelistAppApi['GetReferenceCorp
   SaveGitAuthorSettings: appMethod<NovelistAppApi['SaveGitAuthorSettings']>('SaveGitAuthorSettings'),
   SaveLayoutSettings: appMethod<NovelistAppApi['SaveLayoutSettings']>('SaveLayoutSettings'),
   SaveLLMConfig: appMethod<NovelistAppApi['SaveLLMConfig']>('SaveLLMConfig'),
-  SaveSettings: appMethod<NovelistAppApi['SaveSettings']>('SaveSettings'),
   SaveUpdateCheckSettings: appMethod<NovelistAppApi['SaveUpdateCheckSettings']>('SaveUpdateCheckSettings'),
   SaveUserName: appMethod<NovelistAppApi['SaveUserName']>('SaveUserName'),
   SaveWindowSettings: appMethod<NovelistAppApi['SaveWindowSettings']>('SaveWindowSettings'),
@@ -470,14 +431,11 @@ GetReferenceCorpusFeatureAnalysisRun: appMethod<NovelistAppApi['GetReferenceCorp
   SearchReferenceCorpusCandidates: appMethod<NovelistAppApi['SearchReferenceCorpusCandidates']>('SearchReferenceCorpusCandidates'),
   SearchReferenceMaterials: appMethod<NovelistAppApi['SearchReferenceMaterials']>('SearchReferenceMaterials'),
   SearchStyleSamples: appMethod<NovelistAppApi['SearchStyleSamples']>('SearchStyleSamples'),
-  SearchStoryMemory: appMethod<NovelistAppApi['SearchStoryMemory']>('SearchStoryMemory'),
   SetActiveNovel: appMethod<NovelistAppApi['SetActiveNovel']>('SetActiveNovel'),
   SetApprovalMode: appMethod<NovelistAppApi['SetApprovalMode']>('SetApprovalMode'),
-  SetChatPanelWidth: appMethod<NovelistAppApi['SetChatPanelWidth']>('SetChatPanelWidth'),
   SetLastSession: appMethod<NovelistAppApi['SetLastSession']>('SetLastSession'),
   SetReasoningEffort: appMethod<NovelistAppApi['SetReasoningEffort']>('SetReasoningEffort'),
   SetSelectedModel: appMethod<NovelistAppApi['SetSelectedModel']>('SetSelectedModel'),
-  StartNarrativePatternExtraction: ((...args) => invokeAppArgs('StartNarrativePatternExtraction', args, { timeoutMs: null })) as NovelistAppApi['StartNarrativePatternExtraction'],
   StartNovelImport: ((...args) => invokeAppArgs('StartNovelImport', args, { timeoutMs: null })) as NovelistAppApi['StartNovelImport'],
   UpdateStyleSample: appMethod<NovelistAppApi['UpdateStyleSample']>('UpdateStyleSample'),
   TestEmbeddingConnection: appMethod<NovelistAppApi['TestEmbeddingConnection']>('TestEmbeddingConnection'),
@@ -487,7 +445,8 @@ GetReferenceCorpusFeatureAnalysisRun: appMethod<NovelistAppApi['GetReferenceCorp
   UpdateChapterTitle: appMethod<NovelistAppApi['UpdateChapterTitle']>('UpdateChapterTitle'),
   DeleteChapter: appMethod<NovelistAppApi['DeleteChapter']>('DeleteChapter'),
   UpdateCharacter: appMethod<NovelistAppApi['UpdateCharacter']>('UpdateCharacter'),
-  UpdateDataDir: appMethod<NovelistAppApi['UpdateDataDir']>('UpdateDataDir'),
+  // U13：copy-first 迁移可能耗时较长（大目录递归复制），不设 30s 默认超时。
+  UpdateDataDir: ((...args) => invokeAppArgs('UpdateDataDir', args, { timeoutMs: null })) as NovelistAppApi['UpdateDataDir'],
   UpdateLocation: appMethod<NovelistAppApi['UpdateLocation']>('UpdateLocation'),
   UpdateNovel: appMethod<NovelistAppApi['UpdateNovel']>('UpdateNovel'),
   UpdatePreference: appMethod<NovelistAppApi['UpdatePreference']>('UpdatePreference'),

@@ -61,6 +61,7 @@ export interface ContentPanelHandle {
   openFileWithHighlight: (path: string, title: string, matchPos: number, matchLen: number) => void
   clearHighlight: () => void
   closeAllTabs: () => void
+  closeTabsByPaths: (paths: string[]) => void
   openDiffTab: (data: {
     path: string; title: string; diff: string; original: string; modified: string
     changeType: string; reason: string; toolId: string
@@ -543,6 +544,17 @@ const ContentPanel = forwardRef<ContentPanelHandle, Props>(function ContentPanel
     })
   }, [openDiffTab, setActiveTabId])
 
+  // O15：章节删除后按路径关闭对应 tab——残留 tab 的自动保存会被后端守卫拒绝，
+  // 但留着开着的 tab 只会给作者"章节还在"的错觉。
+  const closeTabsByPaths = useCallback((paths: string[]) => {
+    const wanted = new Set(paths)
+    for (const tab of tabsRef.current) {
+      if (tab.type === 'file' && wanted.has(tab.path)) {
+        closeTab(tab.id)
+      }
+    }
+  }, [closeTab])
+
   // ── 暴露给父组件的方法 ──────────────────────────────────
 
   useImperativeHandle(ref, () => ({
@@ -555,7 +567,8 @@ const ContentPanel = forwardRef<ContentPanelHandle, Props>(function ContentPanel
     handleDiffReject,
     saveActiveTab,
     toggleActivePreview,
-  }), [doOpenFile, doOpenFileWithHighlight, clearHighlight, closeAllTabs, openDiffTab, handleDiffApprove, handleDiffReject, saveActiveTab, toggleActivePreview])
+    closeTabsByPaths,
+  }), [doOpenFile, doOpenFileWithHighlight, clearHighlight, closeAllTabs, openDiffTab, handleDiffApprove, handleDiffReject, saveActiveTab, toggleActivePreview, closeTabsByPaths])
 
 
   // ── 渲染 ────────────────────────────────────────────────

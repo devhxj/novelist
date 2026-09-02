@@ -712,8 +712,6 @@ export function installConfigurableAppMockBridge(options = {}) {
     nextStyleSampleId: 4,
     nextStyleSkillExtractionDelayMs: 0,
     nextStyleSkillExtractionMode: 'success',
-    nextNarrativePatternDelayMs: 0,
-    nextNarrativePatternMode: 'success',
     nextUpdateCheckMode: options.updateCheckMode ?? 'available',
     nextSessionId: 1,
     nextTurnId: 101,
@@ -724,13 +722,12 @@ export function installConfigurableAppMockBridge(options = {}) {
     savedEmbeddingConfig: null,
     exportedNovels: [],
     savedCovers: [],
+    coversByNovelId: {},
+    deletedCovers: [],
     savedAvatars: [],
     failNextStyleSampleDelete: false,
     cancelledStyleSkillExtractionTaskIds: [],
     styleSkillExtractionRuns: [],
-    cancelledNarrativePatternTaskIds: [],
-    narrativePatternRuns: [],
-    narrativePatternTraces: {},
     novelImportRuns: [],
     activeNovelImports: {},
     cancelledNovelImportTaskIds: [],
@@ -1052,7 +1049,13 @@ referenceCorpusTechniqueSpecimenAnalysisRuns: [],
       case 'runtime.app.quit':
       case 'UpdateDataDir':
         state.dataDirOverride = String(args[0] ?? '')
-        return null
+        // U13：真实后端 copy-first 迁移返回复制统计；mock 给确定性数字供工作流断言。
+        return {
+          copied_files: 12,
+          skipped_files: 1,
+          warnings: 1,
+          manifest_path: `${state.dataDirOverride}\\relocation_manifest.json`,
+        }
       case 'CancelChat':
       case 'ApproveTool':
       case 'RebuildNovelIndex':
@@ -1076,7 +1079,6 @@ referenceCorpusTechniqueSpecimenAnalysisRuns: [],
       case 'SetApprovalMode':
         state.settings.approval_mode = String(args[0] ?? '')
         return null
-      case 'SetChatPanelWidth':
         state.settings.chat_panel_width = Number(args[0] ?? state.settings.chat_panel_width ?? 360)
         return null
       case 'SaveLLMConfig':
@@ -1105,9 +1107,18 @@ referenceCorpusTechniqueSpecimenAnalysisRuns: [],
       case 'DeleteNovel':
         deleteNovel(args[0])
         return null
-      case 'GetCover': return null
+      case 'GetCover': return state.coversByNovelId[Number(args[0])] ?? null
       case 'SaveCover':
         state.savedCovers.push({ novel_id: args[0], byte_count: Array.isArray(args[1]) ? args[1].length : 0 })
+        // 保存后 GetCover 生效（1x1 PNG），供「移除封面」验收（F13）。
+        state.coversByNovelId[Number(args[0])] = {
+          content_type: 'image/png',
+          data_base64: 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==',
+        }
+        return null
+      case 'DeleteCover':
+        state.deletedCovers.push(Number(args[0]))
+        delete state.coversByNovelId[Number(args[0])]
         return null
       case 'SaveAvatar':
         state.savedAvatars.push({ byte_count: Array.isArray(args[0]) ? args[0].length : 0 })
@@ -1219,10 +1230,6 @@ referenceCorpusTechniqueSpecimenAnalysisRuns: [],
       case 'ExtractStyleSkillFromSamples': return extractStyleSkillFromSamples(args[0])
       case 'CancelStyleSkillExtraction': return cancelStyleSkillExtraction(args[0])
       case 'GetStyleSkillExtractionRun': return state.styleSkillExtractionRuns.find((run) => run.task_id === args[0]?.task_id) ?? null
-      case 'StartNarrativePatternExtraction': return startNarrativePatternExtraction(args[0])
-      case 'CancelNarrativePatternExtraction': return cancelNarrativePatternExtraction(args[0])
-      case 'GetNarrativePatternRun': return state.narrativePatternRuns.find((run) => run.task_id === args[0]?.task_id) ?? null
-      case 'GetNarrativePatternTrace': return state.narrativePatternTraces[String(args[0]?.task_id ?? '')] ?? null
       case 'SearchStyleSamples': return searchStyleSamples(args[0])
       case 'GetStyleSample': return getStyleSample(args[0])
       case 'CreateStyleSample': return createStyleSample(args[0])
@@ -1970,11 +1977,11 @@ case 'ListReferenceCorpusTechniqueSpecimens': return listReferenceCorpusTechniqu
     const message = String(input?.message ?? '')
     // 早期取消验收：这个分支刻意延迟 chat:started，作者按"停止"时前端还拿不到会话 id，
     // 取消意图必须先挂起、待 chat:started 到手后补发（U9）。
-    // 注意：只有这个分支在 chat:started 里携带 session_id。普通分支带上它会触发
-    // 前端"加载历史消息" effect 在流式中途重建 turns，把正在流式的气泡整个冲掉。
+    // O21：普通分支与真实后端一致地携带 session_id（FileSystemChatSessionService 总是发）；
+    // 前端以 liveTurnsSessionIdGuard 防止历史加载 effect 在流式中途重建 turns。
     const delayedStart = message.includes('早期取消')
     if (!delayedStart) {
-      emit('chat:started', { turn_id: turnId })
+      emit('chat:started', { session_id: sessionId, turn_id: turnId })
     }
 
     if (message.includes('注入失败')) {
@@ -2959,334 +2966,6 @@ case 'ListReferenceCorpusTechniqueSpecimens': return listReferenceCorpusTechniqu
     })
     upsertStyleSkillRun(run)
     return run
-  }
-
-  async function startNarrativePatternExtraction(input = {}) {
-    const taskId = String(input?.task_id ?? `narrative-pattern-${state.narrativePatternRuns.length + 1}`)
-    const chapterRanges = Array.isArray(input?.chapter_ranges) ? input.chapter_ranges.map(normalizeChapterRange) : []
-    const selectedChapterIds = Array.isArray(input?.selected_chapter_ids)
-      ? input.selected_chapter_ids.map(Number).filter(Number.isFinite)
-      : chapterRangesToMockChapterIds(chapterRanges, Number(input?.novel_id ?? state.activeNovelId))
-    const skillName = String(input?.skill_name ?? '').trim() || '叙事模式技能'
-    const delayMs = Math.max(0, Number(state.nextNarrativePatternDelayMs ?? 0))
-    const mode = String(state.nextNarrativePatternMode ?? 'success')
-    state.nextNarrativePatternDelayMs = 0
-    state.nextNarrativePatternMode = 'success'
-
-    let run = narrativePatternRun({
-      taskId,
-      status: 'running',
-      stage: 'load_chapters',
-      progressCompleted: 0,
-      progressTotal: 6,
-      chapterRanges,
-      selectedChapterIds,
-      skillName,
-      skillPreview: '',
-      diagnostics: [],
-      completedAt: null,
-    })
-    upsertNarrativePatternRun(run)
-    state.narrativePatternTraces[taskId] = { task_id: taskId, entries: [] }
-    emitNarrativePatternProgress(run, '正在加载并校验章节。', {
-      llmStatus: 'idle',
-    })
-
-    if (delayMs > 0) {
-      await wait(delayMs)
-    }
-
-    if (state.cancelledNarrativePatternTaskIds.includes(taskId)) {
-      run = narrativePatternRun({
-        taskId,
-        status: 'cancelled',
-        stage: 'cancelled',
-        progressCompleted: run.progress_completed,
-        progressTotal: run.progress_total,
-        chapterRanges,
-        selectedChapterIds,
-        skillName,
-        skillPreview: '',
-        diagnostics: [copyableDiagnostic('pattern.cancelled', '叙事模式抽取已取消。', '用户取消', 'CancelNarrativePatternExtraction', taskId)],
-        completedAt: now,
-      })
-      upsertNarrativePatternRun(run)
-      emitNarrativePatternProgress(run, '叙事模式抽取已取消。', { llmStatus: 'cancelled' })
-      return run
-    }
-
-    if (selectedChapterIds.length > 0 && selectedChapterIds.length < 3) {
-      const diagnostic = copyableDiagnostic('pattern.insufficient_chapters', '可用章节不足，无法抽取叙事模式。', '至少需要 3 章且正文长度达到最低阈值。', 'StartNarrativePatternExtraction', taskId)
-      run = narrativePatternRun({
-        taskId,
-        status: 'failed',
-        stage: 'load_chapters',
-        progressCompleted: 1,
-        progressTotal: 6,
-        chapterRanges,
-        selectedChapterIds,
-        skillName,
-        skillPreview: '',
-        diagnostics: [diagnostic],
-        completedAt: now,
-      })
-      upsertNarrativePatternRun(run)
-      appendNarrativePatternTrace(taskId, 'load_chapters', [diagnostic])
-      emitNarrativePatternProgress(run, diagnostic.message, { llmStatus: 'failed' })
-      return run
-    }
-
-    run = updateNarrativePatternRunProgress(run, 'boundary_detection', 1)
-    appendNarrativePatternTrace(taskId, 'boundary_detection', [])
-    emitNarrativePatternProgress(run, '正在识别叙事边界。', {
-      llmStatus: 'calling',
-      tokenEstimate: 1800,
-      boundaryCount: 2,
-    })
-
-    if (mode === 'invalid_model') {
-      const diagnostic = copyableDiagnostic('pattern.invalid_boundary_json', '模型返回的边界 JSON 无法解析。', 'Expected valid narrative boundary JSON.', 'StartNarrativePatternExtraction', taskId)
-      run = narrativePatternRun({
-        taskId,
-        status: 'failed',
-        stage: 'boundary_detection',
-        progressCompleted: 1,
-        progressTotal: 6,
-        chapterRanges,
-        selectedChapterIds,
-        skillName,
-        skillPreview: '',
-        diagnostics: [diagnostic],
-        completedAt: now,
-      })
-      upsertNarrativePatternRun(run)
-      appendNarrativePatternTrace(taskId, 'boundary_detection', [diagnostic])
-      emitNarrativePatternProgress(run, diagnostic.message, {
-        llmStatus: 'failed',
-        boundaryCount: 0,
-      })
-      return run
-    }
-
-    run = updateNarrativePatternRunProgress(run, 'chapter_summary', 2)
-    appendNarrativePatternTrace(taskId, 'chapter_summary', [])
-    emitNarrativePatternProgress(run, '正在提取章节摘要：批次 1/2。', {
-      llmStatus: 'calling',
-      batchIndex: 1,
-      batchTotal: 2,
-      tokenEstimate: 2200,
-      boundaryCount: 2,
-      summaryCount: Math.max(1, Math.floor(selectedChapterIds.length / 2)),
-    })
-
-    run = updateNarrativePatternRunProgress(run, 'chapter_summary', 3)
-    appendNarrativePatternTrace(taskId, 'chapter_summary', [])
-    emitNarrativePatternProgress(run, '章节摘要已完成。', {
-      llmStatus: 'completed',
-      batchIndex: 2,
-      batchTotal: 2,
-      tokenEstimate: 2400,
-      boundaryCount: 2,
-      summaryCount: Math.max(selectedChapterIds.length, 1),
-    })
-
-    run = updateNarrativePatternRunProgress(run, 'phase_compression', 4)
-    appendNarrativePatternTrace(taskId, 'phase_compression', [])
-    emitNarrativePatternProgress(run, '正在压缩叙事阶段：轮次 1，批次 1/1。', {
-      llmStatus: 'calling',
-      round: 1,
-      batchIndex: 1,
-      batchTotal: 1,
-      tokenEstimate: 2600,
-      boundaryCount: 2,
-      summaryCount: Math.max(selectedChapterIds.length, 1),
-      phaseCount: 2,
-    })
-
-    run = updateNarrativePatternRunProgress(run, 'skill_generation', 5)
-    appendNarrativePatternTrace(taskId, 'skill_generation', [])
-    emitNarrativePatternProgress(run, '正在生成叙事模式技能。', {
-      llmStatus: 'calling',
-      boundaryCount: 2,
-      summaryCount: Math.max(selectedChapterIds.length, 1),
-      phaseCount: 2,
-    })
-
-    const rangeText = chapterRanges.map((range) => `${range.start_chapter}-${range.end_chapter}`).join(',')
-    const skillPreview = [
-      '---',
-      `name: ${skillName}`,
-      'description: 从章节结构抽取的叙事模式技能。',
-      'category: 叙事结构',
-      'mode: auto',
-      'author: ai',
-      'version: 1',
-      'generated_by: narrative_pattern_extraction',
-      `source_chapter_ranges: ${rangeText}`,
-      `source_chapter_ids: ${selectedChapterIds.join(',')}`,
-      '---',
-      '',
-      `# ${skillName}`,
-      '',
-      '## 边界提示',
-      '- 1-3：雨夜线索压低信息量。',
-      '- 4-6：证词冲突推动反转。',
-      '',
-      '## 章节摘要',
-      '- 第1章以桌面水痕触发调查。',
-      '- 第3章用钟楼回声制造误导。',
-      '',
-      '## 阶段压缩',
-      '- 雨夜压迫到证据反转：让证词冲突逐步重组线索。',
-    ].join('\n')
-
-    run = narrativePatternRun({
-      taskId,
-      status: 'completed',
-      stage: 'completed',
-      progressCompleted: 6,
-      progressTotal: 6,
-      chapterRanges,
-      selectedChapterIds,
-      skillName,
-      skillPreview,
-      diagnostics: [copyableDiagnostic('pattern.preview_ready', '叙事模式技能预览已生成。', `skill_name=${skillName}`, 'StartNarrativePatternExtraction', taskId)],
-      completedAt: now,
-    })
-    upsertNarrativePatternRun(run)
-    emitNarrativePatternProgress(run, '叙事模式技能预览已生成。', {
-      llmStatus: 'completed',
-      boundaryCount: 2,
-      summaryCount: Math.max(selectedChapterIds.length, 1),
-      phaseCount: 2,
-    })
-    return run
-  }
-
-  function cancelNarrativePatternExtraction(input = {}) {
-    const taskId = String(input?.task_id ?? '')
-    if (!state.cancelledNarrativePatternTaskIds.includes(taskId)) {
-      state.cancelledNarrativePatternTaskIds.push(taskId)
-    }
-
-    const existing = state.narrativePatternRuns.find((run) => run.task_id === taskId)
-    const run = narrativePatternRun({
-      taskId,
-      status: 'cancelled',
-      stage: 'cancelled',
-      progressCompleted: existing?.progress_completed ?? 0,
-      progressTotal: existing?.progress_total ?? 6,
-      chapterRanges: existing?.chapter_ranges ?? [],
-      selectedChapterIds: existing?.selected_chapter_ids ?? [],
-      skillName: existing?.skill_name ?? '',
-      skillPreview: '',
-      diagnostics: [copyableDiagnostic('pattern.cancelled', '叙事模式抽取已取消。', String(input?.reason ?? ''), 'CancelNarrativePatternExtraction', taskId)],
-      completedAt: now,
-    })
-    upsertNarrativePatternRun(run)
-    appendNarrativePatternTrace(taskId, 'cancelled', run.diagnostics)
-    emitNarrativePatternProgress(run, '叙事模式抽取已取消。', { llmStatus: 'cancelled' })
-    return run
-  }
-
-  function narrativePatternRun({
-    taskId,
-    status,
-    stage,
-    progressCompleted,
-    progressTotal,
-    chapterRanges,
-    selectedChapterIds,
-    skillName,
-    skillPreview,
-    diagnostics,
-    completedAt,
-  }) {
-    return {
-      task_id: taskId,
-      novel_id: state.activeNovelId,
-      status,
-      stage,
-      progress_completed: progressCompleted,
-      progress_total: progressTotal,
-      chapter_ranges: chapterRanges,
-      selected_chapter_ids: selectedChapterIds,
-      skill_name: skillName,
-      skill_preview: skillPreview,
-      diagnostics,
-      created_at: now,
-      updated_at: now,
-      completed_at: completedAt,
-    }
-  }
-
-  function updateNarrativePatternRunProgress(run, stage, progressCompleted) {
-    const updated = { ...run, stage, progress_completed: progressCompleted, updated_at: now }
-    upsertNarrativePatternRun(updated)
-    return updated
-  }
-
-  function upsertNarrativePatternRun(run) {
-    state.narrativePatternRuns = [
-      run,
-      ...state.narrativePatternRuns.filter((item) => item.task_id !== run.task_id),
-    ]
-  }
-
-  function appendNarrativePatternTrace(taskId, stage, diagnostics) {
-    const trace = state.narrativePatternTraces[taskId] ?? { task_id: taskId, entries: [] }
-    const nextIndex = trace.entries.length + 1
-    trace.entries = [
-      ...trace.entries,
-      {
-        trace_id: `${taskId}-trace-${String(nextIndex).padStart(2, '0')}`,
-        stage,
-        input_hash: `sha256:mock-${stage}-input-${nextIndex}`,
-        output_hash: `sha256:mock-${stage}-output-${nextIndex}`,
-        diagnostics,
-        created_at: now,
-      },
-    ]
-    state.narrativePatternTraces[taskId] = trace
-  }
-
-  function emitNarrativePatternProgress(run, message, options = {}) {
-    emit('narrative_pattern_extraction:progress', {
-      task_id: run.task_id,
-      status: run.status,
-      stage: run.stage,
-      progress_completed: run.progress_completed,
-      progress_total: run.progress_total,
-      message,
-      updated_at: now,
-      llm_status: options.llmStatus ?? '',
-      round: options.round ?? null,
-      batch_index: options.batchIndex ?? null,
-      batch_total: options.batchTotal ?? null,
-      token_estimate: options.tokenEstimate ?? null,
-      boundary_count: options.boundaryCount ?? null,
-      summary_count: options.summaryCount ?? null,
-      phase_count: options.phaseCount ?? null,
-    })
-  }
-
-  function normalizeChapterRange(range = {}) {
-    return {
-      start_chapter: Number(range.start_chapter ?? 0),
-      end_chapter: Number(range.end_chapter ?? 0),
-    }
-  }
-
-  function chapterRangesToMockChapterIds(ranges, novelId = state.activeNovelId) {
-    const byNumber = new Map(chapters(novelId).map((chapter) => [chapter.chapter_number, chapter.id]))
-    const ids = []
-    for (const range of ranges) {
-      for (let chapterNumber = range.start_chapter; chapterNumber <= range.end_chapter; chapterNumber += 1) {
-        const id = byNumber.get(chapterNumber)
-        if (id != null) ids.push(id)
-      }
-    }
-    return ids
   }
 
   function searchStyleSamples(input = {}) {

@@ -332,6 +332,14 @@ export async function verifyNovelChapterWorkflow(browser, url, consoleErrors, pa
   await waitForBridgeCall(page, 'SaveCover')
   await assertLastBinaryCall(page, 'SaveCover', 12)
 
+  // F13：封面可移除——保存后「移除封面」出现，移除后回到默认封面。
+  const removeCoverButton = page.getByRole('button', { name: '移除封面' })
+  await expectVisible(removeCoverButton, 'remove cover button appears once a cover exists')
+  await page.screenshot({ path: path.join(outputDir, 'cover-remove-button.png'), fullPage: true })
+  await removeCoverButton.click()
+  await waitForBridgeCall(page, 'DeleteCover')
+  await expectHidden(removeCoverButton, 'remove cover button disappears after removal')
+
   await page.getByRole('button', { name: '删除作品 全局回归小说 副本' }).click({ force: true })
   await expectVisible(page.getByRole('heading', { name: '删除作品' }), 'delete duplicate-like novel dialog')
   await assertBridgeCallCount(page, 'DeleteNovel', 0)
@@ -995,7 +1003,7 @@ export async function verifyFileChangeConflictWorkflow(browser, url, consoleErro
   await page.close()
 }
 
-// O7：章节删除——软删除、章号不复用；撤销动作用原标题新建章节恢复。
+// O7：章节删除——软删除、章号不复用；U14：撤销恢复正文与大纲（以新章号）。
 export async function verifyChapterDeleteWorkflow(browser, url, consoleErrors, pageErrors) {
   const page = await newAppPage(browser, consoleErrors, pageErrors, {
     initialized: true,
@@ -1009,14 +1017,31 @@ export async function verifyChapterDeleteWorkflow(browser, url, consoleErrors, p
   await ensureChapterBlockExpanded(page)
   await expectVisible(chapterButton(page, '雨夜线索'), 'chapter list before delete')
 
+  // 先打开章节：删除后编辑器里的 tab 必须一并关闭（O15），不能留下"章节还在"的错觉。
+  await chapterButton(page, '雨夜线索').click()
+  await assertEditorContains(page, '林岚在雨夜旧宅门前停住')
+  const chapterTab = page.getByText('第1章 雨夜线索', { exact: true }).first()
+  await expectVisible(chapterTab, 'chapter tab open before delete')
+
   await page.getByRole('button', { name: '删除章节 雨夜线索' }).click()
   const deleteToast = page.getByTestId('toast-info').filter({ hasText: '已删除第1章「雨夜线索」' })
   await expectVisible(deleteToast, 'delete toast appears with undo action')
   await expectHidden(chapterButton(page, '雨夜线索'), 'deleted chapter leaves the list')
+  await expectHidden(chapterTab, 'deleted chapter tab closes in the editor (O15)')
   await page.screenshot({ path: path.join(outputDir, 'chapter-delete-undo-toast.png'), fullPage: true })
 
+  // 撤销恢复正文与大纲：新章节号、原正文回到编辑器（U14）。
   await deleteToast.getByRole('button', { name: '撤销' }).click()
   await expectVisible(chapterButton(page, '雨夜线索'), 'undo recreates the chapter in the list')
+  const restoreToast = page.getByTestId('toast-success').filter({ hasText: '已恢复「雨夜线索」为第' })
+  await expectVisible(restoreToast, 'restore toast reports the new chapter number')
+  await chapterButton(page, '雨夜线索').click()
+  await assertEditorContains(page, '林岚在雨夜旧宅门前停住')
+  const saveCalls = await page.evaluate(() =>
+    window.__appMockState.calls.filter((call) =>
+      call.method === 'SaveContent' &&
+      String(call.args?.[0]?.content ?? '').includes('林岚在雨夜旧宅门前停住')))
+  assert.equal(saveCalls.length, 1, 'undo must restore the original content through SaveContent')
   await page.close()
 }
 
@@ -1037,7 +1062,9 @@ export async function verifyDataDirMigrationWorkflow(browser, url, consoleErrors
   await expectVisible(form, 'migration form opens')
   await form.getByLabel('新的数据目录').fill('D:\\NovelistMigrated')
   await form.getByRole('button', { name: '开始迁移' }).click()
-  await expectVisible(page.getByText('数据目录迁移完成，应用已切换到新目录。'), 'migration success feedback')
+  // U13：copy-first 迁移成功文案必须如实呈现复制统计与清单位置。
+  await expectVisible(page.getByText('已复制 12 个文件'), 'migration success feedback includes copy stats')
+  await expectVisible(page.getByText('迁移清单'), 'migration success feedback includes the manifest path')
   await expectInputValue(page.getByLabel('当前数据目录'), 'D:\\NovelistMigrated')
 
   const migrateCall = await page.evaluate(() =>

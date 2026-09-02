@@ -3,7 +3,6 @@ import {
   Archive,
   BookMarked,
   Check,
-  CircleAlert,
   Pencil,
   FileText,
   FolderOpen,
@@ -16,6 +15,7 @@ import {
 } from 'lucide-react'
 import { useApp } from '@/hooks/useApp'
 import { describeBridgeError } from '@/lib/novelist/bridgeErrors'
+import ReferenceErrorStrip from './ReferenceErrorStrip'
 import { describeAnchorStatus, type ReferenceAnchorTone } from '@/lib/novelist/referenceAnchorStates'
 import type { reference } from '@/lib/novelist/types'
 
@@ -88,7 +88,11 @@ export default function ReferenceBookSidebar({
   const [activeAction, setActiveAction] = useState<'pick' | 'create' | 'delete' | 'edit' | null>(null)
   const [editingAnchorId, setEditingAnchorId] = useState<number | null>(null)
   const [editForm, setEditForm] = useState<{ title: string; author: string; tags: string }>({ title: '', author: '', tags: '' })
-  const [error, setError] = useState<string | null>(null)
+  const [error, setError] = useState<{ message: string; detail: string | null } | null>(null)
+  const showError = useCallback((err: unknown, fallback: string) => {
+    const diagnostic = describeBridgeError(err, fallback)
+    setError({ message: diagnostic.message, detail: diagnostic.detail })
+  }, [])
   const [errorRetry, setErrorRetry] = useState<(() => void) | null>(null)
   const selectedIdsRef = useRef(selectedAnchorIds)
   const loadSequenceRef = useRef(0)
@@ -121,12 +125,12 @@ export default function ReferenceBookSidebar({
       }
     } catch (err) {
       if (loadSequence !== loadSequenceRef.current) return
-      setError(describeBridgeError(err, '参考书籍加载失败。').message)
+      showError(err, '参考书籍加载失败。')
       setErrorRetry(() => () => { setReloadTick(t => t + 1) })
     } finally {
       if (loadSequence === loadSequenceRef.current) setIsLoading(false)
     }
-  }, [app, novelId, onAnchorsChange, onSelectionChange])
+  }, [showError, app, novelId, onAnchorsChange, onSelectionChange])
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
@@ -153,7 +157,7 @@ export default function ReferenceBookSidebar({
   const commitMetadataEdit = async (anchor: reference.Anchor) => {
     const title = editForm.title.trim()
     if (!title) {
-      setError('书名不能为空。')
+      setError({ message: '书名不能为空。', detail: null })
       setErrorRetry(null)
       return
     }
@@ -165,16 +169,15 @@ export default function ReferenceBookSidebar({
         anchor_id: anchor.anchor_id,
         title,
         author: editForm.author.trim() ? editForm.author.trim() : null,
-        license_status: anchor.license_status,
-        visibility: anchor.visibility,
-        source_trust: anchor.source_trust,
+        // O20：license/visibility/source_trust 不回传（null = 保持现值），
+        // 打开表单时的快照不再有把并发变更整体回滚的能力。
         user_tags: editForm.tags.split(/[,，]/).map((tag) => tag.trim()).filter(Boolean),
       })
       setEditingAnchorId(null)
       await loadAnchors()
       onReferenceMutation()
     } catch (err) {
-      setError(describeBridgeError(err, '参考书信息保存失败。').message)
+      showError(err, '参考书信息保存失败。')
       setErrorRetry(() => () => { void commitMetadataEdit(anchor) })
     } finally {
       setActiveAction(null)
@@ -197,12 +200,12 @@ export default function ReferenceBookSidebar({
 
   const createFromDroppedFile = async (file: File) => {
     if (!/\.(txt|md)$/i.test(file.name)) {
-      setError('拖拽导入仅支持 .txt 或 .md 文件。')
+      setError({ message: '拖拽导入仅支持 .txt 或 .md 文件。', detail: null })
       setErrorRetry(null)
       return
     }
     if (file.size > 20 * 1024 * 1024) {
-      setError('拖拽的文件超过 20MB 上限。')
+      setError({ message: '拖拽的文件超过 20MB 上限。', detail: null })
       setErrorRetry(null)
       return
     }
@@ -232,7 +235,7 @@ export default function ReferenceBookSidebar({
       await loadAnchors()
       onReferenceMutation()
     } catch (err) {
-      setError(describeBridgeError(err, '拖拽导入失败，请重试或改用文件选择器。').message)
+      showError(err, '拖拽导入失败，请重试或改用文件选择器。')
       setErrorRetry(() => () => { void createFromDroppedFile(file) })
     } finally {
       setActiveAction(null)
@@ -258,7 +261,7 @@ export default function ReferenceBookSidebar({
         title: current.title.trim() || titleFromPath(sourcePath),
       }))
     } catch (err) {
-      setError(describeBridgeError(err, '无法打开文件选择器，请手动填写文件路径。').message)
+      showError(err, '无法打开文件选择器，请手动填写文件路径。')
       setErrorRetry(() => () => { void pickSourceFile() })
     } finally {
       setActiveAction(null)
@@ -269,7 +272,7 @@ export default function ReferenceBookSidebar({
     const title = form.title.trim()
     const sourcePath = form.sourcePath.trim()
     if (!title || !sourcePath) {
-      setError('请填写书名并选择本地文件。')
+      setError({ message: '请填写书名并选择本地文件。', detail: null })
       return
     }
 
@@ -297,7 +300,7 @@ export default function ReferenceBookSidebar({
       await loadAnchors()
       onReferenceMutation()
     } catch (err) {
-      setError(describeBridgeError(err, '无法添加参考书籍，请检查文件路径。').message)
+      showError(err, '无法添加参考书籍，请检查文件路径。')
       setErrorRetry(() => () => { void createReferenceBook() })
     } finally {
       setActiveAction(null)
@@ -316,7 +319,7 @@ export default function ReferenceBookSidebar({
       await loadAnchors()
       onReferenceMutation()
     } catch (err) {
-      setError(describeBridgeError(err, '无法删除参考书籍。').message)
+      showError(err, '无法删除参考书籍。')
       setErrorRetry(() => () => { void deleteReferenceBook(anchor) })
     } finally {
       setActiveAction(null)
@@ -438,18 +441,13 @@ export default function ReferenceBookSidebar({
       )}
 
       {error && (
-        <div className="mx-3 mt-3 flex items-start gap-2 rounded-md border border-destructive/30 bg-destructive/5 px-2.5 py-2 text-xs text-destructive" role="alert">
-          <CircleAlert className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden="true" />
-          <span className="min-w-0 flex-1 break-words">{error}</span>
-          {errorRetry && (
-            <button
-              type="button"
-              onClick={() => { setError(null); setErrorRetry(null); errorRetry() }}
-              className="shrink-0 self-center rounded border border-destructive/40 px-2 py-0.5 text-[11px] font-medium hover:bg-destructive/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-            >
-              重试
-            </button>
-          )}
+        <div className="mx-3 mt-3">
+          <ReferenceErrorStrip
+            message={error.message}
+            detail={error.detail}
+            onRetry={errorRetry ? () => { setError(null); setErrorRetry(null); errorRetry() } : undefined}
+            onClose={() => { setError(null); setErrorRetry(null) }}
+          />
         </div>
       )}
 

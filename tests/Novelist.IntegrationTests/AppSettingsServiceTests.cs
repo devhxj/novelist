@@ -232,14 +232,14 @@ public sealed class AppSettingsServiceTests : IDisposable
         var result = await dispatcher.DispatchAsync("""
             {
               "kind": "request",
-              "id": "req_bad_width",
-              "method": "SetChatPanelWidth",
-              "payload": { "args": [12000] }
+              "id": "req_bad_model",
+              "method": "SetSelectedModel",
+              "payload": { "args": [""] }
             }
             """);
 
         using var json = ParseOutbound(result);
-        AssertBridgeError(json.RootElement, "req_bad_width", BridgeErrorCodes.ValidationError);
+        AssertBridgeError(json.RootElement, "req_bad_model", BridgeErrorCodes.ValidationError);
     }
 
     [Fact]

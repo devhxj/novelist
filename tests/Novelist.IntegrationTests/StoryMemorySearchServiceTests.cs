@@ -111,65 +111,6 @@ public sealed class StoryMemorySearchServiceTests : IDisposable
         Assert.Contains("已过期", error.Message, StringComparison.Ordinal);
     }
 
-    [Fact]
-    public async Task BridgeWorkspaceHandlersDispatchSearchStoryMemory()
-    {
-        var options = CreateOptions();
-        await InitializeAsync(options);
-        var settings = new FileSystemAppSettingsService(options);
-        var novels = new FileSystemNovelService(options, settings);
-        var chapters = new FileSystemChapterContentService(options, novels);
-        var world = new FileSystemWorldEntityService(options, novels);
-        var planning = new FileSystemPlanningService(options, novels);
-        var writing = new FileSystemWritingStatisticsService(options, novels);
-        var novel = await novels.CreateNovelAsync(new CreateNovelPayload("长夜档案", "", ""), CancellationToken.None);
-        var chapter = await chapters.CreateChapterAsync(new CreateChapterPayload(novel.Id, "雾中来信"), CancellationToken.None);
-
-        var memory = new RagStoryMemorySearchService(
-            options,
-            novels,
-            chapters,
-            new ReadyRagIndexService(novel.Id),
-            new RecordingSemanticSearchService([
-                new RagSearchHitPayload("c1", novel.Id, 1, "content", 0, 0, "林岚发现暗号", chapter.FilePath, chapter.Title, 0.1, 0.9)
-            ]));
-        var dispatcher = new BridgeDispatcher()
-            .RegisterCompatibilityAppMethodHandlers()
-            .RegisterWorkspaceUtilityHandlers(
-                new FileSystemSkillCatalogService(options, novels),
-                new FileSystemWorkspaceSearchService(options, novels, chapters, world, planning),
-                new FileSystemNovelExportService(novels, chapters, settings, new NullExportDestinationPicker()),
-                writing,
-                memory);
-
-        var result = await dispatcher.DispatchAsync($$"""
-            {
-              "kind": "request",
-              "id": "req_memory",
-              "method": "SearchStoryMemory",
-              "payload": {
-                "args": [
-                  {
-                    "novel_id": {{novel.Id}},
-                    "query": "暗号",
-                    "top_k": 5,
-                    "min_relevance": 0.5,
-                    "chapter_numbers": [],
-                    "chunk_types": []
-                  }
-                ]
-              }
-            }
-            """);
-
-        Assert.Contains("\"ok\":true", result.OutboundJson, StringComparison.Ordinal);
-        using var json = JsonDocument.Parse(result.OutboundJson!);
-        Assert.Contains(
-            "林岚发现暗号",
-            json.RootElement.GetProperty("result").GetProperty("content").GetString(),
-            StringComparison.Ordinal);
-    }
-
     public void Dispose()
     {
         if (Directory.Exists(_root))

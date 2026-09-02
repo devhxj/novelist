@@ -10,7 +10,7 @@ public interface IAppInitializationService
 
     ValueTask<AppConfigPayload> GetAppConfigAsync(CancellationToken cancellationToken);
 
-    ValueTask UpdateDataDirectoryAsync(string dataDirectory, CancellationToken cancellationToken);
+    ValueTask<UpdateDataDirResultPayload> UpdateDataDirectoryAsync(string dataDirectory, CancellationToken cancellationToken);
 
     ValueTask<PlatformPayload> GetPlatformAsync(CancellationToken cancellationToken);
 }

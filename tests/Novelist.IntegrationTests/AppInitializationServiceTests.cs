@@ -217,8 +217,100 @@ public sealed class AppInitializationServiceTests : IDisposable
     }
 
     [Fact]
-    public async Task UpdatingDataDirectoryInvalidatesCachedStartupRecoveryResult()
+    public async Task UpdatingDataDirectoryCopiesDataBeforeRepointingAndWritesManifest()
     {
+        var configDirectory = Path.Combine(_root, "config");
+        var sourceData = Path.Combine(_root, "source-data");
+        var targetData = Path.Combine(_root, "target-data");
+        var service = CreateService(configDirectory, sourceData);
+        await service.InitializeAsync(sourceData, CancellationToken.None);
+
+        // 在源目录造出有意义的用户数据：一部小说 + 设置 + 章节正文。
+        var novelWorkspace = Path.Combine(sourceData, "novels", "1");
+        Directory.CreateDirectory(Path.Combine(novelWorkspace, "chapters"));
+        await File.WriteAllTextAsync(Path.Combine(novelWorkspace, "chapters", "001.md"), "第一章正文");
+        await File.WriteAllTextAsync(Path.Combine(sourceData, "app_settings.json"), "{\"last_novel_id\":1}");
+        var sourceSnapshotBefore = Directory
+            .EnumerateFiles(sourceData, "*", SearchOption.AllDirectories)
+            .OrderBy(path => path, StringComparer.Ordinal)
+            .Select(path => (path, File.ReadAllText(path)))
+            .ToArray();
+
+        var result = await service.UpdateDataDirectoryAsync(targetData, CancellationToken.None);
+
+        // 复制完成：目标目录包含全部数据，清单为 completed。
+        Assert.True(result.CopiedFiles >= sourceSnapshotBefore.Length);
+        Assert.True(File.Exists(Path.Combine(targetData, "novels", "1", "chapters", "001.md")));
+        Assert.True(File.Exists(Path.Combine(targetData, "app_settings.json")));
+        Assert.Equal(
+            Path.Combine(Path.GetFullPath(targetData), DataDirectoryRelocationService.ManifestFileName),
+            result.ManifestPath);
+        Assert.True(File.Exists(result.ManifestPath));
+        Assert.Equal("completed", ReadManifestStatus(result.ManifestPath));
+
+        // 指针切换到新目录。
+        var config = await service.GetAppConfigAsync(CancellationToken.None);
+        Assert.Equal(Path.GetFullPath(targetData), config.DataDir);
+
+        // source 逐文件未动（copy-first 不变量）。
+        var sourceSnapshotAfter = Directory
+            .EnumerateFiles(sourceData, "*", SearchOption.AllDirectories)
+            .OrderBy(path => path, StringComparer.Ordinal)
+            .Select(path => (path, File.ReadAllText(path)))
+            .ToArray();
+        Assert.Equal(sourceSnapshotBefore, sourceSnapshotAfter);
+    }
+
+    [Fact]
+    public async Task UpdatingDataDirectoryRejectsNestedTargetAndKeepsConfigUnchanged()
+    {
+        var configDirectory = Path.Combine(_root, "config");
+        var sourceData = Path.Combine(_root, "source-data");
+        var service = CreateService(configDirectory, sourceData);
+        await service.InitializeAsync(sourceData, CancellationToken.None);
+        var configBefore = await File.ReadAllBytesAsync(Path.Combine(configDirectory, "config.json"), CancellationToken.None);
+
+        var nestedTarget = Path.Combine(sourceData, "inside-target");
+        await Assert.ThrowsAsync<InvalidOperationException>(
+            () => service.UpdateDataDirectoryAsync(nestedTarget, CancellationToken.None).AsTask());
+
+        // 指针未动；路径校验在任何文件系统写入之前完成，目标连目录都不产生。
+        Assert.Equal(configBefore, await File.ReadAllBytesAsync(Path.Combine(configDirectory, "config.json"), CancellationToken.None));
+        var config = await service.GetAppConfigAsync(CancellationToken.None);
+        Assert.Equal(Path.GetFullPath(sourceData), config.DataDir);
+        Assert.False(Directory.Exists(nestedTarget));
+    }
+
+    [Fact]
+    public async Task UpdatingDataDirectorySkipsConflictingTargetFilesWithWarnings()
+    {
+        var configDirectory = Path.Combine(_root, "config");
+        var sourceData = Path.Combine(_root, "source-data");
+        var targetData = Path.Combine(_root, "target-data");
+        var service = CreateService(configDirectory, sourceData);
+        await service.InitializeAsync(sourceData, CancellationToken.None);
+        await File.WriteAllTextAsync(Path.Combine(sourceData, "app_settings.json"), "{\"last_novel_id\":1}");
+
+        // 目标目录已有内容不同的同名文件：跳过并计入 warning，不覆盖。
+        Directory.CreateDirectory(targetData);
+        await File.WriteAllTextAsync(Path.Combine(targetData, "app_settings.json"), "{\"last_novel_id\":9}");
+
+        var result = await service.UpdateDataDirectoryAsync(targetData, CancellationToken.None);
+
+        Assert.True(result.SkippedFiles >= 1);
+        Assert.Equal(1, result.Warnings);
+        Assert.Equal("{\"last_novel_id\":9}", await File.ReadAllTextAsync(Path.Combine(targetData, "app_settings.json")));
+        Assert.Equal("completed_with_warnings", ReadManifestStatus(result.ManifestPath));
+    }
+
+    private static string ReadManifestStatus(string manifestPath)
+    {
+        using var document = JsonDocument.Parse(File.ReadAllBytes(manifestPath));
+        return document.RootElement.GetProperty("status").GetString()!;
+    }
+
+    [Fact]
+    public async Task UpdatingDataDirectoryInvalidatesCachedStartupRecoveryResult()    {
         var recovery = new CountingImportRecoveryService();
         var referenceRecovery = new CountingReferenceAnchorRecoveryService();
         var options = new AppInitializationOptions

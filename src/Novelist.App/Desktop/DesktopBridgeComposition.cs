@@ -76,13 +76,6 @@ public static PhotinoWebMessageBridge CreateBridge(
         var updateCheckService = new GitHubUpdateCheckService(
             options,
             settingsService);
-        var narrativePatternService = new FileSystemNarrativePatternExtractionService(
-            options,
-            novelService,
-            chapterContentService,
-            chatCompletionClient,
-            llmService,
-            eventSink);
         var searchService = new FileSystemWorkspaceSearchService(
             options,
             novelService,
@@ -219,7 +212,6 @@ referenceCorpusService);
                 novelImportRecoveryService)
             .RegisterStyleSampleHandlers(styleSampleService, styleSkillExtractionService)
             .RegisterUpdateCheckHandlers(updateCheckService)
-            .RegisterNarrativePatternHandlers(narrativePatternService)
             .RegisterGitHistoryHandlers(versionControl)
             .RegisterReferenceAnchorHandlers(referenceAnchorService)
             .RegisterReferenceMaterializationHandlers(referenceMaterializationService)

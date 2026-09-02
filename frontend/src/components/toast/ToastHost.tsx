@@ -55,9 +55,10 @@ function ToastCard({ toast }: { toast: ToastItem }) {
 
 // 全局通知出口（F9）：整块容器是 polite live region，
 // 错误条目再单独带 role="alert"，读屏器与普通作者都不会错过后台结果。
+// U15：容器常驻挂载——live region 与首条通知同一帧插入时读屏器不可靠播报，
+// 空态也保留容器，只清空子项。
 export default function ToastHost() {
   const toasts = useSyncExternalStore(subscribeToasts, getToastSnapshot)
-  if (toasts.length === 0) return null
   return (
     <div
       role="status"

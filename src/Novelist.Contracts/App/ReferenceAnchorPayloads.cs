@@ -218,15 +218,17 @@ public sealed record RestoreReferenceMaterialsPayload(
     [property: JsonPropertyName("novel_id")] long NovelId,
     [property: JsonPropertyName("material_ids")] IReadOnlyList<string> MaterialIds);
 
+// O20：license/visibility/source_trust 可空——null 表示"保持现值"。
+// 编辑表单只回写作者改过的字段，避免把打开表单时的快照静默回滚到并发变更上（additive，旧调用方不受影响）。
 public sealed record UpdateReferenceAnchorMetadataPayload(
     [property: JsonPropertyName("novel_id")] long NovelId,
     [property: JsonPropertyName("anchor_id")] long AnchorId,
     [property: JsonPropertyName("title")] string Title,
     [property: JsonPropertyName("author")] string? Author,
-    [property: JsonPropertyName("license_status")] string LicenseStatus,
-    [property: JsonPropertyName("visibility")] string Visibility,
-    [property: JsonPropertyName("source_trust")] string SourceTrust,
-[property: JsonPropertyName("user_tags")] IReadOnlyList<string> UserTags);
+    [property: JsonPropertyName("license_status"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? LicenseStatus = null,
+    [property: JsonPropertyName("visibility"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? Visibility = null,
+    [property: JsonPropertyName("source_trust"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? SourceTrust = null,
+    [property: JsonPropertyName("user_tags"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] IReadOnlyList<string>? UserTags = null);
 
 public sealed record BackfillReferenceMaterialEmbeddingsPayload(
  [property: JsonPropertyName("novel_id")] long NovelId,

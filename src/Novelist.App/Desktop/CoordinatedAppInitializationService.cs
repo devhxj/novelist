@@ -43,13 +43,19 @@ internal sealed class CoordinatedAppInitializationService : IAppInitializationSe
  }
  }
 
- public ValueTask InitializeAsync(string dataDirectory, CancellationToken cancellationToken) =>
- RebindAsync(
- token => _inner.InitializeAsync(dataDirectory, token),
+ public async ValueTask InitializeAsync(string dataDirectory, CancellationToken cancellationToken)
+ {
+ await RebindAsync(
+ async token =>
+ {
+  await _inner.InitializeAsync(dataDirectory, token);
+  return true;
+ },
  restartPreviousOnFailure: true,
  cancellationToken);
+ }
 
- public ValueTask UpdateDataDirectoryAsync(string dataDirectory, CancellationToken cancellationToken) =>
+ public ValueTask<UpdateDataDirResultPayload> UpdateDataDirectoryAsync(string dataDirectory, CancellationToken cancellationToken) =>
 RebindAsync(
 token => _inner.UpdateDataDirectoryAsync(dataDirectory, token),
  restartPreviousOnFailure: true,
@@ -61,8 +67,8 @@ token => _inner.UpdateDataDirectoryAsync(dataDirectory, token),
  public ValueTask<PlatformPayload> GetPlatformAsync(CancellationToken cancellationToken) =>
  _inner.GetPlatformAsync(cancellationToken);
 
- private async ValueTask RebindAsync(
- Func<CancellationToken, ValueTask> updateAsync,
+ private async ValueTask<T> RebindAsync<T>(
+ Func<CancellationToken, ValueTask<T>> updateAsync,
  bool restartPreviousOnFailure,
  CancellationToken cancellationToken)
  {
@@ -73,8 +79,9 @@ token => _inner.UpdateDataDirectoryAsync(dataDirectory, token),
  await StopBackgroundServicesAsync(cancellationToken);
  try
  {
- await updateAsync(cancellationToken);
+ var result = await updateAsync(cancellationToken);
  await StartBackgroundServicesAsync(cancellationToken);
+ return result;
  }
  catch
  {

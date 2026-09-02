@@ -170,6 +170,14 @@ export default function WorkspaceView({ initialNovelId, initialShowHelp, startup
     contentRef.current?.openFile('novelist.md', '故事状态')
   }
 
+  // O15：章节删除后关闭编辑器里的正文/大纲 tab，残留 tab 不再制造"章节还在"的错觉。
+  function handleChapterDeleted(ch: chapter.Chapter) {
+    contentRef.current?.closeTabsByPaths([ch.file_path, `outlines/${String(ch.chapter_number).padStart(3, '0')}.md`])
+    if (tabTarget?.path === ch.file_path) {
+      setTabTarget(null)
+    }
+  }
+
   // ── 全局快捷键 ──────────────────────────────────────────
 
   // N3：Ctrl+S / Ctrl+Shift+V 原来挂在 ContentPanel 上，面板一卸载快捷键就静默失效。
@@ -529,6 +537,7 @@ export default function WorkspaceView({ initialNovelId, initialShowHelp, startup
             onSelectChapter={handleSelectChapter}
             onSelectNovelist={handleSelectNovelist}
             onExportNovel={(id) => setExportNovelId(id)}
+            onChapterDeleted={handleChapterDeleted}
             target={tabTarget}
             showCreate={showCreate}
             setShowCreate={setShowCreate}

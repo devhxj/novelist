@@ -27,6 +27,8 @@ interface Props {
   onSelectChapter: (ch: chapter.Chapter) => void
   onSelectNovelist: () => void
   onExportNovel: (novelId: number) => void
+  /** O15：章节删除成功后回调，用于关闭编辑器里的对应 tab。 */
+  onChapterDeleted: (ch: chapter.Chapter) => void
   target: { path: string; title: string } | null
   showCreate: boolean
   setShowCreate: (v: boolean) => void
@@ -57,7 +59,7 @@ export default function SidePanel({
   onWidthCommit,
   activePanel,
   novels, novelId, onSelectNovel,
-  onSelectChapter, onSelectNovelist, onExportNovel, target,
+  onSelectChapter, onSelectNovelist, onExportNovel, onChapterDeleted, target,
   showCreate, setShowCreate, title, setTitle, description, setDescription,
   onCreateNovel,
   activeSkillName, onSelectSkill, onEditSkill, onNewSkill,
@@ -192,6 +194,7 @@ export default function SidePanel({
           onSelectChapter={onSelectChapter}
           onSelectNovelist={onSelectNovelist}
           onExportNovel={() => onExportNovel(novelId)}
+          onChapterDeleted={onChapterDeleted}
         />
       ) : activePanel === 'characters' ? (
         <CharacterList novelId={novelId} />

@@ -151,10 +151,6 @@ export namespace app {
     content: string
   }
 
-  export interface SaveSettingsInput {
-    [key: string]: unknown
-  }
-
   export interface SessionDetail {
     session_id: string
     novel_id: number
@@ -312,6 +308,14 @@ export namespace config {
     endpoint_url: string
     default_enabled: boolean
     timeout_ms: number
+  }
+
+  /** U13：UpdateDataDir 的 copy-first 迁移结果——复制统计与清单位置。 */
+  export interface UpdateDataDirResult {
+    copied_files: number
+    skipped_files: number
+    warnings: number
+    manifest_path: string
   }
 
   export interface AppConfig {
@@ -642,81 +646,6 @@ export namespace styleSample {
   }
 }
 
-export namespace pattern {
-  export interface ChapterRange {
-    start_chapter: number
-    end_chapter: number
-  }
-
-  export interface StartNarrativePatternExtractionInput {
-    task_id: string
-    novel_id: number
-    chapter_ranges: ChapterRange[]
-    provider_name: string
-    model_id: string
-    reasoning_effort: string
-    skill_name: string
-    selected_chapter_ids?: number[] | null
-  }
-
-  export interface CancelNarrativePatternExtractionInput {
-    task_id: string
-    reason: string
-  }
-
-  export interface GetNarrativePatternRunInput {
-    task_id: string
-  }
-
-  export interface NarrativePatternRun {
-    task_id: string
-    novel_id: number
-    status: string
-    stage: string
-    progress_completed: number
-    progress_total: number
-    chapter_ranges: ChapterRange[]
-    selected_chapter_ids: number[]
-    skill_name: string
-    skill_preview: string
-    diagnostics: diagnostics.CopyableDiagnostic[]
-    created_at: Timestamp
-    updated_at: Timestamp
-    completed_at?: Timestamp | null
-  }
-
-  export interface NarrativePatternProgress {
-    task_id: string
-    status: string
-    stage: string
-    progress_completed: number
-    progress_total: number
-    message: string
-    updated_at: Timestamp
-    llm_status: string
-    round?: number | null
-    batch_index?: number | null
-    batch_total?: number | null
-    token_estimate?: number | null
-    boundary_count?: number | null
-    summary_count?: number | null
-    phase_count?: number | null
-  }
-
-  export interface NarrativePatternTrace {
-    task_id: string
-    entries: NarrativePatternTraceEntry[]
-  }
-
-  export interface NarrativePatternTraceEntry {
-    trace_id: string
-    stage: string
-    input_hash: string
-    output_hash: string
-    diagnostics: diagnostics.CopyableDiagnostic[]
-    created_at: Timestamp
-  }
-}
 
 export namespace git {
   export interface GetGitCommitsInput {
@@ -1214,9 +1143,10 @@ has_more: boolean
     anchor_id: number
     title: string
     author?: string | null
-    license_status: string
-    visibility: string
-    source_trust: string
+    /** O20：不传 = 保持现值（避免编辑表单把并发变更整体回写回滚）。 */
+    license_status?: string | null
+    visibility?: string | null
+    source_trust?: string | null
     user_tags: string[]
   }
 

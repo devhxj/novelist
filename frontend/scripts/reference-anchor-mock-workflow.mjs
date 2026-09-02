@@ -822,9 +822,11 @@ async function verifyBridgeCalls(page) {
   assert.equal(metadataCall.args[0].anchor_id, 101, 'anchor metadata update payload must include anchor id')
   assert.equal(metadataCall.args[0].title, '雨夜动作语料库', 'anchor metadata update payload must include title')
   assert.equal(metadataCall.args[0].author, 'Metadata Curator', 'anchor metadata update payload must include author')
-  assert.equal(metadataCall.args[0].license_status, 'licensed', 'anchor metadata update payload must include license status')
-  assert.equal(metadataCall.args[0].visibility, 'workspace', 'anchor metadata update payload must preserve workspace visibility')
-  assert.equal(metadataCall.args[0].source_trust, 'user_verified', 'anchor metadata update payload must include source trust')
+  // O20：编辑表单不再回传 license/visibility/source_trust（null = 保持现值），
+  // 打开表单时的快照没有把并发变更整体回滚的能力。
+  assert.equal(metadataCall.args[0].license_status, undefined, 'anchor metadata update payload must omit license status (keep-current)')
+  assert.equal(metadataCall.args[0].visibility, undefined, 'anchor metadata update payload must omit visibility (keep-current)')
+  assert.equal(metadataCall.args[0].source_trust, undefined, 'anchor metadata update payload must omit source trust (keep-current)')
   assert.deepEqual(metadataCall.args[0].user_tags, ['雨夜', '动作克制', '精选'], 'anchor metadata update payload must include user tags')
 
   const bulkDeleteCall = calls.find((call) => call.method === 'DeleteReferenceAnchors')
@@ -1646,7 +1648,6 @@ function installReferenceAnchorMockBridge(options = {}) {
       case 'SetSelectedModel':
       case 'SetReasoningEffort':
       case 'SetApprovalMode':
-      case 'SetChatPanelWidth':
         return null
       case 'GetNovels': return [novel()]
       case 'GetCover': return null
@@ -1872,13 +1873,14 @@ function installReferenceAnchorMockBridge(options = {}) {
 
     anchor.title = input.title
     anchor.author = input.author ?? ''
-    anchor.license_status = input.license_status
-    anchor.visibility = input.visibility
-    anchor.source_trust = input.source_trust
+    // O20：未传的字段保持现值（与真实后端 null = keep-current 同语义）。
+    if (input.license_status != null) anchor.license_status = input.license_status
+    if (input.visibility != null) anchor.visibility = input.visibility
+    if (input.source_trust != null) anchor.source_trust = input.source_trust
     anchor.user_tags = Array.isArray(input.user_tags) ? input.user_tags : []
-    anchor.owner_scope = input.visibility === 'workspace' ? 'workspace_corpus' : 'novel'
-    anchor.owner_novel_id = input.visibility === 'workspace' ? null : input.novel_id
-    anchor.novel_id = input.visibility === 'workspace' ? 0 : input.novel_id
+    anchor.owner_scope = anchor.visibility === 'workspace' ? 'workspace_corpus' : 'novel'
+    anchor.owner_novel_id = anchor.visibility === 'workspace' ? null : input.novel_id
+    anchor.novel_id = anchor.visibility === 'workspace' ? 0 : input.novel_id
     anchor.updated_at = now
     return anchor
   }

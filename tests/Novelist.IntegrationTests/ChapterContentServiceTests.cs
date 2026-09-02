@@ -155,6 +155,73 @@ public sealed class ChapterContentServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task SaveContentToDeletedChapterIsRejectedAndDoesNotResurrectTheFile()
+    {
+        var options = CreateOptions();
+        await InitializeAsync(options);
+        var novelService = new FileSystemNovelService(options, new FileSystemAppSettingsService(options));
+        var novel = await novelService.CreateNovelAsync(new CreateNovelPayload("复活守卫", "", ""), CancellationToken.None);
+        var service = new FileSystemChapterContentService(options, novelService);
+        var chapter = await service.CreateChapterAsync(new CreateChapterPayload(novel.Id, "被删的一章"), CancellationToken.None);
+        await service.SaveContentAsync(
+            new SaveContentPayload(novel.Id, chapter.FilePath, "即将消失的正文"),
+            CancellationToken.None);
+
+        await service.DeleteChapterAsync(new DeleteChapterPayload(novel.Id, chapter.Id), CancellationToken.None);
+
+        // 对已删除章号的保存必须被拒绝（O15）——文件不得以孤儿形态复活。
+        await Assert.ThrowsAsync<ArgumentException>(
+            () => service.SaveContentAsync(
+                new SaveContentPayload(novel.Id, chapter.FilePath, "编辑器残留 tab 的自动保存"),
+                CancellationToken.None).AsTask());
+        Assert.False(File.Exists(Path.Combine(options.DefaultDataDirectory, "novels", novel.Id.ToString(), "chapters", "001.md")));
+        Assert.Empty(await service.GetChaptersAsync(novel.Id, CancellationToken.None));
+    }
+
+    [Fact]
+    public async Task DeleteChapterRecordsNegativeWordDeltaInWritingStatistics()
+    {
+        var options = CreateOptions();
+        await InitializeAsync(options);
+        var novelService = new FileSystemNovelService(options, new FileSystemAppSettingsService(options));
+        var novel = await novelService.CreateNovelAsync(new CreateNovelPayload("统计扣减", "", ""), CancellationToken.None);
+        var recorder = new RecordingWritingDeltaRecorder();
+        var service = new FileSystemChapterContentService(options, novelService, writingDeltaRecorder: recorder);
+        var chapter = await service.CreateChapterAsync(new CreateChapterPayload(novel.Id, "长章"), CancellationToken.None);
+        await service.SaveContentAsync(
+            new SaveContentPayload(novel.Id, chapter.FilePath, "六个字的正文内容"),
+            CancellationToken.None);
+
+        await service.DeleteChapterAsync(new DeleteChapterPayload(novel.Id, chapter.Id), CancellationToken.None);
+
+        // 删除时按章节字数扣减（N6），写作速度数据不再虚高。
+        var deleteDelta = Assert.Single(recorder.Deltas, delta => delta.WordDelta < 0);
+        Assert.Equal(chapter.Id, deleteDelta.ChapterId);
+        Assert.Equal(-8, deleteDelta.WordDelta);
+    }
+
+    [Fact]
+    public async Task GetMaxChapterNumberIncludesDeletedHighWaterMark()
+    {
+        var options = CreateOptions();
+        await InitializeAsync(options);
+        var novelService = new FileSystemNovelService(options, new FileSystemAppSettingsService(options));
+        var novel = await novelService.CreateNovelAsync(new CreateNovelPayload("高水位", "", ""), CancellationToken.None);
+        var service = new FileSystemChapterContentService(options, novelService);
+        var first = await service.CreateChapterAsync(new CreateChapterPayload(novel.Id, "一"), CancellationToken.None);
+        var second = await service.CreateChapterAsync(new CreateChapterPayload(novel.Id, "二"), CancellationToken.None);
+
+        await service.DeleteChapterAsync(new DeleteChapterPayload(novel.Id, second.Id), CancellationToken.None);
+
+        // 尾章删除后历史最高章号仍是 2（O19）：时间线/卷轴的 max+1 推导与分配器一致。
+        Assert.Equal(2, await service.GetMaxChapterNumberAsync(novel.Id, CancellationToken.None));
+        var third = await service.CreateChapterAsync(new CreateChapterPayload(novel.Id, "三"), CancellationToken.None);
+        Assert.Equal(3, third.ChapterNumber);
+        Assert.Equal(3, await service.GetMaxChapterNumberAsync(novel.Id, CancellationToken.None));
+        Assert.Equal(first.ChapterNumber, 1);
+    }
+
+    [Fact]
     public async Task SaveContentDoesNotFailWhenRagStaleNotificationFails()
     {
         var options = CreateOptions();
@@ -365,6 +432,22 @@ public sealed class ChapterContentServiceTests : IDisposable
             CancellationToken cancellationToken)
         {
             throw new InvalidOperationException("stale notification failed");
+        }
+    }
+
+    private sealed class RecordingWritingDeltaRecorder : IWritingDeltaRecorder
+    {
+        public List<(long ChapterId, int WordDelta)> Deltas { get; } = [];
+
+        public ValueTask RecordWordDeltaAsync(
+            long novelId,
+            long chapterId,
+            int wordDelta,
+            CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            Deltas.Add((chapterId, wordDelta));
+            return ValueTask.CompletedTask;
         }
     }
 

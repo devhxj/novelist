@@ -5213,6 +5213,45 @@ Assert.True(segment.TextPreview.Length <= 51);
     }
 
     [Fact]
+    public async Task UpdateAnchorMetadataKeepsCurrentLicenseVisibilityAndTrustWhenOmitted()
+    {
+        var options = CreateOptions();
+        await InitializeAsync(options);
+        var novels = new FileSystemNovelService(options, new FileSystemAppSettingsService(options));
+        var ownerNovel = await novels.CreateNovelAsync(new CreateNovelPayload("部分更新所有者", "", ""), CancellationToken.None);
+        var sourcePath = CreateSourceFile("partial-update-anchor-metadata.md", "并发变更不应被编辑表单回滚。");
+        var service = new SqliteReferenceAnchorService(options, novels);
+        var anchor = await service.CreateAnchorAsync(
+            new CreateReferenceAnchorPayload(
+                ownerNovel.Id,
+                "原名",
+                null,
+                sourcePath,
+                "markdown",
+                "licensed"),
+            CancellationToken.None);
+
+        // O20：编辑表单只改书名/作者/标签；license/visibility/source_trust 省略 = 保持现值。
+        var updated = await service.UpdateAnchorMetadataAsync(
+            new UpdateReferenceAnchorMetadataPayload(
+                ownerNovel.Id,
+                anchor.AnchorId,
+                "只改书名",
+                "新作者",
+                LicenseStatus: null,
+                Visibility: null,
+                SourceTrust: null,
+                UserTags: ["只改书名"]),
+            CancellationToken.None);
+
+        Assert.Equal("只改书名", updated.Title);
+        Assert.Equal("新作者", updated.Author);
+        Assert.Equal("licensed", updated.LicenseStatus);
+        Assert.Equal(anchor.Visibility, updated.Visibility);
+        Assert.Equal(anchor.SourceTrust, updated.SourceTrust);
+    }
+
+    [Fact]
     public async Task UpdateAnchorMetadataCannotBypassOtherNovelPrivateOrWorkspaceRestrictedVisibility()
     {
         var options = CreateOptions();

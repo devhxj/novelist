@@ -17,12 +17,6 @@ public static class AppSettingsBridgeHandlers
         dispatcher.Register("GetSettings", async (_, cancellationToken) =>
             await service.GetSettingsAsync(cancellationToken));
 
-        dispatcher.Register("SaveSettings", async (_, cancellationToken) =>
-        {
-            await service.SaveSettingsAsync(cancellationToken);
-            return null;
-        });
-
         dispatcher.Register("SetSelectedModel", async (context, cancellationToken) =>
         {
             await service.SetSelectedModelAsync(
@@ -37,12 +31,6 @@ public static class AppSettingsBridgeHandlers
             await service.SetReasoningEffortAsync(
                 ReadStringArg(context.Payload, 0, "reasoningEffort", allowEmpty: true),
                 cancellationToken);
-            return null;
-        });
-
-        dispatcher.Register("SetChatPanelWidth", async (context, cancellationToken) =>
-        {
-            await service.SetChatPanelWidthAsync(ReadIntArg(context.Payload, 0, "width"), cancellationToken);
             return null;
         });
 

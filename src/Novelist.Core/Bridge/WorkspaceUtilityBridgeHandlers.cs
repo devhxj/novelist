@@ -57,14 +57,6 @@ public static class WorkspaceUtilityBridgeHandlers
                 ReadStringArg(context.Payload, 1, "query", allowEmpty: true),
                 cancellationToken));
 
-        if (storyMemory is not null)
-        {
-            dispatcher.Register("SearchStoryMemory", async (context, cancellationToken) =>
-                await storyMemory.SearchAsync(
-                    ReadObjectArg<SearchStoryMemoryPayload>(context.Payload, 0, "input"),
-                    cancellationToken));
-        }
-
         dispatcher.Register("RebuildNovelIndex", async (context, cancellationToken) =>
         {
             await search.RebuildNovelIndexAsync(

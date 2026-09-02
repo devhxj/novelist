@@ -90,7 +90,10 @@ public sealed class FileSystemChapterContentService : IChapterContentService
         try
         {
             var store = await LoadOrCreateAsync(novelId, cancellationToken);
-            return store.Items.Count == 0 ? 0 : store.Items.Max(chapter => chapter.ChapterNumber);
+            // O19：与 AllocateChapterNumber 同口径——删除留下的高水位也算"历史最高章号"，
+            // 时间线/卷轴的"下一章"推导才不会与实际分配错位（章号永不复用）。
+            var maxExisting = store.Items.Count == 0 ? 0 : store.Items.Max(chapter => chapter.ChapterNumber);
+            return Math.Max(maxExisting, store.NextChapterNumber - 1);
         }
         finally
         {
@@ -233,6 +236,16 @@ public sealed class FileSystemChapterContentService : IChapterContentService
 
             await SaveAsync(input.NovelId, store, cancellationToken);
 
+            // 删除的章节字数要从写作统计里扣掉（N6），否则速度数据永远虚高。
+            if (_writingDeltaRecorder is not null && chapter.WordCount != 0)
+            {
+                await _writingDeltaRecorder.RecordWordDeltaAsync(
+                    input.NovelId,
+                    chapter.Id,
+                    -chapter.WordCount,
+                    cancellationToken);
+            }
+
             try
             {
                 if (File.Exists(contentFullPath))
@@ -246,8 +259,13 @@ public sealed class FileSystemChapterContentService : IChapterContentService
             }
             catch
             {
-                // 文件删除失败不回滚元数据：列表已经隐藏该章，孤文件可由索引清理兜底。
+                // 元数据已持久化、列表已隐藏该章；残留文件无法再通过保存放大
+                // （SaveContentAsync 有章节库守卫），留待作者手动清理。
             }
+
+            // stale 标记先于 git 提交：提交失败时索引也不能继续服务已删正文（O16）。
+            await TryMarkRagIndexStaleAsync(input.NovelId, contentRelativePath);
+            await TryMarkRagIndexStaleAsync(input.NovelId, outlineRelativePath);
 
             await _versionControl.CommitIfChangedAsync(
                 input.NovelId,
@@ -258,9 +276,6 @@ public sealed class FileSystemChapterContentService : IChapterContentService
         {
             _mutex.Release();
         }
-
-        await TryMarkRagIndexStaleAsync(input.NovelId, contentRelativePath!);
-        await TryMarkRagIndexStaleAsync(input.NovelId, outlineRelativePath!);
     }
 
     public async ValueTask<string> GetContentAsync(
@@ -309,17 +324,31 @@ public sealed class FileSystemChapterContentService : IChapterContentService
         var fullPath = await ResolveContentFilePathAsync(input.NovelId, relativePath, cancellationToken);
         var shouldMarkRagStale = false;
         var shouldCommitRepositoryChanges = !IsUserSkillPath(relativePath);
+        var chapterNumber = ParseChapterNumber(relativePath);
 
         await _mutex.WaitAsync(cancellationToken);
         try
         {
+            // O15：章节文件必须先过章节库守卫再写盘——章号已删除/不存在时拒绝保存，
+            // 防止编辑器残留 tab、自动保存或 Agent 编辑把已删除章节复活成无元数据的孤儿文件。
+            ChapterStoreDocument? store = null;
+            if (chapterNumber is not null)
+            {
+                store = await LoadOrCreateAsync(input.NovelId, cancellationToken);
+                if (store.Items.FindIndex(chapter => chapter.ChapterNumber == chapterNumber.Value) < 0)
+                {
+                    throw new ArgumentException(
+                        $"Chapter {chapterNumber.Value.ToString(CultureInfo.InvariantCulture)} does not exist (it may have been deleted). " +
+                        "Create a new chapter instead of saving to the retired chapter file.",
+                        nameof(input));
+                }
+            }
+
             Directory.CreateDirectory(Path.GetDirectoryName(fullPath)!);
             await File.WriteAllTextAsync(fullPath, input.Content, cancellationToken);
 
-            var chapterNumber = ParseChapterNumber(relativePath);
-            if (chapterNumber is not null)
+            if (store is not null && chapterNumber is not null)
             {
-                var store = await LoadOrCreateAsync(input.NovelId, cancellationToken);
                 var index = store.Items.FindIndex(chapter => chapter.ChapterNumber == chapterNumber.Value);
                 if (index >= 0)
                 {
@@ -495,8 +524,10 @@ public sealed class FileSystemChapterContentService : IChapterContentService
     private static int AllocateChapterNumber(ChapterStoreDocument store)
     {
         // 删除留下的章节号进入高水位（NextChapterNumber），保证不重排也不复用。
-        var highWater = Math.Max(store.NextChapterNumber, store.Items.Count == 0 ? 0 : store.Items.Max(chapter => chapter.ChapterNumber));
-        var next = highWater + 1;
+        // NextChapterNumber 语义是"下一个可分配的新章号"（删除尾章时 = 被删章号 + 1），
+        // 因此取 max(高水位, 现存最大章号 + 1)——直接 +1 会在尾删场景永久跳过一个从未使用的章号（N7）。
+        var maxExisting = store.Items.Count == 0 ? 0 : store.Items.Max(chapter => chapter.ChapterNumber);
+        var next = Math.Max(store.NextChapterNumber, maxExisting + 1);
         if (next > MaxChapterNumber)
         {
             throw new InvalidOperationException("Chapter number allocation is exhausted.");
