@@ -30,8 +30,15 @@ public static class ChapterCorpusBridgeHandlers
             throw Invalid(argumentName, "Value must be an object.");
         }
 
-        return value.Deserialize<T>(BridgeJson.SerializerOptions)
-            ?? throw Invalid(argumentName, "Value must be a valid object.");
+        try
+        {
+            return value.Deserialize<T>(BridgeJson.SerializerOptions)
+                ?? throw Invalid(argumentName, "Value must be a valid object.");
+        }
+        catch (JsonException)
+        {
+            throw Invalid(argumentName, "Value must match the expected object shape.");
+        }
     }
 
     private static JsonElement ReadArg(JsonElement? payload, int index, string argumentName)

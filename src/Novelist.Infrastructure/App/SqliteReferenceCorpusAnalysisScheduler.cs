@@ -33,6 +33,16 @@ private static readonly ReferenceCorpusFrozenTokenPolicy DefaultTokenPolicy = ne
  var databasePath = await _databasePathResolver.ResolveAsync(cancellationToken);
  var store = new SqliteReferenceCorpusAnalysisJobStore(databasePath);
  await store.EnsureSchemaAsync(cancellationToken);
+ var existing = await store.GetAsyncByRunAsync(input.RunId, cancellationToken);
+ if (existing is not null &&
+ existing.JobKind == input.JobKind &&
+ existing.NovelId == input.NovelId &&
+ existing.AnchorId == input.AnchorId)
+ {
+ // 幂等：同一 run 的重复入队返回既有任务，而不是靠 run_id 唯一约束抛冲突。
+ return ToPayload(existing);
+ }
+
  var model = await ResolveFrozenModelAsync(cancellationToken);
  var now = DateTimeOffset.UtcNow;
 var snapshotId = $"analysis-snapshot:{Guid.NewGuid():N}";
@@ -215,12 +225,20 @@ job.LastErrorCode, job.LastErrorMessage, job.CurrentChapter,
 
  private static string ReadScope(string inputJson)
  {
+ // 查询路径容错：store 中损坏的 InputJson 不应让列表/依赖校验抛未分类异常。
+ try
+ {
  using var document = JsonDocument.Parse(inputJson);
  var found = document.RootElement.TryGetProperty("scope", out var scope) ||
  document.RootElement.TryGetProperty("Scope", out scope);
  return found && scope.ValueKind == JsonValueKind.String
  ? scope.GetString() ?? string.Empty
  : string.Empty;
+ }
+ catch (JsonException)
+ {
+ return string.Empty;
+ }
  }
 
  private static async ValueTask<SqliteConnection> OpenConnectionAsync(string path, CancellationToken cancellationToken)

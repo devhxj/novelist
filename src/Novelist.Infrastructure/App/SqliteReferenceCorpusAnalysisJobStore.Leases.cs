@@ -357,7 +357,7 @@ var completed = nextStatus is ReferenceCorpusAnalysisJobStatuses.Cancelled or Re
  lease_expires_at = NULL,
  heartbeat_at = NULL,
  last_error_code = 'lease_expired',
- last_error_message = 'Worker lease expired before the attempt completed.',
+ last_error_message = 'Worker lease expired before the attempt completed; reserved tokens were charged conservatively to protect the budget.',
  updated_at = $now,
  row_version = row_version + 1
  WHERE job_id = $job_id
@@ -392,7 +392,7 @@ Add(update, "$completed_at", completed ? ToDb(now) : null);
 Add(attempt, "$now", ToDb(now));
  Add(attempt, "$outcome", "abandoned");
  Add(attempt, "$error_code", "lease_expired");
- Add(attempt, "$error_message", "Worker lease expired before the attempt completed.");
+ Add(attempt, "$error_message", "Worker lease expired before the attempt completed; reserved tokens were charged conservatively to protect the budget.");
  Add(attempt, "$job_id", item.JobId);
 Add(attempt, "$attempt_no", item.AttemptCount);
  Add(attempt, "$reserved_tokens", item.ReservedTokens);

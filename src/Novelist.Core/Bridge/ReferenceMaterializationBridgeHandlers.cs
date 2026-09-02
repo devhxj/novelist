@@ -15,17 +15,17 @@ public static class ReferenceMaterializationBridgeHandlers
         ArgumentNullException.ThrowIfNull(service);
 
         dispatcher.Register("AnalyzeReferenceChapterSplit", async (context, cancellationToken) =>
-            SanitizeProfile(await service.AnalyzeChapterSplitAsync(
+            await ExecuteProfileAsync(() => service.AnalyzeChapterSplitAsync(
                 ReadObjectArg<AnalyzeReferenceChapterSplitPayload>(context.Payload, 0, "input"),
                 cancellationToken)));
 
         dispatcher.Register("PreviewReferenceChapterSplit", async (context, cancellationToken) =>
-            SanitizeProfile(await service.PreviewChapterSplitAsync(
+            await ExecuteProfileAsync(() => service.PreviewChapterSplitAsync(
                 ReadObjectArg<PreviewReferenceChapterSplitPayload>(context.Payload, 0, "input"),
                 cancellationToken)));
 
         dispatcher.Register("ConfirmReferenceChapterSplit", async (context, cancellationToken) =>
-            SanitizeProfile(await service.ConfirmChapterSplitAsync(
+            await ExecuteProfileAsync(() => service.ConfirmChapterSplitAsync(
                 ReadObjectArg<ConfirmReferenceChapterSplitPayload>(context.Payload, 0, "input"),
                 cancellationToken)));
 
@@ -92,6 +92,23 @@ public static class ReferenceMaterializationBridgeHandlers
                 })
                 .ToArray()
         };
+    }
+
+    private static async ValueTask<ReferenceChapterSplitProfilePayload> ExecuteProfileAsync(
+        Func<ValueTask<ReferenceChapterSplitProfilePayload>> operation)
+    {
+        try
+        {
+            return SanitizeProfile(await operation());
+        }
+        catch (ReferenceMaterializationException exception)
+        {
+            throw new BridgeRequestException(
+                exception.ErrorCode,
+                exception.Message,
+                new { error_code = exception.ErrorCode },
+                retryable: true);
+        }
     }
 
     private static async ValueTask<ReferenceMaterializationStatusPayload> ExecuteStatusAsync(

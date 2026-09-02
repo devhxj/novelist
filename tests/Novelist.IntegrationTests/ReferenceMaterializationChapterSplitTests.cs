@@ -214,6 +214,69 @@ public sealed class ReferenceMaterializationChapterSplitTests : IDisposable
     }
 
     [Fact]
+    public async Task AnalyzeAutoSplitRejectsTemplatesMatchingOnlyOneMidSampleHeading()
+    {
+        var options = CreateOptions();
+        await InitializeAsync(options);
+        var novels = new FileSystemNovelService(options, new FileSystemAppSettingsService(options));
+        var novel = await novels.CreateNovelAsync(new CreateNovelPayload("单标题幻觉防护", "", ""), CancellationToken.None);
+        var sourcePath = CreateSourceFile(
+            "single-heading.md",
+            "开头是没有标题的正文。\n\n雨声压住窗沿。\n\n# 突兀孤立的标题\n\n后续仍然只有这一处标题。\n");
+        var anchors = new SqliteReferenceAnchorService(options, novels);
+        var anchor = await anchors.CreateAnchorAsync(
+            new CreateReferenceAnchorPayload(novel.Id, "单标题来源", null, sourcePath, "markdown", "user_provided"),
+            CancellationToken.None);
+        var service = new SqliteReferenceMaterializationService(
+            options,
+            new RecordingChapterSplitAnalyzer(new ReferenceChapterSplitModelResult(
+                "markdown_heading",
+                "# {title}",
+                0.9,
+                [0])));
+
+        // 幻觉防护：模板在整个样本中只命中一个非起始标题时判定不可靠，而不是生成单章切分。
+        var exception = await Assert.ThrowsAsync<ReferenceMaterializationException>(async () =>
+            await service.AnalyzeChapterSplitAsync(
+                new AnalyzeReferenceChapterSplitPayload(novel.Id, anchor.AnchorId),
+                CancellationToken.None));
+
+        Assert.Equal(ReferenceMaterializationErrorCodes.ChapterSplitOutputInvalid, exception.ErrorCode);
+        Assert.Contains("one heading", exception.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task AnalyzeAutoSplitAcceptsSingleHeadingAnchoredAtSampleStart()
+    {
+        var options = CreateOptions();
+        await InitializeAsync(options);
+        var novels = new FileSystemNovelService(options, new FileSystemAppSettingsService(options));
+        var novel = await novels.CreateNovelAsync(new CreateNovelPayload("首章超长", "", ""), CancellationToken.None);
+        var longFirstChapterBody = new string('雨', 55_000);
+        var sourcePath = CreateSourceFile(
+            "long-first-chapter.md",
+            "# 第一章 开端\n\n" + longFirstChapterBody + "\n\n# 第二章 回声\n\n门外的雨停了。\n");
+        var anchors = new SqliteReferenceAnchorService(options, novels);
+        var anchor = await anchors.CreateAnchorAsync(
+            new CreateReferenceAnchorPayload(novel.Id, "超长首章来源", null, sourcePath, "markdown", "user_provided"),
+            CancellationToken.None);
+        var service = new SqliteReferenceMaterializationService(
+            options,
+            new RecordingChapterSplitAnalyzer(new ReferenceChapterSplitModelResult(
+                "markdown_heading",
+                "# {title}",
+                0.9,
+                [0])));
+
+        var result = await service.AnalyzeChapterSplitAsync(
+            new AnalyzeReferenceChapterSplitPayload(novel.Id, anchor.AnchorId),
+            CancellationToken.None);
+
+        // 样本内只有起点锚定的单个标题，但全文边界重建找到两章：分析应成功而非误判幻觉。
+        Assert.Equal(2, result.ChapterCount);
+    }
+
+    [Fact]
     public async Task PreviewManualSplitSupportsLiteralDelimiters()
     {
         var options = CreateOptions();

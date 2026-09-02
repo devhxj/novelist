@@ -73,11 +73,12 @@ public sealed partial class SqliteReferenceMaterializationService : IReferenceMa
         {
             boundaries = BuildBoundaries(source.NormalizedText, modelResult.PatternKind, modelResult.DelimiterTemplate);
         }
-        catch (ArgumentException)
+        catch (ArgumentException exception)
         {
+            // 失败定位：把具体失配原因（少于两个边界/空章）透传给用户，而不是吞成笼统错误。
             throw new ReferenceMaterializationException(
                 ReferenceMaterializationErrorCodes.ChapterSplitOutputInvalid,
-                "Chapter split analysis produced invalid chapter boundaries.");
+                $"Chapter split analysis produced invalid chapter boundaries: {exception.Message}");
         }
 
         await EnsureSourceDidNotChangeAsync(source, input.NovelId, input.AnchorId, cancellationToken);
@@ -733,14 +734,29 @@ public sealed partial class SqliteReferenceMaterializationService : IReferenceMa
             .Distinct()
             .OrderBy(offset => offset)
             .ToArray();
-        if (headingOffsets.Length == 0)
+        // 幻觉防护：模板必须在样本中命中至少两个标题；唯一例外是唯一标题锚定在样本起点
+        //（首章超长的书，50K 样本内只有一个章标题是合法的）。
+        if (headingOffsets.Length == 0 || (headingOffsets.Length == 1 && headingOffsets[0] != 0))
         {
             throw new ReferenceMaterializationException(
                 ReferenceMaterializationErrorCodes.ChapterSplitOutputInvalid,
-                "Chapter split analysis did not produce a template that matches the source sample.");
+                headingOffsets.Length == 0
+                    ? "Chapter split analysis did not produce a template that matches the source sample."
+                    : $"Chapter split analysis template matched only one heading at offset {headingOffsets[0]}; the pattern looks unreliable.");
         }
 
-        return headingOffsets.Take(3).ToArray();
+        // 分散取样：证据点取首/中/末，而非仅前三个，审计时可核对模板在样本各段的命中情况。
+        if (headingOffsets.Length <= 3)
+        {
+            return headingOffsets;
+        }
+
+        return new[]
+        {
+            headingOffsets[0],
+            headingOffsets[headingOffsets.Length / 2],
+            headingOffsets[^1]
+        };
     }
 
     private static void ValidateReferenceInput(long novelId, long anchorId)

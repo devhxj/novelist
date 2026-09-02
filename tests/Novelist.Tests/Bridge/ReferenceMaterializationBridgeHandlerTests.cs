@@ -72,6 +72,34 @@ public sealed class ReferenceMaterializationBridgeHandlerTests
     }
 
     [Fact]
+    public async Task ChapterSplitHandlersReturnTheStableMaterializationErrorCode()
+    {
+        var service = new RecordingMaterializationService
+        {
+            SplitProfileException = new ReferenceMaterializationException(
+                ReferenceMaterializationErrorCodes.ChapterSplitOutputInvalid,
+                "Chapter split output failed validation.")
+        };
+        var dispatcher = new BridgeDispatcher().RegisterReferenceMaterializationHandlers(service);
+
+        foreach (var (method, args) in new (string, object?[])[]
+                 {
+                     ("AnalyzeReferenceChapterSplit", new object?[] { new AnalyzeReferenceChapterSplitPayload(42, 99) }),
+                     ("PreviewReferenceChapterSplit", new object?[] { new PreviewReferenceChapterSplitPayload(42, 99, "第{number}章") }),
+                     ("ConfirmReferenceChapterSplit", new object?[] { new ConfirmReferenceChapterSplitPayload(42, 99, "profile-1") })
+                 })
+        {
+            var result = await dispatcher.DispatchAsync(Request(method, args));
+            using var json = JsonDocument.Parse(result.OutboundJson ?? throw new InvalidOperationException("Bridge returned no response."));
+            var error = json.RootElement.GetProperty("error");
+
+            Assert.False(json.RootElement.GetProperty("ok").GetBoolean());
+            Assert.Equal(ReferenceMaterializationErrorCodes.ChapterSplitOutputInvalid, error.GetProperty("code").GetString());
+            Assert.True(error.GetProperty("retryable").GetBoolean());
+        }
+    }
+
+    [Fact]
     public async Task EnqueueReturnsTheStableMaterializationErrorCodeFromModelPreflight()
     {
         var service = new RecordingMaterializationService
@@ -142,11 +170,17 @@ public sealed class ReferenceMaterializationBridgeHandlerTests
 
         public Exception? SemanticSearchException { get; init; }
 
+        public Exception? SplitProfileException { get; init; }
+
         public ValueTask<ReferenceChapterSplitProfilePayload> AnalyzeChapterSplitAsync(
             AnalyzeReferenceChapterSplitPayload input,
             CancellationToken cancellationToken)
         {
             Calls.Add($"analyze:{input.NovelId}:{input.AnchorId}");
+            if (SplitProfileException is not null)
+            {
+                throw SplitProfileException;
+            }
             return ValueTask.FromResult(CreateProfile(input.AnchorId));
         }
 
@@ -155,6 +189,10 @@ public sealed class ReferenceMaterializationBridgeHandlerTests
             CancellationToken cancellationToken)
         {
             Calls.Add($"preview:{input.NovelId}:{input.AnchorId}:{input.DelimiterTemplate}");
+            if (SplitProfileException is not null)
+            {
+                throw SplitProfileException;
+            }
             return ValueTask.FromResult(CreateProfile(input.AnchorId));
         }
 
@@ -163,6 +201,10 @@ public sealed class ReferenceMaterializationBridgeHandlerTests
             CancellationToken cancellationToken)
         {
             Calls.Add($"confirm:{input.NovelId}:{input.AnchorId}:{input.SplitProfileId}");
+            if (SplitProfileException is not null)
+            {
+                throw SplitProfileException;
+            }
             return ValueTask.FromResult(CreateProfile(input.AnchorId) with
             {
                 Status = ReferenceChapterSplitProfileStates.Confirmed

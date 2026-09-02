@@ -59,6 +59,19 @@ await InsertSnapshotAsync(connection, transaction, snapshot, cancellationToken);
  return await ReadJobAsync(connection, transaction: null, jobId, cancellationToken);
  }
 
+ public async ValueTask<ReferenceCorpusAnalysisJob?> GetAsyncByRunAsync(
+ string runId,
+ CancellationToken cancellationToken = default)
+ {
+ ValidateId(runId, nameof(runId));
+ await using var connection = await OpenConnectionAsync(cancellationToken);
+ await using var command = connection.CreateCommand();
+ command.CommandText = $"SELECT {JobColumns} FROM reference_analysis_jobs WHERE run_id = $run_id LIMIT 1;";
+ Add(command, "$run_id", runId);
+ var jobs = await ReadJobsAsync(command, cancellationToken);
+ return jobs.Count == 0 ? null : jobs[0];
+ }
+
  public async ValueTask<IReadOnlyList<ReferenceCorpusAnalysisJob>> ListAsync(
  ReferenceCorpusAnalysisJobListRequest request,
  CancellationToken cancellationToken = default)
