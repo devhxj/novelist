@@ -1,7 +1,8 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { ChevronLeft, ChevronRight, Gauge, Hammer, LibraryBig, PackageOpen, RefreshCcw } from 'lucide-react'
 import { useApp } from '@/hooks/useApp'
 import type { reference, storage } from '@/lib/novelist/types'
+import { OBSERVATION_FAMILIES, SPECIMEN_FAMILIES } from '@/lib/novelist/corpusFamilies'
 import ReferenceCorpusWorkspace from './ReferenceCorpusWorkspace'
 
 type Props = {
@@ -83,41 +84,24 @@ function CorpusOverview({ novelId, anchors, refreshKey, onOpenBrowse }: {
 
   const usableAnchors = useMemo(() => anchors.filter(isUsableAnchor), [anchors])
 
+  // 全书聚合端点一次取观察/标本总数，消除逐锚点 N+1。
   const load = useCallback(async () => {
     if (!novelId) return
     setLoading(true)
     setError(null)
     try {
-      const [observationTotals, specimenTotals, coverageResult] = await Promise.all([
-        Promise.all(usableAnchors.map(async (anchor) => {
-          const page = await app.ListReferenceCorpusFeatureObservations({
-            novel_id: novelId,
-            anchor_id: anchor.anchor_id,
-            page_request: { page_size: 1, sort_by: 'feature_family', sort_dir: 'asc' },
-          })
-          return page.total ?? 0
-        })),
-        Promise.all(usableAnchors.map(async (anchor) => {
-          const page = await app.ListReferenceCorpusTechniqueSpecimens({
-            novel_id: novelId,
-            anchor_id: anchor.anchor_id,
-            page_request: { page_size: 1, sort_by: 'confidence', sort_dir: 'desc' },
-          })
-          return page.total ?? 0
-        })),
+      const [totals, coverageResult] = await Promise.all([
+        app.GetReferenceCorpusAssetTotals({ novel_id: novelId }),
         app.GetReferenceMaterialCoverage({ novel_id: novelId, archive_filter: 'active' }),
       ])
-      setStats({
-        observations: observationTotals.reduce((sum, value) => sum + value, 0),
-        specimens: specimenTotals.reduce((sum, value) => sum + value, 0),
-      })
+      setStats({ observations: totals.observation_total, specimens: totals.specimen_total })
       setCoverage(coverageResult)
     } catch {
       setError('语料总览加载失败。请刷新后重试。')
     } finally {
       setLoading(false)
     }
-  }, [app, novelId, usableAnchors])
+  }, [app, novelId])
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
@@ -159,7 +143,9 @@ function CorpusOverview({ novelId, anchors, refreshKey, onOpenBrowse }: {
         {cards.map((card) => (
           <div key={card.label} className="rounded-md border border-border bg-background px-3 py-3">
             <div className="text-xs text-muted-foreground">{card.label}</div>
-            <div className="mt-1 text-lg font-semibold tabular-nums text-foreground">{card.value}</div>
+            <div className="mt-1 text-lg font-semibold tabular-nums text-foreground">
+              {loading && stats === null ? '—' : card.value}
+            </div>
           </div>
         ))}
       </div>
@@ -223,9 +209,12 @@ function CorpusBrowse({ novelId, anchors, refreshKey }: {
 
   const result = kind === 'observations' ? observations : specimens
   const currentPage = cursorStack.length + 1
+  const requestSeqRef = useRef(0)
 
+  // seq guard：快速切换参考书/维度/翻页时丢弃过期响应，避免旧数据覆盖新结果。
   const load = useCallback(async (cursor: string | null) => {
     if (!novelId || anchorId == null) return
+    const requestId = ++requestSeqRef.current
     setLoading(true)
     setError(null)
     try {
@@ -237,7 +226,8 @@ function CorpusBrowse({ novelId, anchors, refreshKey }: {
           sort_dir: 'asc',
           filters: family ? { feature_family: family } : null,
         }
-        setObservations(await app.ListReferenceCorpusFeatureObservations({ novel_id: novelId, anchor_id: anchorId, page_request: page }))
+        const result = await app.ListReferenceCorpusFeatureObservations({ novel_id: novelId, anchor_id: anchorId, page_request: page })
+        if (requestSeqRef.current === requestId) setObservations(result)
       } else {
         const page: storage.PageRequest = {
           cursor,
@@ -246,12 +236,13 @@ function CorpusBrowse({ novelId, anchors, refreshKey }: {
           sort_dir: 'desc',
           filters: family ? { technique_family: family } : null,
         }
-        setSpecimens(await app.ListReferenceCorpusTechniqueSpecimens({ novel_id: novelId, anchor_id: anchorId, page_request: page }))
+        const result = await app.ListReferenceCorpusTechniqueSpecimens({ novel_id: novelId, anchor_id: anchorId, page_request: page })
+        if (requestSeqRef.current === requestId) setSpecimens(result)
       }
     } catch {
-      setError('语料浏览加载失败。请刷新后重试。')
+      if (requestSeqRef.current === requestId) setError('语料浏览加载失败。请刷新后重试。')
     } finally {
-      setLoading(false)
+      if (requestSeqRef.current === requestId) setLoading(false)
     }
   }, [app, novelId, anchorId, kind, family])
 
@@ -311,10 +302,7 @@ function CorpusBrowse({ novelId, anchors, refreshKey }: {
             aria-label="筛选维度"
           >
             <option value="">全部</option>
-            {(kind === 'observations'
-              ? ['emotion', 'sensory', 'rhythm', 'syntax', 'action', 'interaction', 'pov', 'rhetoric', 'hook', 'narrative']
-              : ['emotion', 'rhetoric', 'rhythm', 'action', 'structure']
-            ).map((value) => (
+            {(kind === 'observations' ? OBSERVATION_FAMILIES : SPECIMEN_FAMILIES).map((value) => (
               <option key={value} value={value}>{value}</option>
             ))}
           </select>

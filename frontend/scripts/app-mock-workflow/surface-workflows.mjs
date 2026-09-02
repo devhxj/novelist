@@ -729,11 +729,20 @@ export async function verifyCorpusChatWorkflow(page) {
   await expectVisible(page.getByText('语料不足：0%（0/2 beat）'), 'chapter coverage insufficient text')
   await expectVisible(page.getByText('可直写（AI 会诚实标注语料不足），或先到「语料」区导入同类参考书补足 beat 对应素材。'), 'chapter coverage guidance')
 
-  // 恢复可命中细纲，验证写作注入与用量展示。
+  // 覆盖度失败态：后端故障时横幅显式报错并可重试，而不是静默消失。
+  await page.evaluate(async () => {
+    await window.novelist.invoke('UpdateChapterPlan', { args: [42, { scope: 'next', content: '覆盖度失败触发' }] })
+  })
+  await page.getByTestId('chapter-coverage-banner').getByRole('button', { name: '刷新' }).click()
+  await expectVisible(page.getByText('覆盖度计算失败，语料信号暂不可用'), 'chapter coverage failure text')
+  await page.getByTestId('chapter-coverage-banner').getByRole('button', { name: '重试' }).click()
+  await expectVisible(page.getByText('覆盖度计算失败，语料信号暂不可用'), 'chapter coverage failure persists after retry')
+
+  // 恢复可命中细纲：错误态横幅上点重试，信号恢复为覆盖度展示。
   await page.evaluate(async () => {
     await window.novelist.invoke('UpdateChapterPlan', { args: [42, { scope: 'next', content: '雨夜门口对峙\n灯影停顿收尾' }] })
   })
-  await page.getByTestId('chapter-coverage-banner').getByRole('button', { name: '刷新' }).click()
+  await page.getByTestId('chapter-coverage-banner').getByRole('button', { name: '重试' }).click()
   await expectVisible(page.getByText('语料覆盖：100%（2/2 beat）'), 'chapter coverage full text')
 
   const chatBefore = await bridgeCallCount(page, 'Chat')
@@ -747,6 +756,11 @@ export async function verifyCorpusChatWorkflow(page) {
   await expectVisible(page.getByTestId('corpus-usage-card'), 'corpus usage card')
   await expectVisible(page.getByText('本章语料注入'), 'corpus usage card heading')
   await expectVisible(page.getByTestId('corpus-usage-card').getByText('《全局雨夜参考》').first(), 'corpus usage material source book')
+
+  // 注入失败态：语料检索故障时回合继续，失败卡片显式呈现而不是打断对话。
+  await input.fill('注入失败：验证降级')
+  await input.press('Enter')
+  await expectVisible(page.getByText('参考语料注入失败，本章按无语料模式继续：mock 检索故障').first(), 'corpus injection failure card')
 
   // 访谈选择题：AI 以 choices 块提问，点击选项即作为作者回答发送。
   await input.fill('访谈：林岚在雨夜发现新线索')
@@ -771,10 +785,10 @@ export async function verifyChatWorkflow(page) {
   await expectVisible(page.getByText('检查雨夜线索这一章的约束'), 'user chat message')
   await expectVisible(page.getByText('读取章节列表').first(), 'tool card')
   await expectVisible(page.getByText('搜索完成').first(), 'web search card')
-  await expectVisible(page.getByText('Mock source'), 'web search source title')
-  await expectVisible(page.getByText('https://example.com/mock-source'), 'web search source URL')
-  await page.getByRole('button', { name: '搜索结果总结' }).click()
-  await expectVisible(page.getByText('检索结果只用于对照氛围，不写入章节。'), 'web search summary')
+  await expectVisible(page.getByText('Mock source').first(), 'web search source title')
+  await expectVisible(page.getByText('https://example.com/mock-source').first(), 'web search source URL')
+  await page.getByRole('button', { name: '搜索结果总结' }).last().click()
+  await expectVisible(page.getByText('检索结果只用于对照氛围，不写入章节。').first(), 'web search summary')
   await expectVisible(page.getByText('建议先保留受限视角').first(), 'assistant message')
 
   await input.fill('停止生成这个回复')

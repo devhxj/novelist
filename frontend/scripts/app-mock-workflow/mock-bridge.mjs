@@ -1239,6 +1239,7 @@ referenceCorpusTechniqueSpecimenAnalysisRuns: [],
       case 'ListActiveReferenceMaterializationMaterials': return listActiveReferenceMaterializationMaterials(args[0])
       case 'SearchReferenceMaterials': return searchReferenceMaterials(args[0])
       case 'GetReferenceMaterialCoverage': return getReferenceMaterialCoverage(args[0])
+      case 'GetReferenceCorpusAssetTotals': return getReferenceCorpusAssetTotals(args[0])
       case 'GetReferenceMaterialTagReviewQueue': return getReferenceMaterialTagReviewQueue(args[0])
       case 'GetReferenceMaterialDetail': return getReferenceMaterialDetail(args[0])
       case 'GetReferenceSourceSegmentDetail': return getReferenceSourceSegmentDetail(args[0])
@@ -1931,13 +1932,39 @@ case 'ListReferenceCorpusTechniqueSpecimens': return listReferenceCorpusTechniqu
     const message = String(input?.message ?? '')
     emit('chat:started', { turn_id: turnId })
 
+    if (message.includes('注入失败')) {
+      emit(`agent:${turnId}`, agentEvent(turnId, 1, {
+        type: 3,
+        tool_name: 'corpus_injection',
+        tool_id: `corpus-injection-${turnId}`,
+        phase: 'failed',
+        success: false,
+        error: '参考语料注入失败，本章按无语料模式继续：mock 检索故障',
+        display_text: '参考语料注入失败，本章按无语料模式继续：mock 检索故障',
+        activity_kind: 'search',
+        metadata: {
+          automatic: true,
+          chapter_number: input?.chapter_number ?? null,
+        },
+      }))
+      await wait(40)
+      const degradeText = '本章按直写推进：AI 会诚实标注语料不足。'
+      emit(`agent:${turnId}`, agentEvent(turnId, 2, { type: 2, data: degradeText }))
+      return {
+        session_id: sessionId,
+        turn_id: turnId,
+        final_text: degradeText,
+        corpus_usage: null,
+      }
+    }
+
     const corpusUsage = input?.chapter_number
       ? chatCorpusUsage()
       : null
     if (corpusUsage) {
       emit(`agent:${turnId}`, agentEvent(turnId, 1, {
         type: 3,
-        tool_name: 'search_reference_materials',
+        tool_name: 'corpus_injection',
         tool_id: `corpus-injection-${turnId}`,
         phase: 'completed',
         display_text: `已注入本章参考语料 ${corpusUsage.length} 条`,
@@ -2484,6 +2511,9 @@ case 'ListReferenceCorpusTechniqueSpecimens': return listReferenceCorpusTechniqu
     const plan = state.chapterPlans.find(
       (item) => Number(item.novel_id) === novelId && item.scope === 'next',
     )
+    if (String(plan?.content ?? '').includes('覆盖度失败')) {
+      throw new Error('覆盖度计算失败（mock 故障注入）')
+    }
     const beats = String(plan?.content ?? '')
       .split('\n')
       .map((line) => line.trim().replace(/^[-*+·]\s*/, '').trim())
@@ -4466,6 +4496,11 @@ function referenceAnchors() {
       ? filters.map((item) => String(item ?? '').trim().toLowerCase()).filter(Boolean)
       : []
     return normalizedFilters.length === 0 || normalizedFilters.includes(String(value ?? '').trim().toLowerCase())
+  }
+
+  function getReferenceCorpusAssetTotals(input = {}) {
+    const novelId = Number(input?.novel_id ?? 42)
+    return { novel_id: novelId, observation_total: 128, specimen_total: 36 }
   }
 
   function getReferenceMaterialCoverage(input = {}) {

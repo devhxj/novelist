@@ -30,6 +30,7 @@ interface Props {
   onWidthCommit: (width: number) => void
   novelId: number
   chapterNumber?: number | null
+  referenceRefreshKey?: number
   onApprove: (toolId: string, feedback: string) => Promise<void>
   onReject: (toolId: string, feedback: string) => Promise<void>
   onApprovalFileEdit?: (payload: {
@@ -39,6 +40,12 @@ interface Props {
 }
 
 const EVENT_REORDER_TIMEOUT = 120
+
+// bridge 错误统一提取可读信息：BridgeError.message 已含服务端文案，避免 "Error: " 前缀。
+function describeError(err: unknown): string {
+  if (err instanceof Error && err.message) return err.message
+  return String(err)
+}
 
 interface EventQueue {
   nextSeq: number
@@ -57,6 +64,7 @@ export default function ChatPanel({
   onWidthCommit,
   novelId,
   chapterNumber,
+  referenceRefreshKey = 0,
   onApprove,
   onReject,
   onApprovalFileEdit,
@@ -89,6 +97,8 @@ export default function ChatPanel({
   const [historyLoadRetry, setHistoryLoadRetry] = useState(0)
   const [slashCommands, setSlashCommands] = useState<app.SlashCommand[]>([])
   const [chapterCoverage, setChapterCoverage] = useState<reference.ChapterCorpusCoverage | null>(null)
+  const [coverageState, setCoverageState] = useState<'idle' | 'loading' | 'ready' | 'error'>('idle')
+  const coverageRequestSeqRef = useRef(0)
   const chapterNumberRef = useRef<number | null | undefined>(chapterNumber)
   chapterNumberRef.current = chapterNumber
   const messagesEndRef = useRef<HTMLDivElement>(null)
@@ -107,14 +117,27 @@ export default function ChatPanel({
   }, [width])
 
   // 章节语料覆盖度：打开章节后按细纲 beat 聚合检索命中，写作前给出“语料不足”信号。
-  const loadCoverage = useCallback(() => {
+  // seq guard 防止章节快速切换时旧请求覆盖新结果；失败显式呈现，不再静默吞掉。
+  const loadCoverage = useCallback((options?: { refresh?: boolean }) => {
     if (!novelId || !chapterNumber) {
+      coverageRequestSeqRef.current++
       setChapterCoverage(null)
+      setCoverageState('idle')
       return
     }
-    app.GetChapterCorpusCoverage({ novel_id: novelId, chapter_number: chapterNumber })
-      .then((coverage) => { setChapterCoverage(coverage) })
-      .catch(() => { setChapterCoverage(null) })
+    const requestId = ++coverageRequestSeqRef.current
+    setCoverageState('loading')
+    app.GetChapterCorpusCoverage({ novel_id: novelId, chapter_number: chapterNumber, refresh: options?.refresh ?? false })
+      .then((coverage) => {
+        if (coverageRequestSeqRef.current !== requestId) return
+        setChapterCoverage(coverage)
+        setCoverageState('ready')
+      })
+      .catch(() => {
+        if (coverageRequestSeqRef.current !== requestId) return
+        setChapterCoverage(null)
+        setCoverageState('error')
+      })
   }, [app, novelId, chapterNumber])
 
   useEffect(() => {
@@ -127,6 +150,14 @@ export default function ChatPanel({
     const refresh = () => { loadCoverage() }
     return refresh
   }, [isLoading, loadCoverage])
+
+  // 语料区发生材料化/复核变更时（referenceRefreshKey 递增），强制刷新覆盖度信号。
+  const coverageRefreshKeyRef = useRef(referenceRefreshKey)
+  useEffect(() => {
+    if (coverageRefreshKeyRef.current === referenceRefreshKey) return
+    coverageRefreshKeyRef.current = referenceRefreshKey
+    loadCoverage({ refresh: true })
+  }, [referenceRefreshKey, loadCoverage])
 
   // 加载模型列表并恢复持久化设置
   useEffect(() => {
@@ -833,7 +864,7 @@ export default function ChatPanel({
     if (!selectedKey) return
     const [p, m] = selectedKey.split('/')
     activeCountRef.current++
-    if (activeCountRef.current > 1) {
+    if (activeCountRef.current > 1 && sessionId) {
       app.CancelChat(sessionId)
     }
     setIsLoading(true)
@@ -894,7 +925,7 @@ export default function ChatPanel({
       setTurns(prev => prev.map(t => {
         if (t.id !== turnId) return t
         if (t.status === 'stopped') return t
-        return { ...t, status: 'interrupted' as const, errorMessage: String(err) }
+        return { ...t, status: 'interrupted' as const, errorMessage: describeError(err) }
       }))
     } finally {
       eventQueuesRef.current.forEach((queue, queuedTurnId) => {
@@ -1065,7 +1096,7 @@ export default function ChatPanel({
                         if (seg.toolName === 'web_fetch' && seg.toolStatus === 'completed' && seg.result) {
                           return <WebFetchCard key={seg.id} result={seg.result} displayText={seg.displayText} />
                         }
-                        if (seg.toolName === 'search_reference_materials' && seg.toolStatus === 'completed' && seg.result?.automatic) {
+                        if (seg.toolName === 'corpus_injection' && seg.toolStatus === 'completed' && seg.result?.automatic) {
                           const materials = (seg.result.materials as CorpusUsageMaterial[] | undefined) ?? []
                           return <CorpusUsageCard key={seg.id} materials={materials} />
                         }
@@ -1147,8 +1178,18 @@ export default function ChatPanel({
                     )}
                     {turn.status === 'interrupted' && (
                       <div className="flex justify-center">
-                        <div className="bg-danger-bg border border-danger-border rounded-lg px-3 py-2 text-xs text-red-500 max-w-[80%]">
-                          对话被中断
+                        <div className="bg-danger-bg border border-danger-border rounded-lg px-3 py-2 text-xs text-red-500 max-w-[80%] flex flex-col gap-2">
+                          <span>{turn.errorMessage || '对话被中断'}</span>
+                          {turn.userMessage && (
+                            <button
+                              type="button"
+                              disabled={isLoading}
+                              onClick={() => handleSend(turn.userMessage)}
+                              className="self-start rounded-md border border-danger-border bg-background/70 px-2 py-1 text-xs text-red-600 hover:bg-background disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
+                            >
+                              重试
+                            </button>
+                          )}
                         </div>
                       </div>
                     )}
@@ -1176,6 +1217,34 @@ export default function ChatPanel({
         <div ref={messagesEndRef} />
       </div>
 
+      {chapterNumber && coverageState === 'error' && (
+        <div
+          className="mx-4 mb-1.5 rounded-md border border-destructive/30 bg-destructive/5 px-2.5 py-2 text-[11px] text-destructive"
+          data-testid="chapter-coverage-banner"
+          role="alert"
+        >
+          <div className="flex items-center justify-between gap-2">
+            <span className="font-medium">覆盖度计算失败，语料信号暂不可用</span>
+            <button
+              type="button"
+              onClick={() => { loadCoverage({ refresh: true }) }}
+              className="shrink-0 rounded px-1.5 py-0.5 underline underline-offset-2 hover:opacity-80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            >
+              重试
+            </button>
+          </div>
+        </div>
+      )}
+
+      {chapterNumber && coverageState === 'loading' && !chapterCoverage && (
+        <div
+          className="mx-4 mb-1.5 rounded-md border border-border bg-muted/30 px-2.5 py-2 text-[11px] text-muted-foreground"
+          data-testid="chapter-coverage-banner"
+        >
+          正在计算本章语料覆盖度…
+        </div>
+      )}
+
       {chapterNumber && chapterCoverage && chapterCoverage.total_count > 0 && (
         <div
           className={`mx-4 mb-1.5 rounded-md border px-2.5 py-2 text-[11px] ${chapterCoverage.sufficient ? 'border-border bg-muted/30 text-muted-foreground' : 'border-border bg-tag-amber text-tag-amber-foreground'}`}
@@ -1188,12 +1257,16 @@ export default function ChatPanel({
             </span>
             <button
               type="button"
-              onClick={() => { loadCoverage() }}
-              className="shrink-0 rounded px-1.5 py-0.5 text-[10px] underline-offset-2 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              disabled={coverageState === 'loading'}
+              onClick={() => { loadCoverage({ refresh: true }) }}
+              className="shrink-0 rounded px-1.5 py-0.5 underline-offset-2 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
             >
               刷新
             </button>
           </div>
+          {chapterCoverage.truncated && (
+            <p className="mt-1 leading-relaxed opacity-80">细纲超过 40 个 beat，仅统计前 40 个。</p>
+          )}
           {!chapterCoverage.sufficient && (
             <p className="mt-1 leading-relaxed">
               可直写（AI 会诚实标注语料不足），或先到「语料」区导入同类参考书补足 beat 对应素材。

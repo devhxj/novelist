@@ -555,6 +555,7 @@ export default function WorkspaceView({ initialNovelId, initialShowHelp, startup
             onWidthCommit={(width) => { void commitLayout({ chat_panel_width: width }) }}
             novelId={activeNovelId}
             chapterNumber={activeChapterNumber}
+            referenceRefreshKey={referenceRefreshKey}
             onApprove={handleApprove}
             onReject={handleReject}
             onApprovalFileEdit={handleApprovalFileEdit}

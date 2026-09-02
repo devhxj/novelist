@@ -143,6 +143,49 @@ export function rebuildTurns(messages: session.Message[]): Turn[] {
       continue
     }
 
+    // 语料注入用量事件：重放为 corpus_injection 工具卡（成功 → 用量卡；失败 → 错误卡）
+    if (msg.event_type === 'corpus_usage') {
+      if (!current || current.turnId !== msg.turn_id) {
+        current = {
+          id: `hist_${msg.turn_id}`,
+          turnId: msg.turn_id,
+          userMessage: '',
+          segments: [],
+          status: 'done',
+        }
+        turns.push(current)
+      }
+      let succeeded: boolean
+      let error: string
+      let displayText: string
+      let materials: unknown
+      try {
+        const meta = JSON.parse(msg.extra_metadata || '{}') as Record<string, unknown>
+        succeeded = meta.succeeded !== false
+        error = typeof meta.error === 'string' ? meta.error : ''
+        displayText = typeof meta.display_text === 'string' ? meta.display_text : ''
+        materials = meta.materials
+      } catch {
+        // 损坏的元数据按失败占位渲染，不阻断历史加载
+        succeeded = false
+        error = '语料注入状态不可读'
+        displayText = ''
+        materials = undefined
+      }
+      current.segments.push({
+        ...emptySegment(`seg_${segCounter++}`),
+        type: 'tool',
+        toolName: 'corpus_injection',
+        toolId: `corpus-injection-${msg.turn_id}`,
+        toolStatus: succeeded ? 'completed' : 'failed',
+        displayText: displayText || (succeeded ? '已注入本章参考语料' : '本章语料注入失败'),
+        activityKind: 'search',
+        error,
+        result: succeeded ? { automatic: true, materials } : undefined,
+      })
+      continue
+    }
+
     if (msg.role === 'user') {
       current = {
         id: `hist_${msg.turn_id}`,

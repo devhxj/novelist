@@ -156,6 +156,7 @@ export interface NovelistAppApi {
  ReprioritizeReferenceCorpusAnalysisJob: AppMethod<[{ job_id: string; expected_version: number; priority_class: string; priority_value: number }], reference.CorpusAnalysisJob>
   StartReferenceCorpusTechniqueSpecimenAnalysis: AppMethod<[reference.StartCorpusTechniqueSpecimenAnalysisInput], reference.CorpusTechniqueSpecimenAnalysisRun>
   GetReferenceCorpusTechniqueSpecimenAnalysisRun: AppMethod<[reference.GetCorpusTechniqueSpecimenAnalysisRunInput], reference.CorpusTechniqueSpecimenAnalysisRun | null>
+  GetReferenceCorpusAssetTotals: AppMethod<[reference.GetReferenceCorpusAssetTotalsInput], reference.ReferenceCorpusAssetTotals>
   ListReferenceCorpusFeatureObservations: AppMethod<[reference.ListCorpusFeatureObservationsInput], storage.PageResult_reference_CorpusFeatureObservation_>
   ListReferenceCorpusTechniqueSpecimens: AppMethod<[reference.ListCorpusTechniqueSpecimensInput], storage.PageResult_reference_CorpusTechniqueSpecimen_>
   GetAppConfig: AppMethod<[], config.AppConfig>
@@ -407,7 +408,8 @@ GetReferenceCorpusFeatureAnalysisRun: appMethod<NovelistAppApi['GetReferenceCorp
   GetReferenceAnchors: appMethod<NovelistAppApi['GetReferenceAnchors']>('GetReferenceAnchors'),
   GetReferenceMaterialDetail: appMethod<NovelistAppApi['GetReferenceMaterialDetail']>('GetReferenceMaterialDetail'),
   GetReferenceMaterialCoverage: appMethod<NovelistAppApi['GetReferenceMaterialCoverage']>('GetReferenceMaterialCoverage'),
-  GetChapterCorpusCoverage: appMethod<NovelistAppApi['GetChapterCorpusCoverage']>('GetChapterCorpusCoverage'),
+  GetReferenceCorpusAssetTotals: appMethod<NovelistAppApi['GetReferenceCorpusAssetTotals']>('GetReferenceCorpusAssetTotals'),
+  GetChapterCorpusCoverage: ((...args) => invokeAppArgs('GetChapterCorpusCoverage', args, { timeoutMs: 90_000 })) as NovelistAppApi['GetChapterCorpusCoverage'],
   GetReferenceMaterializationStatus: appMethod<NovelistAppApi['GetReferenceMaterializationStatus']>('GetReferenceMaterializationStatus'),
   GetReferenceMaterialTagReviewQueue: appMethod<NovelistAppApi['GetReferenceMaterialTagReviewQueue']>('GetReferenceMaterialTagReviewQueue'),
   GetReferenceSourceSegmentDetail: appMethod<NovelistAppApi['GetReferenceSourceSegmentDetail']>('GetReferenceSourceSegmentDetail'),

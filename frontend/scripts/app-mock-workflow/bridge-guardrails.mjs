@@ -141,6 +141,7 @@ export async function verifyReferenceWorkspaceBridgeCalls(page) {
     'ListReferenceCorpusFeatureObservations',
     'ListReferenceCorpusTechniqueSpecimens',
     'GetReferenceMaterialCoverage',
+    'GetReferenceCorpusAssetTotals',
   ]
 
   for (const method of requiredMethods) {

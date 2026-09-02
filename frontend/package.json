@@ -14,6 +14,7 @@
     "test:chapter-range": "node tests/chapter-range.test.mjs",
     "test:reference-materialization-api": "node --test tests/reference-materialization-api.test.mjs",
     "test:time": "node tests/time.test.mjs",
+    "test:choices": "node tests/choices.test.mjs",
     "test:layout": "node tests/layout.test.mjs",
     "test:diagnostics": "node tests/diagnostics.test.mjs",
     "test:layout-ui": "node scripts/app-mock-workflow.mjs --suite=full --target=vite --grep=@layout",

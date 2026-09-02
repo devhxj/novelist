@@ -1567,84 +1567,14 @@ safe_diagnostics?: string[] | null
     evidence: CorpusCandidateEvidence[]
   }
 
-  export interface GenerateCorpusInsertionDraftInput {
-    natural_language_goal: string
-    chapter_context: CurrentChapterContext
-    scope: CorpusScope
-    slot_values: Record<string, string>
-    selected_blueprint?: CorpusInsertionBlueprint | null
-  }
 
-  export interface CorpusDraftSlotValueVariant {
-    variant_id: string
-    label: string
-    slot_values: Record<string, string>
-  }
 
-  export interface GenerateCorpusInsertionDraftCandidatesInput {
-    natural_language_goal: string
-    chapter_context: CurrentChapterContext
-    scope: CorpusScope
-    slot_values: Record<string, string>
-    selected_blueprint: CorpusInsertionBlueprint
-requested_count: number
-slot_value_variants?: CorpusDraftSlotValueVariant[] | null
- transition_strategy_variants?: string[] | null
-  }
 
-  export interface GenerateCorpusBlueprintCandidatesInput {
-    natural_language_goal: string
-    chapter_context: CurrentChapterContext
-    scope: CorpusScope
-    requested_count: number
-    feedback?: CorpusBlueprintFeedback | null
-  }
 
-export interface CorpusBlueprintFeedback {
-    rejected_blueprint_ids: string[]
-    rejected_node_ids: string[]
-    avoid_library_ids: string[]
-    avoid_anchor_ids: number[]
-    problem_tags: string[]
-notes: string
-}
 
- export interface CorpusBlueprintChecklistItem {
- dimension: 'emotion_arc' | 'rhythm' | 'technique_diversity' | 'scene_template' | 'source_distribution'
- decision: 'accepted' | 'revise'
- problem_tags: string[]
- notes?: string | null
- }
 
- export interface AdvanceCorpusBlueprintSessionInput {
- session_id: string
- request_id: string
- action: 'generate' | 'select' | 'revise' | 'accept'
- generation_input?: GenerateCorpusBlueprintCandidatesInput | null
- selected_blueprint_id?: string | null
- checklist?: CorpusBlueprintChecklistItem[] | null
- }
 
- export interface GetCorpusBlueprintSessionInput {
- novel_id: number
- chapter_number: number
- session_id: string
- }
 
- export interface CorpusBlueprintSession {
- session_id: string
- novel_id: number
- chapter_number: number
- status: 'awaiting_feedback' | 'accepted'
- iteration: number
- selected_blueprint_id: string
- accepted_blueprint_id: string
- checklist: CorpusBlueprintChecklistItem[]
- strategy_coverage: string[]
- candidates: CorpusBlueprintCandidates
- updated_at: string
- natural_language_goal?: string | null
- }
 
  export interface GetCorpusCascadeImpactInput {
  observation_ids: string[]
@@ -1657,297 +1587,33 @@ notes: string
  blueprint_ids: string[]
  }
 
-  export interface CorpusBlueprintSourceDistributionItem {
-    library_id: string
-    anchor_id: number
-    node_count: number
-  }
 
-  export interface CorpusBlueprintCandidate {
-    blueprint: CorpusInsertionBlueprint
-    source_distribution: CorpusBlueprintSourceDistributionItem[]
-    coverage_score: number
-    gap_reasons: string[]
-feedback_reason: string
-gap_positions?: CorpusBlueprintGapPosition[] | null
-difference_audit?: CorpusBlueprintDifferenceAudit | null
- emotion_arc?: CorpusBlueprintEmotionArcPoint[] | null
-}
 
- export interface CorpusBlueprintEmotionArcPoint {
- beat_id: string
- beat_index: number
- emotion_state: string
- intensity: number
- direction: string
- evidence_node_ids: string[]
- }
 
- export interface CorpusBlueprintDifferenceAudit {
- passed: boolean
- node_set_hash: string
- minimum_node_difference_ratio: number
- closest_blueprint_id?: string | null
- closest_node_difference_ratio: number
- source_distribution_differs: boolean
- strategy_differs: boolean
- diagnostics: string[]
- }
 
- export interface CorpusBlueprintIteration {
- iteration: number
- state: string
- feedback_applied: boolean
- candidate_count: number
- distinct_candidate_count: number
- rejected_blueprint_ids: string[]
- can_iterate: boolean
- can_select: boolean
- }
 
-  export interface CorpusBlueprintGapPosition {
-    beat_id: string
-    beat_index: number
-    role_in_beat: string
-    narrative_function: string
-    node_ids: string[]
-    covered_dimensions: string[]
-    missing_dimensions: string[]
-    gap_reasons: string[]
-  }
 
-  export interface CorpusBlueprintCandidates {
-    query_context: CorpusQueryContext
-    candidates: CorpusBlueprintCandidate[]
-feedback_applied: boolean
-feedback_summary: string
-iteration?: CorpusBlueprintIteration | null
- orchestration_stages?: string[] | null
-}
 
-  export interface CorpusInsertionBlueprint {
-    blueprint_id: string
-    query_context_hash: string
-    strategy: string
-    beats: CorpusInsertionBlueprintBeat[]
-  }
 
-  export interface CorpusInsertionBlueprintBeat {
-    beat_id: string
-    beat_index: number
-    role_in_beat: string
-    narrative_function: string
-    node_ids: string[]
-  }
 
-  export interface CorpusSlotReplacement {
-    slot_name: string
-    source_value: string
-    replacement_value: string
-    source_start: number
-    source_end: number
-    output_start: number
-    output_end: number
-  }
 
-  export interface CorpusPreservedSpan {
-    span_id: string
-    source_start: number
-    source_end: number
-    output_start: number
-    output_end: number
-    source_text_hash: string
-    output_text_hash: string
-    matches: boolean
-  }
 
-  export interface CorpusLockedSpan {
-    span_id: string
-    source_start: number
-    source_end: number
-    output_start: number
-    output_end: number
-    source_text_hash: string
-    output_text_hash: string
-    matches: boolean
-    reason: string
-  }
 
-  export interface CorpusInsertionPiece {
-    piece_id: string
-    beat_id: string
-    candidate_id: string
-    node_id: string
-    anchor_id: number
-    library_id: string
-    text_hash: string
-    reuse_policy: CorpusReusePolicy
-    license_state: CorpusLicenseState
-    output_text: string
-    preserved_text_hash: string
-    preserved_hash_matches: boolean
-    preserved_spans: CorpusPreservedSpan[]
-    locked_spans: CorpusLockedSpan[]
-    slot_replacements: CorpusSlotReplacement[]
-  }
 
-  export interface CorpusInsertionTransition {
-    transition_id: string
-    gap_id: string
-    after_piece_id: string
-    before_piece_id: string
-    decision: 'direct_join' | 'insert_transition' | 'replace_piece' | string
-    strategy: string
-    text: string
-    text_hash: string
-    output_start: number
-    output_end: number
-    approved: boolean
-    reason: string
-    replacement_piece_id?: string | null
-    replacement_node_id?: string | null
-  }
 
-  export interface CorpusInsertionGateViolation {
-    metric: string
-    actual: number
-    threshold: number
-  }
 
-  export interface CorpusInsertionGatePiece {
-    piece_id: string
-    node_id: string
-    should_block: boolean
-    four_gram_containment_ratio: number
-    longest_common_substring_ratio: number
-    violations: CorpusInsertionGateViolation[]
-  }
 
-  export interface CorpusInsertionGate {
-    passed: boolean
-    status: string
-    errors: string[]
-    pieces: CorpusInsertionGatePiece[]
-  }
 
-  export interface CorpusDraftAuditViolation {
-    violation_id: string
-    code: string
-    severity: string
-    piece_id: string
-    node_id: string
-    span_id: string | null
-    message: string
-    transition_id?: string | null
-  }
 
-  export interface CorpusDraftAuditPiece {
-    piece_id: string
-    node_id: string
-    passed: boolean
-    preserved_span_count: number
-    mismatched_span_count: number
-    violations: CorpusDraftAuditViolation[]
-  }
 
-  export interface CorpusDraftAuditTransition {
-    transition_id: string
-    gap_id: string
-    after_piece_id: string
-    before_piece_id: string
-    decision: string
-    passed: boolean
-    violations: CorpusDraftAuditViolation[]
-  }
 
-  export interface CorpusDraftAudit {
-    passed: boolean
-    status: string
-    errors: string[]
-    pieces: CorpusDraftAuditPiece[]
-    transitions: CorpusDraftAuditTransition[]
-  }
 
-  export interface CorpusInsertionDraft {
-    query_context: CorpusQueryContext
-    blueprint: CorpusInsertionBlueprint
-    pieces: CorpusInsertionPiece[]
-    slot_replacements: CorpusSlotReplacement[]
-    transitions: CorpusInsertionTransition[]
-    assembled_text: string
-    chapter_text_after_insertion: string
-    ready_for_insertion: boolean
-    gate: CorpusInsertionGate
-    audit: CorpusDraftAudit
-  }
 
-  export interface CorpusDraftCandidateNextAction {
-    action: 'regenerate_blueprint' | string
-    reason_code: string
-    message: string
-    transition_id?: string | null
-    rejected_piece_id?: string | null
-    rejected_node_id?: string | null
-    replacement_node_id?: string | null
-    feedback: CorpusBlueprintFeedback
-  }
 
-export interface CorpusInsertionDraftCandidate {
-    candidate_id: string
-    strategy: string
-    explanation: string
-    draft: CorpusInsertionDraft
-next_action?: CorpusDraftCandidateNextAction | null
-}
 
- export interface CorpusDraftCandidateDifference {
- candidate_id: string
- baseline_candidate_id: string
- same_blueprint_node_set: boolean
- same_piece_outputs: boolean
- slot_difference_count: number
- transition_difference_count: number
- only_allowed_differences: boolean
- duplicate_text: boolean
- diagnostics: string[]
- }
 
- export interface CorpusDraftCandidateSetAudit {
- passed: boolean
- candidate_count: number
- ready_candidate_count: number
- distinct_text_count: number
- differences: CorpusDraftCandidateDifference[]
- errors: string[]
- }
 
-  export interface CorpusInsertionDraftCandidates {
-    query_context: CorpusQueryContext
-selected_blueprint: CorpusInsertionBlueprint
-candidates: CorpusInsertionDraftCandidate[]
- candidate_set_audit?: CorpusDraftCandidateSetAudit | null
-}
 
-  export interface Material {
-    material_id: string
-    anchor_id: number
-    source_segment_id: string
-    material_type: string
-    function_tag: string
-    emotion_tag: string
-    scene_tag: string
-    pov_tag: string
-    technique_tag: string
-    function_confidence: number
-    emotion_confidence: number
-    pov_confidence: number
-    text: string
-    source_hash: string
-    extractor_version: string
-    user_verified: boolean
-    created_at: Timestamp
-    score_components?: Record<string, number> | null
-  }
 
   export interface GetMaterialDetailInput {
     novel_id: number
@@ -2182,15 +1848,6 @@ candidates: CorpusInsertionDraftCandidate[]
     material_ids: string[]
   }
 
-  export interface MaterialQuery {
-    query: string
-    material_types: string[]
-    emotion_tags: string[]
-    function_tags: string[]
-    pov_tags: string[]
-    technique_tags: string[]
-    max_results: number
-  }
 
   export interface SearchMaterialsInput {
     novel_id: number
@@ -2252,55 +1909,29 @@ candidates: CorpusInsertionDraftCandidate[]
     total_count: number
     coverage_ratio: number
     sufficient: boolean
+    truncated?: boolean | null
   }
 
   export interface GetChapterCorpusCoverageInput {
     novel_id: number
     chapter_number?: number | null
+    refresh?: boolean | null
   }
 
-  export interface SlotValue {
-    slot_name: string
-    value: string
-  }
-
-  export interface AdaptMaterialInput {
+  export interface GetReferenceCorpusAssetTotalsInput {
     novel_id: number
-    material_id: string
-    slot_values: SlotValue[]
-    max_rewrite_level: string
-    scene_facts: string[]
   }
 
-  export interface AuditReuseInput {
+  export interface ReferenceCorpusAssetTotals {
     novel_id: number
-    material_id: string
-    candidate_text: string
-    max_rewrite_level: string
-    scene_facts: string[]
+    observation_total: number
+    specimen_total: number
   }
 
-  export interface ReuseAudit {
-    audit_id: string
-    status: string
-    rewrite_level: string
-    provenance_errors: string[]
-    unsupported_fact_errors: string[]
-    ai_prose_risks: string[]
-    non_slot_edits: string[]
-    required_fixes: string[]
-    audited_at: Timestamp
-  }
 
-  export interface AdaptMaterialResult {
-    candidate_id: string
-    material_id: string
-    rewrite_level: string
-    text: string
-    changed_slots: SlotValue[]
-    non_slot_edits: string[]
-    audit: ReuseAudit
-  }
+
+
+
 
   export interface RecordUserFeedbackInput {
     novel_id: number
@@ -2533,443 +2164,45 @@ candidates: CorpusInsertionDraftCandidate[]
     style_sample_id?: number | null
   }
 
-  export interface GenerateChapterBlueprintInput {
-    novel_id: number
-    chapter_number: number
-    title?: string
-    chapter_goal?: string
-    anchor_ids: number[]
-    known_facts: string[]
-    forbidden_facts: string[]
-  }
 
-  export interface ChapterBlueprintSummary {
-    blueprint_id: number
-    novel_id: number
-    chapter_number: number
-    title: string
-    status: string
-    source_plan_hash: string
-    updated_at: Timestamp
-  }
 
-  export interface ChapterBlueprint {
-    blueprint_id: number
-    novel_id: number
-    chapter_number: number
-    title: string
-    status: string
-    source_plan_scope: string
-    source_plan_hash: string
-    context_hash: string
-    analysis_contract_hash: string
-    blueprint_version: number
-    build_version: string
-    parent_blueprint_id: number
-    primary_anchor_id: number
-    chapter_function: string
-    logic_analysis: ChapterBlueprintAnalysisTrack
-    emotion_analysis: ChapterBlueprintAnalysisTrack
-    narration_analysis: ChapterBlueprintAnalysisTrack
-    character_analysis: ChapterBlueprintAnalysisTrack
-    reference_analysis: ChapterBlueprintAnalysisTrack
-    transition_plan: ChapterBlueprintAnalysisTrack
-    execution_contract: ChapterBlueprintExecutionTrack
-    previous_state: string
-    final_state: string
-    final_hook: string
-    global_pov: string
-    global_narrative_distance: string
-    known_facts: string[]
-    forbidden_facts: string[]
-    risk_flags: string[]
-    beats: ChapterBlueprintBeat[]
-    latest_review?: ChapterBlueprintReview | null
-    created_at: Timestamp
-    updated_at: Timestamp
-  }
 
-  export interface ChapterBlueprintAnalysisTrack {
-    track: string
-    summary: string
-    points: string[]
-  }
 
-  export interface ChapterBlueprintExecutionTrack {
-    track: string
-    summary: string
-    paragraph_intentions: string[]
-    execution_modes: string[]
-    anti_screenplay_duties: string[]
-    source_backed_detail_targets: string[]
-    candidate_rejection_rules: string[]
-  }
 
-  export interface BlueprintStyleContract {
-    style_profile_ids: number[]
-    style_dimensions: string[]
-    imitation_intensity: 'diagnostic_only' | 'loose' | 'moderate' | 'strong'
-    min_style_fit: number
-    allowed_closeness: string
-    required_evidence_types: string[]
-    forbidden_style_risks: string[]
-  }
 
-  export interface ChapterBlueprintBeat {
-    beat_id: string
-    beat_index: number
-    scene_index: number
-    beat_type: string
-    narrative_function: string
-    logic_premise: string
-    conflict_pressure: string
-    causality_in: string
-    causality_out: string
-    transition_in: string
-    transition_out: string
-    pov_character: string
-    narrative_distance: string
-    viewpoint_allowed_knowledge: string[]
-    viewpoint_forbidden_knowledge: string[]
-    character_states_before: string[]
-    character_states_after: string[]
-    character_goals: string[]
-    character_misbeliefs: string[]
-    relationship_pressure: string[]
-    emotion_trigger: string
-    emotion_before: string
-    emotion_after: string
-    suppressed_reaction: string
-    external_evidence: string
-    narration_strategy: string
-    rhythm_strategy: string
-    paragraph_intention: string
-    execution_mode: string
-    anti_screenplay_duty: string
-    sensory_anchor_target: string
-    subtext_plan: string
-    source_backed_detail_target: string
-    candidate_rejection_rule: string
-    scene_facts: string[]
-    forbidden_facts: string[]
-    reference_query: MaterialQuery
-    required_material_types: string[]
-    max_rewrite_level: string
-    slot_plan: SlotValue[]
-    locked_phrase_policy: string
-    no_reuse_reason: string
-    prose_duties: string[]
-    risk_flags: string[]
-    style_contract?: BlueprintStyleContract | null
-  }
 
-  export interface ReviewChapterBlueprintInput {
-    novel_id: number
-    blueprint_id: number
-  }
 
-  export interface BlueprintRevisionChange {
-    field_path: string
-    new_value: string
-  }
 
-  export interface ReviseChapterBlueprintInput {
-    novel_id: number
-    blueprint_id: number
-    changes: BlueprintRevisionChange[]
-    origin: string
-    revision_reason: string
-  }
 
-  export interface ChapterBlueprintReview {
-    review_id: string
-    blueprint_id: number
-    context_hash: string
-    source_plan_hash: string
-    analysis_contract_hash: string
-    review_version: number
-    status: string
-    score: number
-    logic_errors: string[]
-    causality_errors: string[]
-    emotion_errors: string[]
-    narration_errors: string[]
-    execution_errors: string[]
-    character_state_errors: string[]
-    pov_errors: string[]
-    continuity_errors: string[]
-    transition_errors: string[]
-    forbidden_fact_errors: string[]
-    reference_binding_errors: string[]
-    material_fit_errors: string[]
-    screenplay_drift_risks: string[]
-    ai_prose_risks: string[]
-    novelistic_narration_errors: string[]
-    required_fixes: string[]
-    defects?: ChapterBlueprintReviewDefect[]
-    reviewed_at: Timestamp
-  }
 
-  export interface ChapterBlueprintReviewDefect {
-    category: string
-    field_path: string
-    beat_id: string
-    severity: string
-    reason: string
-    required_fix: string
-  }
 
-  export interface ApproveChapterBlueprintInput {
-    novel_id: number
-    blueprint_id: number
-    review_id: string
-    approver_origin?: string
-  }
 
-  export interface BindBlueprintMaterialsInput {
-    novel_id: number
-    blueprint_id: number
-    max_results_per_beat: number
-    select_top_candidate?: boolean | null
-  }
 
-  export interface BlueprintMaterialLink {
-    link_id: string
-    blueprint_id: number
-    beat_id: string
-    material_id: string
-    intended_use: string
-    max_rewrite_level: string
-    selected: boolean
-    score: number
-    score_components: Record<string, number>
-    fit_explanation: string
-    created_at: Timestamp
-  }
 
-  export interface BlueprintMaterialBindingResult {
-    blueprint_id: number
-    links: BlueprintMaterialLink[]
-  }
 
-  export interface GenerateAnchoredDraftInput {
-    novel_id: number
-    blueprint_id: number
-    beat_ids: string[]
-    style_intensities?: StyleImitationIntensity[] | null
-    candidates_per_beat?: number
-  }
 
-  export type StyleImitationIntensity = 'diagnostic_only' | 'loose' | 'moderate' | 'strong'
 
-  export interface DraftStyleAttempt {
-    style_profile_ids: number[]
-    style_dimensions: string[]
-    imitation_intensity: StyleImitationIntensity
-    min_style_fit: number
-    allowed_closeness: string
-    required_evidence_types: string[]
-    forbidden_style_risks: string[]
-    selected_material_style_fit?: number | null
-    selected_material_low_confidence: boolean
-    status: 'not_applicable' | 'attempted' | 'diagnostic_only' | 'retrieval_gap'
-  }
 
-  export interface DraftParagraphCandidate {
-    candidate_id: string
-    blueprint_id: number
-    beat_id: string
-    material_id: string
-    rewrite_level: string
-    text: string
-    changed_slots: SlotValue[]
-    non_slot_edits: string[]
-    audit_status: string
-    created_at: Timestamp
-    style_attempts?: DraftStyleAttempt[] | null
-  }
 
-  export interface AnchoredDraft {
-    blueprint_id: number
-    candidates: DraftParagraphCandidate[]
-    audit?: AnchoredDraftAudit | null
-  }
 
-  export interface GetDraftCandidatesInput {
-    novel_id: number
-    blueprint_id: number
-    candidate_ids: string[]
-  }
 
-  export interface AuditAnchoredDraftInput {
-    novel_id: number
-    blueprint_id: number
-    candidate_ids: string[]
-  }
 
-  export interface GetAnchoredDraftAuditsInput {
-    novel_id: number
-    blueprint_id: number
-    candidate_ids?: string[] | null
-    limit?: number
-  }
 
-  export interface GetStyleAuditFindingsInput {
-    novel_id: number
-    blueprint_id: number
-    candidate_ids?: string[] | null
-    risk_types?: string[] | null
-    limit?: number
-  }
 
-  export interface StyleAuditFinding {
-    audit_id: string
-    blueprint_id: number
-    status: string
-    rewrite_level: string
-    candidate_ids: string[]
-    risk_type: string
-    category: string
-    severity: string
-    message: string
-    required_action: string
-    audited_at: Timestamp
-  }
 
-  export interface AnchoredDraftAudit {
-    audit_id: string
-    blueprint_id: number
-    status: string
-    rewrite_level: string
-    provenance_errors: string[]
-    blueprint_errors: string[]
-    unsupported_fact_errors: string[]
-    pov_errors: string[]
-    ai_prose_risks: string[]
-    required_fixes: string[]
-    audited_at: Timestamp
-    candidate_ids?: string[] | null
-    readable_report?: DraftAuditReadableReport | null
-  }
 
-  export interface DraftAuditReadableReport {
-    summary: string
-    candidate_ids: string[]
-    findings: DraftAuditReadableFinding[]
-  }
 
-  export interface DraftAuditReadableFinding {
-    category: string
-    severity: string
-    candidate_ids: string[]
-    message: string
-    required_action: string
-  }
 
-  export interface CorpusSearchPolicy {
-    mode: string
-    max_results_per_beat: number
-    license_statuses: string[]
-    include_anchor_ids: number[]
-    exclude_anchor_ids: number[]
-  }
 
-  export interface OrchestrationStylePolicy {
-    style_profile_ids: number[]
-    style_dimensions: string[]
-    imitation_intensity: StyleImitationIntensity
-    min_style_fit: number
-    allowed_closeness: string
-    required_evidence_types: string[]
-    forbidden_style_risks: string[]
-  }
 
-  export interface StartOrchestrationRunInput {
-    novel_id: number
-    chapter_number: number
-    chapter_goal?: string | null
-    known_facts: string[]
-    forbidden_facts: string[]
-    anchor_ids?: number[] | null
-    corpus_search_policy: CorpusSearchPolicy
-    source_confirmed?: boolean
-    style_policy?: OrchestrationStylePolicy | null
-  }
 
-  export interface OrchestrationApprovalSummary {
-    chapter_function: string
-    pov: string
-    fact_boundary_changes: string[]
-    emotional_trajectory: string
-    material_use_plan: string
-    rewrite_budget: string
-    high_risk_findings: string[]
-  }
 
-  export interface OrchestrationRequiredDecision {
-    decision_type: string
-    stop_reason: string
-    summary: string
-    required_actions: string[]
-    approval_summary: OrchestrationApprovalSummary
-    proposed_blueprint_revision?: OrchestrationBlueprintRevisionProposal | null
-  }
 
-  export interface OrchestrationBlueprintRevisionProposal {
-    blueprint_id: number
-    review_id: string
-    origin: string
-    revision_reason: string
-    changes: BlueprintRevisionChange[]
-  }
 
-  export interface OrchestrationRun {
-    run_id: string
-    novel_id: number
-    chapter_number: number
-    status: string
-    stage: string
-    chapter_goal: string
-    known_facts: string[]
-    forbidden_facts: string[]
-    anchor_ids: number[]
-    corpus_search_policy: CorpusSearchPolicy
-    style_policy?: OrchestrationStylePolicy | null
-    blueprint_id: number
-    review_id: string
-    candidate_ids: string[]
-    current_decision?: OrchestrationRequiredDecision | null
-    last_stop_reason: string
-    error_message: string
-    created_at: Timestamp
-    updated_at: Timestamp
-  }
 
-  export interface OrchestrationRunEvent {
-    event_id: number
-    run_id: string
-    novel_id: number
-    event_type: string
-    stage: string
-    status: string
-    stop_reason: string
-    decision_type: string
-    summary: string
-    created_at: Timestamp
-  }
 
-  export interface ResumeOrchestrationRunInput {
-    novel_id: number
-    run_id: string
-    decision_type: string
-    decision_payload: string
-  }
 
-  export interface CancelOrchestrationRunInput {
-    novel_id: number
-    run_id: string
-    reason: string
-  }
+
 }
 
 export namespace search {
@@ -3077,16 +2310,6 @@ export namespace storage {
     total_estimate?: number | null
   }
 
-  export interface PageResult_reference_Material_ {
-    items: reference.Material[]
-    total: number
-    page: number
-    size: number
-    total_pages: number
-    next_cursor?: string | null
-    has_more?: boolean
-    total_estimate?: number | null
-  }
 
   export interface PageResult_reference_MaterialSummary_ {
     items: reference.MaterialSummary[]
