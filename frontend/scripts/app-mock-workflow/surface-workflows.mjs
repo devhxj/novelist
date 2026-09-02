@@ -792,6 +792,24 @@ export async function verifyCorpusChatWorkflow(page) {
   await expectVisible(page.getByText('参考语料注入失败，本章按无语料模式继续：mock 检索故障').first(), 'corpus injection failure card')
   await page.getByRole('button', { name: '发送消息' }).waitFor({ state: 'visible', timeout: 12_000 })
 
+  // 生成中二次发送（U8）：流式期间发送按钮被停止按钮取代，Enter 不得产生新的 Chat 调用；
+  // 本轮流式完整落地后，第二条消息仍能独立完成流式渲染（退订按 turn 隔离）。
+  await input.fill('长文本 Markdown：验证生成中二次发送')
+  await input.press('Enter')
+  const chatDuringStream = await bridgeCallCount(page, 'Chat')
+  await expectVisible(page.getByRole('button', { name: '停止生成' }), 'stop button replaces send during streaming')
+  await input.fill('流式期间尝试插队的消息')
+  await input.press('Enter')
+  await page.waitForTimeout(350)
+  assert.equal(await bridgeCallCount(page, 'Chat'), chatDuringStream, 'a second send during streaming must not fire another Chat call')
+  await expectVisible(page.getByText('最终建议：先读后改，不越过审批。'), 'first turn stream fully lands while second send was blocked')
+  await page.getByRole('button', { name: '发送消息' }).waitFor({ state: 'visible', timeout: 12_000 })
+  const chatBeforeQueuedSend = await bridgeCallCount(page, 'Chat')
+  await input.press('Enter')
+  await waitForBridgeCallCountAfter(page, 'Chat', chatBeforeQueuedSend)
+  await expectVisible(page.getByText('流式期间尝试插队的消息'), 'queued second message leaves the input after streaming ends')
+  await page.getByRole('button', { name: '发送消息' }).waitFor({ state: 'visible', timeout: 12_000 })
+
   // 直接开写：逃生门按钮发出的消息携带固定开写指令。
   const chatBeforeDirectWrite = await bridgeCallCount(page, 'Chat')
   await page.getByTestId('direct-write-button').click()
@@ -886,6 +904,85 @@ export async function verifyChatWorkflow(page) {
   await assertBridgeCallCount(page, 'runtime.shell.openExternal', 0)
 }
 
+// U9 早期取消：在会话 id 尚未到手（chat:started 刻意延迟）时按"停止"，
+// 取消意图先挂起，事件到手后必须补发成携带真实 session id 的 CancelChat。
+export async function verifyEarlyCancelChatWorkflow(browser, url, consoleErrors, pageErrors) {
+  const page = await newAppPage(browser, consoleErrors, pageErrors, { initialized: true }, undefined, 'chat-early-cancel')
+  await page.goto(url, { waitUntil: 'domcontentloaded' })
+  await expectVisible(page.getByText('全局回归小说'), 'workspace title before early cancel')
+
+  const input = page.getByPlaceholder('输入消息，按 / 调用技能...')
+  await input.fill('早期取消：会话 id 到手前按停止')
+  await input.press('Enter')
+  await expectVisible(page.getByRole('button', { name: '停止生成' }), 'stop button while turn streams')
+  await page.getByRole('button', { name: '停止生成' }).click()
+  await expectVisible(page.getByText('对话已停止'), 'turn marked stopped before session id arrives')
+
+  await waitForBridgeCall(page, 'CancelChat')
+  // 等 Chat 桥调用结束，mock 才会把返回值（含 session_id）记进 calls。
+  await page.getByRole('button', { name: '发送消息' }).waitFor({ state: 'visible', timeout: 12_000 })
+  const cancelCalls = await page.evaluate(() =>
+    window.__appMockState.calls.filter((call) => call.method === 'CancelChat'))
+  const chatCall = await page.evaluate(() =>
+    window.__appMockState.calls.filter((call) => call.method === 'Chat').at(-1) ?? null)
+  assert.equal(cancelCalls.length, 1, 'the pending cancel intent must be resent exactly once')
+  assert.equal(cancelCalls.at(-1).args[0], chatCall?.result?.session_id, 'the resent cancel must carry the session id delivered by chat:started')
+  await page.close()
+}
+
+// U7 外部改动冲突：脏 tab 收到 file:changed 后内容与脏标记都不被覆盖，
+// 冲突条出现并给出保留我的 / 用 AI 版本 / 查看差异三条出路。
+export async function verifyFileChangeConflictWorkflow(browser, url, consoleErrors, pageErrors) {
+  const page = await newAppPage(browser, consoleErrors, pageErrors, {
+    initialized: true,
+    allowSaveContent: true,
+  }, undefined, 'file-change-conflict')
+  await page.goto(url, { waitUntil: 'domcontentloaded' })
+  await expectVisible(page.getByText('全局回归小说'), 'workspace title before conflict')
+
+  await page.locator('nav').first().getByTitle('章节').click()
+  await ensureChapterBlockExpanded(page)
+  await chapterButton(page, '雨夜线索').click()
+  await expectVisible(page.locator('.monaco-editor').first(), 'chapter editor before conflict')
+
+  const emitExternalChange = (incoming) => page.evaluate((text) => {
+    window.__appMockState.contentByPath['chapters/1.md'] = text
+    window.__appMockState.emitEvent('file:changed', { novel_id: 42, path: 'chapters/1.md' })
+  }, incoming)
+
+  await replaceEditorText(page, '作者尚未保存的本地修改：雨夜门口的对峙改写成静态僵持。')
+  await expectVisible(page.getByText('未保存', { exact: true }), 'tab dirty before external change')
+  await emitExternalChange('外部版本第一稿：AI 把本章改写成雨停后的沉默收尾。')
+
+  const conflictBar = page.getByRole('alert').filter({ hasText: '正文被外部改动' })
+  await expectVisible(conflictBar, 'conflict bar appears for dirty tab')
+  await expectVisible(conflictBar.getByText('你还有未保存的修改，已暂存对方版本，未覆盖你的内容。'), 'conflict bar explains pending state')
+  await assertEditorContains(page, '作者尚未保存的本地修改')
+  await expectVisible(page.getByText('未保存', { exact: true }), 'dirty marker preserved through conflict')
+  await page.screenshot({ path: path.join(outputDir, 'file-change-conflict-bar.png'), fullPage: true })
+
+  await conflictBar.getByRole('button', { name: '查看差异' }).click()
+  await expectVisible(page.getByText('第1章 雨夜线索 · 外部改动').first(), 'conflict diff tab opens')
+  // 查看差异会切到 diff 标签页、冲突条随之隐藏；切回正文标签页再做取舍。
+  await page.getByText('第1章 雨夜线索', { exact: true }).click()
+  await expectVisible(conflictBar, 'conflict bar visible again on the chapter tab')
+  await conflictBar.getByRole('button', { name: '用 AI 版本' }).click()
+  await expectHidden(conflictBar, 'conflict bar cleared after taking incoming version')
+  await assertEditorContains(page, '外部版本第一稿：AI 把本章改写成雨停后的沉默收尾。')
+  await expectVisible(page.getByText('已保存'), 'tab clean after taking incoming version')
+
+  await replaceEditorText(page, '第二轮本地修改：作者推翻 AI 的沉默收尾，重新拉回雨夜对峙。')
+  await expectVisible(page.getByText('未保存', { exact: true }), 'tab dirty before second external change')
+  const saveCountBeforeKeepMine = await bridgeCallCount(page, 'SaveContent')
+  await emitExternalChange('外部版本第二稿：AI 再次改写本章结尾。')
+  await expectVisible(page.getByRole('alert').filter({ hasText: '正文被外部改动' }), 'second conflict bar appears')
+  await page.getByRole('alert').filter({ hasText: '正文被外部改动' }).getByRole('button', { name: '保留我的' }).click()
+  await expectHidden(page.getByRole('alert').filter({ hasText: '正文被外部改动' }), 'conflict bar cleared after keeping mine')
+  await assertEditorContains(page, '第二轮本地修改：作者推翻 AI 的沉默收尾，重新拉回雨夜对峙。')
+  await waitForSaveContentAfter(page, 'chapters/1.md', '第二轮本地修改', saveCountBeforeKeepMine)
+  await page.close()
+}
+
 export async function verifyReferenceSmoke(page) {
   await page.getByTitle('素材库').click()
   await expectVisible(page.getByRole('heading', { name: '选择一个参考来源' }), 'reference materialization workspace heading')
@@ -927,6 +1024,38 @@ export async function verifyReferenceWorkspaceWorkflow(page) {
   await waitForBridgeCallCountAfter(page, 'EnqueueReferenceMaterialization', enqueueCount)
   await expectVisible(corpusWorkspace.getByText('向量索引完整'), 'completed materialization index state')
   await page.screenshot({ path: path.join(outputDir, 'materialized-reference-workspace.png'), fullPage: true })
+
+  // O8：完成态的 run 不再锁死入口——可以直接「重新材料化」新建 run。
+  await expectVisible(corpusWorkspace.getByTestId('rematerialize-button'), 'rematerialize button on completed run')
+  const rematerializeCount = await bridgeCallCount(page, 'EnqueueReferenceMaterialization')
+  await corpusWorkspace.getByTestId('rematerialize-button').click()
+  await waitForBridgeCallCountAfter(page, 'EnqueueReferenceMaterialization', rematerializeCount)
+  await expectVisible(corpusWorkspace.getByText('向量索引完整'), 'fresh completed run after rematerialize')
+
+  // O8：失败与取消两个终态同样给出「重新材料化」出路；失败还保留「修复后重试」。
+  for (const status of ['failed', 'cancelled']) {
+    await page.evaluate((nextStatus) => {
+      const run = window.__appMockState.materializationRuns.at(-1)
+      run.status = nextStatus
+      if (nextStatus === 'failed') {
+        run.last_error_code = 'materialization_llm_request_failed'
+        run.last_error_message = 'Mock LLM failure for retry coverage'
+      }
+    }, status)
+    await corpusWorkspace.getByRole('button', { name: '刷新材料化状态' }).click()
+    await expectVisible(corpusWorkspace.getByTestId('rematerialize-button'), `rematerialize button on ${status} run`)
+    if (status === 'failed') {
+      await expectVisible(corpusWorkspace.getByRole('button', { name: '修复后重试' }), 'retry button on failed run')
+      await expectVisible(corpusWorkspace.getByText('materialization_llm_request_failed'), 'failed run error surfaced')
+    }
+  }
+
+  // O9：切分结果生成后仍有「重新分析」出路；重新分析会清掉缓存并再次得到待确认 profile。
+  const reanalyzeCount = await bridgeCallCount(page, 'AnalyzeReferenceChapterSplit')
+  await corpusWorkspace.getByTestId('reanalyze-split-button').click()
+  await waitForBridgeCallCountAfter(page, 'AnalyzeReferenceChapterSplit', reanalyzeCount)
+  await expectVisible(corpusWorkspace.getByText('待确认 · 3 个章节'), 'fresh pending profile after re-analysis')
+  await page.screenshot({ path: path.join(outputDir, 'reference-reanalyze-rematerialize.png'), fullPage: true })
 
   // 蓝图预演已随拼装线退役：右侧恢复 AI 对话，预演面板不再存在。
   await expectHidden(page.getByTestId('blueprint-preview-panel'), 'retired blueprint preview panel')

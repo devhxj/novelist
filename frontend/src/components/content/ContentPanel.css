@@ -7,3 +7,8 @@
   border-radius: 2px;
   border-bottom: 2px solid rgba(30, 64, 175, 0.45);
 }
+
+.file-change-conflict-bar {
+  border-bottom: 1px solid var(--tool-amber-border);
+  background: var(--tool-amber);
+}

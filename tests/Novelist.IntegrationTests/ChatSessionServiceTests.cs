@@ -605,6 +605,49 @@ public sealed class ChatSessionServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task CancelChatRejectsEmptySessionIdInsteadOfSilentlySucceeding()
+    {
+        var options = CreateOptions();
+        await InitializeAsync(options);
+        var settings = new FileSystemAppSettingsService(options);
+        var novelService = new FileSystemNovelService(options, settings);
+        var service = CreateService(
+            options,
+            novelService,
+            settings,
+            new BlockingChatCompletionClient(),
+            new RecordingBridgeEventSink());
+
+        // 作者在 chat:started 之前按下停止时会话 id 还是空的。静默返回会让 UI
+        // 以为已经取消，生成其实还在跑；报错才能让前端挂起意图并在拿到 id 后补发。
+        foreach (var emptyId in new[] { "", "   " })
+        {
+            var failure = await Assert.ThrowsAsync<BridgeRequestException>(
+                async () => await service.CancelChatAsync(emptyId, CancellationToken.None));
+            Assert.Equal(BridgeErrorCodes.ValidationError, failure.Code);
+            Assert.False(failure.Retryable);
+        }
+    }
+
+    [Fact]
+    public async Task CancelChatOnUnknownSessionIdIsANoOp()
+    {
+        var options = CreateOptions();
+        await InitializeAsync(options);
+        var settings = new FileSystemAppSettingsService(options);
+        var novelService = new FileSystemNovelService(options, settings);
+        var service = CreateService(
+            options,
+            novelService,
+            settings,
+            new BlockingChatCompletionClient(),
+            new RecordingBridgeEventSink());
+
+        // 已经结束的会话再点一次停止不应该报错，否则重试逻辑会陷入死循环。
+        await service.CancelChatAsync("session_not_running", CancellationToken.None);
+    }
+
+    [Fact]
     public async Task ChatExecutesToolCallsThroughMafExecutorAndPersistsLegacyToolMetadata()
     {
         var options = CreateOptions();

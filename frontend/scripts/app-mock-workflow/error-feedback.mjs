@@ -24,6 +24,7 @@ export async function verifyErrorFeedbackWorkflow(context) {
   await verifyMetadataCrudErrorFeedback(context)
   await verifyLegacySaveExportErrorFeedback(context)
   await verifyLegacySurfaceErrorLifecycle(context)
+  await verifyApprovalSubmitErrorRecovery(context)
 
   await clickActivity(page, '角色')
   await clickCardAction(page.locator('main'), '林岚', '删除')
@@ -776,6 +777,92 @@ async function verifyReaderPreferenceErrorLifecycle(context) {
     'preference create error after opening edit form',
   )
   await page.close()
+}
+
+// O10 验收场景：审批提交失败时卡片必须显式报错、保留反馈、给出重试与"结束本轮"出路，
+// 等待超时后也必须提供出路，且结束后卡片离开"等待审批"状态而不是永久挂起。
+// 聊天故障只能在建页时注入（faults 队列不可运行时新增），所以按 error-feedback 惯例各开独立页面。
+async function verifyApprovalSubmitErrorRecovery(context) {
+  const {
+    browser,
+    url,
+    consoleErrors,
+    pageErrors,
+    newAppPage,
+    outputDir,
+    expectVisible,
+    expectHidden,
+    bridgeCallCount,
+    errorAlert,
+  } = context
+
+  const chatInput = (page) => page.getByPlaceholder('输入消息，按 / 调用技能...')
+  const approvalCard = (page) => page.locator('.tool-card.awaiting-approval')
+  const feedbackBox = (page) => approvalCard(page).locator('textarea.approval-feedback')
+  const sendApprovalPrompt = async (page) => {
+    const input = chatInput(page)
+    await input.fill('等待审批：确认删除角色林岚')
+    await input.press('Enter')
+    await expectVisible(approvalCard(page), 'approval card after mock awaiting_approval event')
+  }
+
+  // 第一页：ApproveTool 一次性故障 → 报错 + 反馈保留 → 重试成功 → 恢复干净审批态。
+  const failurePage = await newAppPage(browser, consoleErrors, pageErrors, {
+    initialized: true,
+    faults: {
+      ApproveTool: {
+        mode: 'storage',
+        code: 'APPROVAL_SUBMIT_FAILED',
+        message: '模拟审批提交失败：审批记录写入故障',
+        retryable: true,
+      },
+    },
+  }, undefined, 'approval-submit-failure')
+  await failurePage.goto(url, { waitUntil: 'domcontentloaded' })
+  await expectVisible(failurePage.getByText('全局回归小说'), 'workspace title before approval failure scenario')
+  await sendApprovalPrompt(failurePage)
+
+  await feedbackBox(failurePage).fill('这条线索后面还要用，先留着，仅移出本章')
+  const approveBefore = await bridgeCallCount(failurePage, 'ApproveTool')
+  await approvalCard(failurePage).getByRole('button', { name: '批准' }).click()
+  const approvalAlert = errorAlert(failurePage, '模拟审批提交失败：审批记录写入故障')
+  await expectVisible(approvalAlert, 'approval submit failure error message')
+  await expectVisible(approvalCard(failurePage).getByRole('button', { name: '重试批准' }), 'retry button after approval failure')
+  await expectVisible(approvalCard(failurePage).getByRole('button', { name: '结束本轮' }), 'end-turn escape hatch after approval failure')
+  assert.equal(await feedbackBox(failurePage).inputValue(), '这条线索后面还要用，先留着，仅移出本章', 'feedback text must survive a failed approval submit')
+  assert.equal(await bridgeCallCount(failurePage, 'ApproveTool'), approveBefore + 1, 'exactly one ApproveTool call before retry')
+  await failurePage.screenshot({ path: path.join(outputDir, 'app-approval-submit-failure.png'), fullPage: true })
+
+  await approvalCard(failurePage).getByRole('button', { name: '重试批准' }).click()
+  await expectHidden(approvalAlert, 'approval failure error cleared after successful retry')
+  assert.equal(await feedbackBox(failurePage).inputValue(), '', 'feedback cleared after successful approval')
+  await expectVisible(approvalCard(failurePage).getByText('等待审批', { exact: true }), 'approval card still awaiting after successful submit')
+  await failurePage.close()
+
+  // 第二页：ApproveTool 永久挂起 → 软超时提示 + 结束本轮 → 卡片离开等待审批，不再卡死。
+  const hangPage = await newAppPage(browser, consoleErrors, pageErrors, {
+    initialized: true,
+    faults: {
+      ApproveTool: { mode: 'timeout', once: false },
+    },
+  }, undefined, 'approval-submit-hang')
+  await hangPage.goto(url, { waitUntil: 'domcontentloaded' })
+  await expectVisible(hangPage.getByText('全局回归小说'), 'workspace title before approval hang scenario')
+  await sendApprovalPrompt(hangPage)
+
+  await approvalCard(hangPage).getByRole('button', { name: '批准' }).click()
+  await expectVisible(approvalCard(hangPage).getByText('提交中', { exact: true }), 'submitting badge while approval hangs')
+  const slowHint = hangPage.getByRole('status').filter({ hasText: '提交已超过 6 秒没有回应' })
+  await expectVisible(slowHint, 'soft timeout hint after 6 seconds without approval response')
+  await expectVisible(approvalCard(hangPage).getByRole('button', { name: '结束本轮' }), 'end-turn escape hatch on approval hang')
+
+  await approvalCard(hangPage).getByRole('button', { name: '结束本轮' }).click()
+  const failedCard = hangPage.locator('.tool-card.failed').filter({ hasText: '确认删除角色' })
+  await expectVisible(failedCard, 'approval card switched to failed after ending the turn')
+  await expectVisible(failedCard.getByText('已结束本轮，审批未提交'), 'abandon reason surfaced on the failed card')
+  await expectHidden(approvalCard(hangPage), 'no awaiting_approval card remains after ending the turn')
+  await hangPage.screenshot({ path: path.join(outputDir, 'app-approval-end-turn.png'), fullPage: true })
+  await hangPage.close()
 }
 
 function lifecycleFault(code, message, details) {

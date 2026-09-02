@@ -96,9 +96,10 @@ export default function WorkspaceView({ initialNovelId, initialShowHelp, startup
   // ── 窗口状态 ────────────────────────────────────────────
 
   useEffect(() => {
+    // 只用于状态栏的系统标识，探测失败不值得打扰作者，静默保留默认文案即可。
     app.GetPlatform().then((info) => {
       if (info.os) setPlatformOS(info.os as string)
-    })
+    }).catch(() => {})
   }, [app])
 
   useEffect(() => {
@@ -170,14 +171,25 @@ export default function WorkspaceView({ initialNovelId, initialShowHelp, startup
 
   // ── Approval ────────────────────────────────────────────
 
+  // 提交与收尾分成两段：提交失败要原样抛回审批卡片（卡片保留反馈文本，给出重试 / 结束本轮）；
+  // 提交成功后的 diff 标签页收尾即使出错也不能再抛，否则卡片会把已提交的审批当成"未提交"，
+  // 作者点重试就会重复提交同一次审批。
+  async function submitApproval(toolId: string, approved: boolean, feedback: string) {
+    await app.ApproveTool(toolId, approved, feedback)
+    try {
+      if (approved) await contentRef.current?.handleDiffApprove(toolId)
+      else contentRef.current?.handleDiffReject(toolId)
+    } catch {
+      // 收尾只影响 diff 标签页的开合，审批本身已生效，标签页可由作者手动关闭。
+    }
+  }
+
   async function handleApprove(toolId: string, feedback: string) {
-    await app.ApproveTool(toolId, true, feedback)
-    await contentRef.current?.handleDiffApprove(toolId)
+    await submitApproval(toolId, true, feedback)
   }
 
   async function handleReject(toolId: string, feedback: string) {
-    await app.ApproveTool(toolId, false, feedback)
-    contentRef.current?.handleDiffReject(toolId)
+    await submitApproval(toolId, false, feedback)
   }
 
   function handleApprovalFileEdit(data: {

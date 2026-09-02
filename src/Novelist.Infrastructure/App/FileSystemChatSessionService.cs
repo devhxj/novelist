@@ -931,7 +931,12 @@ public sealed class FileSystemChatSessionService : IChatSessionService, ISubagen
         var normalizedSessionId = NormalizeSessionId(sessionId, allowEmpty: true);
         if (normalizedSessionId.Length == 0)
         {
-            return;
+            // 静默返回会让"会话还没建立就点停止"看起来生效了，实际生成仍在继续。
+            // 显式报错，前端才能挂起取消意图、等 chat:started 拿到 id 后补发。
+            throw new BridgeRequestException(
+                BridgeErrorCodes.ValidationError,
+                "会话尚未建立，无法取消；请在对话开始后重试。",
+                retryable: false);
         }
 
         if (_activeChats.TryGetValue(normalizedSessionId, out var active))

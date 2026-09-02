@@ -72,9 +72,11 @@ import {
 import {
   verifyChapterWorkflow,
   verifyChatWorkflow,
+  verifyEarlyCancelChatWorkflow,
   verifyCorpusChatWorkflow,
   verifyCompactViewportSmoke,
   verifyEditorSaveWorkflow,
+  verifyFileChangeConflictWorkflow,
   verifyImportExportFilePickerWorkflow,
   verifyNovelChapterWorkflow,
   verifyReferenceSmoke,
@@ -380,9 +382,19 @@ export async function runFullSuite(browser, url) {
   }
 
   if (shouldRun('@writing')) {
+    logStep('checking dirty-tab file change conflict bar')
+    await verifyFileChangeConflictWorkflow(browser, url, consoleErrors, pageErrors)
+  }
+
+  if (shouldRun('@writing')) {
     logStep('checking corpus chat injection and interview loop')
     await verifyCorpusChatWorkflow(page)
     await page.screenshot({ path: path.join(outputDir, 'app-corpus-chat.png'), fullPage: true })
+  }
+
+  if (shouldRun('@writing')) {
+    logStep('checking early cancel before session id arrives')
+    await verifyEarlyCancelChatWorkflow(browser, url, consoleErrors, pageErrors)
   }
 
   if (shouldRun('@surface')) {

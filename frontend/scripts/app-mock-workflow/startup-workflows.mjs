@@ -80,6 +80,63 @@ export async function verifyBootstrapStates(browser, url, consoleErrors, pageErr
   await expectVisible(bridgeUnavailablePage.getByText('请确认正在通过 Novelist 桌面应用打开此界面'), 'bridge unavailable guidance')
   await bridgeUnavailablePage.screenshot({ path: path.join(outputDir, 'app-00-bootstrap.png'), fullPage: true })
   await bridgeUnavailablePage.close()
+
+  await verifyPlatformProbeRecovery(browser, url, consoleErrors, pageErrors)
+}
+
+// 默认目录探测失败过去会把首屏钉死在"加载中..."，按钮永久禁用。
+// 这里断言错误文案、重试按钮与手填目录兜底三条出路都在。
+async function verifyPlatformProbeRecovery(browser, url, consoleErrors, pageErrors) {
+  const retryPage = await newAppPage(browser, consoleErrors, pageErrors, {
+    initialized: false,
+    platformDefaultPath: 'D:\\NovelistRecovered',
+    afterInitializeNovels: [],
+    afterInitializeSettings: settingsFixture(0),
+    faults: {
+      GetPlatform: [{ mode: 'storage', message: '平台信息读取失败' }],
+    },
+  }, undefined, 'init-platform-probe-failure')
+  await retryPage.goto(url, { waitUntil: 'domcontentloaded' })
+  await expectVisible(retryPage.getByText('欢迎使用 Novelist'), 'initialization screen with failed platform probe')
+  await expectVisible(retryPage.getByText('无法自动确定数据目录', { exact: true }), 'platform probe failure title')
+  await expectVisible(retryPage.getByText('平台信息读取失败'), 'platform probe failure detail')
+
+  const manualInput = retryPage.getByLabel('手动填写创作数据目录')
+  await expectVisible(manualInput, 'manual data directory input')
+  const retryButton = retryPage.getByRole('button', { name: '重新检测' })
+  await expectVisible(retryButton, 'platform probe retry button')
+  assert.equal(await retryButton.isEnabled(), true, 'the platform probe retry button must stay clickable')
+  await retryPage.screenshot({ path: path.join(outputDir, 'app-00-init-platform-failure.png'), fullPage: true })
+
+  await retryButton.click()
+  await expectVisible(retryPage.getByText('D:\\NovelistRecovered'), 'default data directory after platform probe retry')
+  await retryPage.getByRole('button', { name: '开始使用' }).click()
+  await expectVisible(retryPage.getByText('还没有作品，创建第一部吧'), 'bookshelf after recovering from platform probe failure')
+  await retryPage.close()
+
+  const manualPage = await newAppPage(browser, consoleErrors, pageErrors, {
+    initialized: false,
+    afterInitializeNovels: [],
+    afterInitializeSettings: settingsFixture(0),
+    faults: {
+      GetPlatform: [{ mode: 'storage', message: '平台信息读取失败', once: false }],
+    },
+  }, undefined, 'init-platform-manual-fallback')
+  await manualPage.goto(url, { waitUntil: 'domcontentloaded' })
+  await expectVisible(manualPage.getByText('无法自动确定数据目录', { exact: true }), 'persistent platform probe failure title')
+
+  const startButton = manualPage.getByRole('button', { name: '开始使用' })
+  assert.equal(await startButton.isDisabled(), true, 'the start button must stay disabled while no directory is known')
+  await manualPage.getByLabel('手动填写创作数据目录').fill('D:\\NovelistManual')
+  assert.equal(await startButton.isEnabled(), true, 'a manually typed directory must unblock the start button')
+  await startButton.click()
+  await expectVisible(manualPage.getByText('还没有作品，创建第一部吧'), 'bookshelf after manual data directory fallback')
+
+  const initializeCall = await manualPage.evaluate(() =>
+    window.__appMockState.calls.find((call) => call.method === 'Initialize') ?? null)
+  assert(initializeCall, 'the manual fallback must reach Initialize')
+  assert.equal(initializeCall.args[0], 'D:\\NovelistManual', 'Initialize must receive the manually typed directory')
+  await manualPage.close()
 }
 
 export async function verifyFixtureFaultModes(browser, url, consoleErrors, pageErrors) {

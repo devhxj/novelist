@@ -12,7 +12,7 @@
 三条主线结论：
 
 1. **有一处真实的数据丢失路径。** 内容区收到 `file:changed`（AI 写文件）时无条件重取并强制清掉脏标记（`ContentPanel.tsx:354-361`），作者正在输入的未保存文字会被覆盖，且"未保存"提示同时消失——作者既丢了字，也失去了"我丢了字"的感知。这比任何交互摩擦都严重，应当单独优先。
-2. **聊天区的"发送/停止"控制面在生成中是失效的。** 发送按钮没有 loading 守卫（`ChatInput.tsx:195` 只判 `disabled || !hasContent`，而 `ChatPanel.tsx:1449-1453` 只传了 `!hasNovel || !selectedKey`），停止按钮只在**没有输入内容时**才出现（`ChatInput.tsx:182`）。于是作者在等待中随手再发一条是完全可达的操作，而 `ChatPanel.tsx:895-900/980-989` 的单槽退订引用会被"先结束的那一轮"拆掉，导致第二轮的流式输出无处落地——正文凭空消失。
+2. **聊天区的"发送/停止"控制面在生成中是失效的。** 发送按钮没有 loading 守卫（`ChatInput.tsx:195` 只判 `disabled || !hasContent`，而 `ChatPanel.tsx:1449-1453` 只传了 `disabled={!hasNovel || !selectedKey}`），停止按钮只在**没有输入内容时**才出现（`ChatInput.tsx:182`）。于是作者在等待中随手再发一条是完全可达的操作，而 `ChatPanel.tsx:895-900` 的重入取消与 `:980-989` 的单槽退订引用会被"先结束的那一轮"拆掉，导致第二轮的流式输出无处落地——正文凭空消失。
 3. **多个关键动作没有回头路。** 章节无法删除（全仓 grep 无 `DeleteChapter`/`RemoveChapter`）；材料化跑完或取消后无法再跑（`ReferenceCorpusWorkspace.tsx:398` 的 `canStart` 要求 `!run`）；自动章节切分一旦切错，因模块级缓存永不清空（`:35` 的 `analyzedProfiles` 只有 `set`/`get`）而必须重启应用才能重来。这些是"操作可逆性"缺口，不是功能缺失。
 
 ## 二、使用便利性（U7–U12）
@@ -101,7 +101,7 @@
 
 - **现象**：`SidePanel.tsx:217-221` 对未匹配的面板渲染「即将推出」；`WorkspaceView.tsx:400` 允许 `setActivePanel('profile')`，`:525` 在 profile 下卸载 ContentPanel，`:562` 的 `{activePanel !== 'profile' && (<ChatPanel` **卸载了聊天区**。ChatInput 的草稿是非受控状态，随卸载丢失。
 - **影响**：作者好奇点一下侧栏图标，代价是正在斟酌的提示词全没了，且换来一句"即将推出"。
-- **建议**：短期把 profile 入口隐藏或禁用（有 tooltip 说明），不给出可点击的死路；中期 ChatPanel 改为保留挂载（`hidden` 而非卸载）或草稿提升到 ChatPanel 层并持久化到会话设置。
+- **建议**：短期把 profile 入口隐藏/禁用（有 tooltip 说明），不给出可点击的死路；中期 ChatPanel 改为保留挂载（`hidden` 而非卸载）或草稿提升到 ChatPanel 层并持久化到会话设置。
 
 ## 四、功能完整性（F7–F12）
 
@@ -141,6 +141,19 @@
 | O11 | 打分排序上提到 `ChatInput`，`SlashMenu` 降为纯展示 | 前端单测断言"高亮项 === 回车插入项"（含重排场景） |
 | N1 | `RegisterReferenceMaterializationSourceFromContent` 补 `{ timeoutMs: null }` | `reference-materialization-api.test.mjs` 断言超时配置与同族方法一致 |
 
+#### 第一批落地记录（2026-09-01）
+
+九项全部完成并通过验收：build / lint / `test:node`（21 例）/ `test:phase16` / `test:app` / `--grep=@writing` / `--grep=@error` 全绿；`dotnet test` 700/702（2 例为 `ReferenceCorpusAnalysisWorkerTests` 的 Windows 文件锁并发抖动，单独重跑 12/12 通过）。新增截图：`app-approval-submit-failure.png`、`app-approval-end-turn.png`、`app-00-init-platform-failure.png`、`file-change-conflict-bar.png`、`reference-reanalyze-rematerialize.png`。
+
+实现中顺带修掉的四个连带问题（都是验收工作流暴露的真实缺陷）：
+
+- **冲突条会被 autosave 静默取消（U7 语义补全）**：脏 tab 收到 `file:changed` 挂起冲突后，已排队的 500ms autosave 仍会把作者缓冲落盘并顺手清掉冲突条，等于替作者按了"保留我的"。现在冲突挂起期间 `handleEditorChange` 不再排队 autosave，事件侧挂冲突时也撤销已排队的定时器；显式 Ctrl+S 与「保留我的」仍正常落盘。
+- **`WorkspaceView` 的 `GetPlatform` 缺 catch**：与 U10 同源的未处理拒绝，在 InitView 兜底页复现时成为页面错误；该调用只喂状态栏系统标识，失败静默保留默认文案。
+- **确认切分未同步缓存（O8/O9 连带）**：`ConfirmReferenceChapterSplit` 成功后只 `setProfile`，`analyzedProfiles` 里仍是"待确认"的旧分析；材料化完成触发 `refreshKey` 重挂时从缓存读回旧状态，把「重新材料化」入口整个锁死。确认成功后同步覆盖缓存。
+- **Monaco DiffEditor 卸载竞态**：关闭 diff 标签页（冲突「用 AI 版本」/「保留我的」、审批收尾都会走）偶发页面错误 `TextModel got disposed before DiffEditorWidget model got reset`。`DiffEditor` 增加 `keepCurrentOriginalModel`/`keepCurrentModifiedModel`，不再由包装层抢先 dispose 模型。
+
+另记一处观察（未改动，留给第二批 F12 一起看）：mock 的 `chat:started` 若携带 `session_id`，前端会在首轮流式中途因"加载历史消息" effect 重建 turns，把正在流式的气泡冲掉。真实后端的行为需要对照验证；当前 mock 仅在早期取消场景（U9 需要补发路径）携带 session_id。
+
 ### 第二批：可感知与可持续（🟠，紧随其后）
 
 | 项 | 改法 | 验收 |
@@ -165,7 +178,7 @@
 ### 不做的事（明确出界）
 
 - **不扩大专家控制面**（AGENTS.md 红线）：F7 的接线一律以"作者动线上需要"为准入，不因"后端已有"而堆叠面板；语料治理 25 个方法不做成管理后台。
-- **不引入全自动无人确认材料化**：O8/O9 放开的是**重来的权利**，章节边界确认仍保留人工关卡。
+- **不引入全自动无人确认材料化**：O8/O9 放开的是"重来的权利"，章节边界人工确认关卡保留。
 - **不为 U7 引入自动合并**：冲突交给作者三选一，不做自动 diff 合并（写作文本的自动合并错误代价远高于一次选择）。
 - **不做通用插件/宏系统**：N3 只补必要快捷键，不引入可配置键位。
 
@@ -178,6 +191,3 @@
 ## 七、本轮排除项
 
 以下 8 项属第二轮 `-fixes.md` 已交付内容，本轮已复核为**修复有效**，不再计入缺口：聊天覆盖度失败重试、章节默认值、可访问性与恢复证据、`test:node` 测试接线与 AGENTS.md 口径同步、`CorpusAreaView` 与 `CorpusUsageCard` 的格式清理，以及 `-fixes.md` 六节记录的 #1–#7 全部条目。
-
-
-

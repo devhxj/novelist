@@ -22,8 +22,8 @@ const MODE_SELECTED_BG: Record<string, string> = {
 }
 
 interface Props {
+  /** 已由 ChatInput 打分排序后的命令列表，本组件不再过滤或重排。 */
   slashItems: app.SlashCommand[]
-  filterText: string
   selectedIndex: number
   position: { top: number; left: number; width: number }
   onSelect: (cmd: app.SlashCommand) => void
@@ -34,35 +34,9 @@ const MENU_MAX_HEIGHT = 260
 const GAP = 8
 
 export default function SlashMenu({
-  slashItems, filterText, selectedIndex, position, onSelect, onHover,
+  slashItems, selectedIndex, position, onSelect, onHover,
 }: Props) {
   const scrollRef = useRef<HTMLDivElement>(null)
-
-  const q = filterText.toLowerCase()
-
-  // charMatch 检查 q 的所有字符是否按顺序出现在 s 中（模糊匹配）
-  const charMatch = (s: string): boolean => {
-    let qi = 0
-    for (let i = 0; i < s.length && qi < q.length; i++) {
-      if (s[i] === q[qi]) qi++
-    }
-    return qi === q.length
-  }
-
-  // score 计算匹配得分，越低越好
-  const score = (c: app.SlashCommand): number => {
-    const name = c.name.toLowerCase()
-    if (name === q) return 0
-    if (name.startsWith(q)) return 1
-    if (name.includes(q)) return 2
-    if (charMatch(name)) return 3
-    if (c.description.toLowerCase().includes(q)) return 4
-    return 5
-  }
-
-  const filtered = slashItems
-    .filter(c => score(c) < 5)
-    .sort((a, b) => score(a) - score(b))
 
   useEffect(() => {
     const el = scrollRef.current
@@ -89,7 +63,7 @@ export default function SlashMenu({
     }
   }, [position])
 
-  if (filtered.length === 0) {
+  if (slashItems.length === 0) {
     return createPortal(
       <div
         className="fixed z-[9999] rounded-lg border bg-background shadow-lg px-3 py-2 text-xs text-muted-foreground"
@@ -107,7 +81,7 @@ export default function SlashMenu({
       style={{ bottom: style.bottom, left: style.left, width: style.width, maxHeight: style.maxHeight }}
     >
       <div ref={scrollRef} className="overflow-y-auto" style={{ maxHeight: style.maxHeight }}>
-        {filtered.map((c, i) => {
+        {slashItems.map((c, i) => {
           const mode = c.type || 'auto'
           const selBg = MODE_SELECTED_BG[mode] || MODE_SELECTED_BG.auto
           return (

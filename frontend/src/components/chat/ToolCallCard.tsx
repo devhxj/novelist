@@ -1,6 +1,10 @@
-import { Loader2, CheckCircle2, XCircle, Eye, Plus, Pencil, Brain, FileText, Wrench, Check, AlertTriangle, Trash2 } from 'lucide-react'
-import { memo, useState } from 'react'
+import { Loader2, CheckCircle2, XCircle, Eye, Plus, Pencil, Brain, FileText, Wrench, Check, AlertTriangle, Trash2, RotateCcw, Ban } from 'lucide-react'
+import { memo, useEffect, useState } from 'react'
+import { diagnosticMessage } from '@/lib/diagnostics'
 import './ToolCallCard.css'
+
+// 审批提交走本地桥，超过这个时长基本就是卡住了：给作者一条"结束本轮"的出路，别让卡片干等。
+const APPROVAL_SLOW_MS = 6000
 
 interface Props {
   toolName: string
@@ -12,8 +16,9 @@ interface Props {
   // approval
   approvalType?: string
   approvalPayload?: Record<string, unknown>
-  onApprove?: (feedback: string) => void
-  onReject?: (feedback: string) => void
+  onApprove?: (feedback: string) => void | Promise<void>
+  onReject?: (feedback: string) => void | Promise<void>
+  onEndTurn?: () => void
 }
 
 function ActivityIcon({ kind, size }: { kind?: string; size: number }) {
@@ -99,8 +104,17 @@ function ApprovalBody({ type, payload }: { type?: string; payload?: Record<strin
   return <span>等待审批...</span>
 }
 
-export default memo(function ToolCallCard({ displayText, status, activityKind, error, compact, approvalType, approvalPayload, onApprove, onReject }: Props) {
+export default memo(function ToolCallCard({ displayText, status, activityKind, error, compact, approvalType, approvalPayload, onApprove, onReject, onEndTurn }: Props) {
   const [feedback, setFeedback] = useState('')
+  const [submitting, setSubmitting] = useState<'approve' | 'reject' | null>(null)
+  const [slow, setSlow] = useState(false)
+  const [submitError, setSubmitError] = useState<{ decision: 'approve' | 'reject'; message: string } | null>(null)
+
+  useEffect(() => {
+    if (!submitting) return
+    const timer = window.setTimeout(() => setSlow(true), APPROVAL_SLOW_MS)
+    return () => window.clearTimeout(timer)
+  }, [submitting])
 
   // 审批中状态
   if (status === 'awaiting_approval' && onApprove && onReject) {
@@ -108,13 +122,34 @@ export default memo(function ToolCallCard({ displayText, status, activityKind, e
       setFeedback(e.target.value)
     }
 
+    const submit = async (decision: 'approve' | 'reject') => {
+      setSubmitting(decision)
+      setSlow(false)
+      setSubmitError(null)
+      try {
+        await (decision === 'approve' ? onApprove(feedback) : onReject(feedback))
+        // 只有提交成功才清空反馈：失败时作者刚敲的那段话必须留在框里。
+        setFeedback('')
+      } catch (e) {
+        setSubmitError({
+          decision,
+          message: diagnosticMessage(e, decision === 'approve' ? '批准提交失败' : '拒绝提交失败'),
+        })
+      } finally {
+        setSubmitting(null)
+        setSlow(false)
+      }
+    }
+
+    const busy = submitting !== null
+
     return (
       <div className={`tool-card awaiting-approval ${compact ? 'compact' : ''}`}>
         <div className="tool-row">
           <span className="tool-icon"><AlertTriangle size={compact ? 12 : 14} /></span>
           <span className="tool-label">{displayText}</span>
           <span className="tool-badge tool-badge-approval">
-            <Loader2 size={10} className="animate-spin" /> 等待审批
+            <Loader2 size={10} className="animate-spin" /> {busy ? '提交中' : '等待审批'}
           </span>
         </div>
         <div className="approval-body">
@@ -125,20 +160,52 @@ export default memo(function ToolCallCard({ displayText, status, activityKind, e
             placeholder="反馈（可选）..."
             rows={1}
             className="approval-feedback"
+            disabled={busy}
           />
+          {submitError ? (
+            <div className="approval-error" role="alert">
+              {submitError.message}
+            </div>
+          ) : slow ? (
+            <div className="approval-hint" role="status">
+              提交已超过 6 秒没有回应，可以继续等，也可以结束本轮。
+            </div>
+          ) : null}
           <div className="approval-actions">
-            <button
-              onClick={() => { onReject(feedback); setFeedback('') }}
-              className="approval-reject-btn cursor-pointer select-none"
-            >
-              <XCircle size={13} /> 拒绝
-            </button>
-            <button
-              onClick={() => { onApprove(feedback); setFeedback('') }}
-              className="approval-accept-btn cursor-pointer select-none"
-            >
-              <Check size={13} /> 批准
-            </button>
+            {(submitError || slow) && onEndTurn && (
+              <button
+                onClick={onEndTurn}
+                className="approval-end-btn cursor-pointer select-none"
+              >
+                <Ban size={13} /> 结束本轮
+              </button>
+            )}
+            {submitError ? (
+              <button
+                onClick={() => { void submit(submitError.decision) }}
+                disabled={busy}
+                className="approval-retry-btn cursor-pointer select-none disabled:opacity-60"
+              >
+                <RotateCcw size={13} /> 重试{submitError.decision === 'approve' ? '批准' : '拒绝'}
+              </button>
+            ) : (
+              <>
+                <button
+                  onClick={() => { void submit('reject') }}
+                  disabled={busy}
+                  className="approval-reject-btn cursor-pointer select-none disabled:opacity-60"
+                >
+                  <XCircle size={13} /> 拒绝
+                </button>
+                <button
+                  onClick={() => { void submit('approve') }}
+                  disabled={busy}
+                  className="approval-accept-btn cursor-pointer select-none disabled:opacity-60"
+                >
+                  <Check size={13} /> 批准
+                </button>
+              </>
+            )}
           </div>
         </div>
       </div>

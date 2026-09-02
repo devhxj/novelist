@@ -1,3 +1,12 @@
+export type FileChangeTarget = 'content' | 'outlineContent'
+
+// 外部改动撞上未保存正文时挂起的对方版本，等作者在冲突条上三选一。
+export type EditorTabConflict = {
+  target: FileChangeTarget
+  path: string
+  incoming: string
+}
+
 export type EditorTab = {
   id: string
   type: 'file' | 'diff'
@@ -9,6 +18,7 @@ export type EditorTab = {
   isDirty?: boolean
   viewMode?: 'content' | 'outline' | 'preview' | 'edit'
   readOnly?: boolean
+  conflict?: EditorTabConflict
   // diff tab
   diff?: string
   original?: string

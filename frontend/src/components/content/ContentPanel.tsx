@@ -13,10 +13,14 @@ import TabBar from './TabBar'
 import ContentEditor from './ContentEditor'
 import OutlineViewer from './OutlineViewer'
 import SkillPreview from './SkillPreview'
+import FileChangeConflictBar from './FileChangeConflictBar'
 import SkillEditForm from '@/components/skill/SkillEditForm'
 import Markdown from '@/components/Markdown'
 import { outlinePath, isContentPath, isOutlinePath, isSkillPath, skillNameFromPath } from './types'
 import type { EditorTab } from './types'
+import {
+  resolveFileChange, fileChangePatch, acceptIncomingPatch, conflictDiffToolId,
+} from './fileChangeConflict'
 import './ContentPanel.css'
 
 const MONACO_THEME: Record<Theme, string> = { light: 'novelist-light', dark: 'vs-dark' }
@@ -94,6 +98,16 @@ const ContentPanel = forwardRef<ContentPanelHandle, Props>(function ContentPanel
   const pendingHighlightRef = useRef<{ matchPos: number; matchLen: number } | null>(null)
   const didApplyHighlightRef = useRef(false) // handleEditorMount 已应用高亮时跳过清除
   const novelIdRef = useRef(novelId)
+
+  // 撤销挂起的 autosave：作者做出选择后，定时器里那份旧缓冲不能再落盘。
+  const cancelPendingAutosave = useCallback(() => {
+    if (saveTimerRef.current) {
+      clearTimeout(saveTimerRef.current)
+      saveTimerRef.current = null
+    }
+    savingRef.current = null
+  }, [])
+
   const tabsRef = useRef(tabs)
 
   useEffect(() => { novelIdRef.current = novelId }, [novelId])
@@ -187,7 +201,8 @@ const ContentPanel = forwardRef<ContentPanelHandle, Props>(function ContentPanel
     try {
       await app.SaveContent({ novel_id: novelIdRef.current, path, content })
       setSaveError(current => current?.tabId === tabId ? null : current)
-      updateTab(tabId, { isDirty: false })
+      // 存盘成功后磁盘就是作者这一份，之前挂起的外部版本已经过期，冲突条一并撤掉。
+      updateTab(tabId, { isDirty: false, conflict: undefined })
       if (savingRef.current?.id === tabId && savingRef.current.path === path && savingRef.current.content === content) {
         savingRef.current = null
       }
@@ -251,6 +266,13 @@ const ContentPanel = forwardRef<ContentPanelHandle, Props>(function ContentPanel
 
     const tab = tabs.find(t => t.id === tabId)
     if (!tab) return
+    // 挂起冲突期间不再自动落盘：磁盘上该留谁的版本要由作者三选一决定，
+    // 否则 500ms 后的 autosave 会替作者"保留我的"，冲突条一闪就没。
+    if (tab.conflict) {
+      savingRef.current = null
+      saveTimerRef.current = null
+      return
+    }
     savingRef.current = { id: tabId, path: tab.path, content }
     saveTimerRef.current = setTimeout(() => {
       if (!savingRef.current) return
@@ -333,36 +355,25 @@ const ContentPanel = forwardRef<ContentPanelHandle, Props>(function ContentPanel
       if (eventNovelId !== novelIdRef.current || !eventPath) return
 
       for (const tab of tabsRef.current) {
-        if (tab.type !== 'file') continue
+        const decision = resolveFileChange(tab, eventPath)
+        if (decision.kind === 'ignore') continue
 
-        let needRefresh = false
-        let refreshKey: 'content' | 'outlineContent' = 'content'
-
-        if (tab.path === eventPath) {
-          needRefresh = true
-          refreshKey = 'content'
-        } else {
-          const derivedOutline: string | null = isContentPath(tab.path) && tab.path !== 'novelist.md'
-            ? outlinePath(parseInt(tab.path.replace(/.*\//, '').replace('.md', '')))
-            : null
-          if (derivedOutline && derivedOutline === eventPath) {
-            needRefresh = true
-            refreshKey = 'outlineContent'
-          }
+        let fresh: string
+        try {
+          fresh = await app.GetContent(eventNovelId, eventPath)
+        } catch {
+          continue // 文件可能被删
         }
 
-        if (needRefresh) {
-          try {
-            const fresh = await app.GetContent(eventNovelId, eventPath)
-            const patch: Partial<EditorTab> = { [refreshKey]: fresh }
-            if (refreshKey === 'content') patch.isDirty = false
-            updateTab(tab.id, patch)
-          } catch { /* 文件可能被删 */ }
+        // 冲突挂起时撤掉已排队的 autosave，旧缓冲不能在作者选择前落盘。
+        if (decision.kind === 'conflict') {
+          cancelPendingAutosave()
         }
+        updateTab(tab.id, fileChangePatch(decision, fresh ?? '', eventPath))
       }
     })
     return () => unsub()
-  }, [app, updateTab])
+  }, [app, updateTab, cancelPendingAutosave])
 
   // ── 打开/激活文件 tab ──────────────────────────────────
 
@@ -469,14 +480,10 @@ const ContentPanel = forwardRef<ContentPanelHandle, Props>(function ContentPanel
     if (ft) {
       try {
         const fresh = await app.GetContent(novelId, dt.path)
-        const patch: Partial<EditorTab> = { viewMode }
-        if (viewMode === 'outline') {
-          patch.outlineContent = fresh
-        } else {
-          patch.content = fresh
-          patch.isDirty = false
-        }
-        updateTab(ft.id, patch)
+        // 批准 diff 只代表"允许 AI 写盘"，不代表作者放弃编辑器里未保存的正文。
+        // 脏 tab 走同一套冲突条，避免审批顺手吞掉刚敲的字。
+        const decision = resolveFileChange(ft, dt.path)
+        updateTab(ft.id, { ...fileChangePatch(decision, fresh ?? '', dt.path), viewMode })
       } catch {
         updateTab(ft.id, { viewMode })
       }
@@ -494,6 +501,58 @@ const ContentPanel = forwardRef<ContentPanelHandle, Props>(function ContentPanel
     closeTab(dt.id)
     doOpenFile(filePath)
   }, [tabs, closeTab, doOpenFile])
+
+  // ── 外部改动冲突：保留我的 / 用 AI 版本 / 查看差异 ────────
+
+  const closeConflictDiffTab = useCallback((path: string) => {
+    const toolId = conflictDiffToolId(path)
+    const existing = tabsRef.current.find(t => t.type === 'diff' && t.toolId === toolId)
+    if (existing) closeTab(existing.id)
+  }, [closeTab])
+
+  const handleConflictKeepMine = useCallback((tab: EditorTab) => {
+    const conflict = tab.conflict
+    if (!conflict) return
+    cancelPendingAutosave()
+    updateTab(tab.id, { conflict: undefined })
+    closeConflictDiffTab(conflict.path)
+    // 只清冲突条的话磁盘上仍是对方的版本，下次外部写入又会撞一次。
+    // 作者既然选了"保留我的"，就把编辑器里这份落盘，让分歧真正结束。
+    if (conflict.target === 'content') {
+      void doSave(tab.id, tab.path, tab.content ?? '').catch(() => undefined)
+    }
+  }, [cancelPendingAutosave, updateTab, closeConflictDiffTab, doSave])
+
+  const handleConflictTakeIncoming = useCallback((tab: EditorTab) => {
+    const conflict = tab.conflict
+    if (!conflict) return
+    cancelPendingAutosave()
+    updateTab(tab.id, acceptIncomingPatch(conflict))
+    if (conflict.target === 'content') onContentChange?.(conflict.incoming)
+    closeConflictDiffTab(conflict.path)
+  }, [cancelPendingAutosave, updateTab, closeConflictDiffTab, onContentChange])
+
+  const handleConflictViewDiff = useCallback((tab: EditorTab) => {
+    const conflict = tab.conflict
+    if (!conflict) return
+    const toolId = conflictDiffToolId(conflict.path)
+    const existing = tabsRef.current.find(t => t.type === 'diff' && t.toolId === toolId)
+    if (existing) {
+      setActiveTabId(existing.id)
+      return
+    }
+    const mine = conflict.target === 'content' ? tab.content ?? '' : tab.outlineContent ?? ''
+    openDiffTab({
+      path: conflict.path,
+      title: `${tab.title} · 外部改动`,
+      diff: '',
+      original: mine,
+      modified: conflict.incoming,
+      changeType: 'file_changed',
+      reason: '文件在编辑期间被外部改动',
+      toolId,
+    })
+  }, [openDiffTab, setActiveTabId])
 
   // ── 暴露给父组件的方法 ──────────────────────────────────
 
@@ -559,6 +618,10 @@ const ContentPanel = forwardRef<ContentPanelHandle, Props>(function ContentPanel
               theme={MONACO_THEME[theme]}
               original={activeTab.original}
               modified={activeTab.modified}
+              // 关闭 diff 标签页时不让包装层抢先 dispose 模型：
+              // 组件卸载与控件解绑的顺序竞争会抛 "TextModel got disposed" 页面错误。
+              keepCurrentOriginalModel
+              keepCurrentModifiedModel
               onMount={editor => {
                 setTimeout(() => {
                   const modified = editor.getModifiedEditor()
@@ -646,6 +709,14 @@ const ContentPanel = forwardRef<ContentPanelHandle, Props>(function ContentPanel
           }}
           retryLabel="重试保存"
           onClose={() => setSaveError(null)}
+        />
+      )}
+      {activeTab.conflict && (
+        <FileChangeConflictBar
+          conflict={activeTab.conflict}
+          onKeepMine={() => handleConflictKeepMine(activeTab)}
+          onTakeIncoming={() => handleConflictTakeIncoming(activeTab)}
+          onViewDiff={() => handleConflictViewDiff(activeTab)}
         />
       )}
 

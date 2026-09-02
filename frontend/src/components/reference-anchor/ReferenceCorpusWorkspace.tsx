@@ -267,6 +267,15 @@ export default function ReferenceCorpusWorkspace({
     }
   }
 
+  // 重新分析：把缓存里留着的上次结果先清掉再跑一遍。
+  // 成功后新 profile 以"待确认"落位，旧确认配置不受影响，作者确认后才会换用。
+  const reanalyze = async () => {
+    if (!selectedAnchor) return
+    analyzedProfiles.delete(selectedAnchor.anchor_id)
+    setProfile(null)
+    await analyze()
+  }
+
   const previewManual = async () => {
     if (!selectedAnchor || !manualTemplate.trim()) return
     setAction('manual-preview')
@@ -297,6 +306,9 @@ export default function ReferenceCorpusWorkspace({
         anchor_id: selectedAnchor.anchor_id,
         split_profile_id: profile.split_profile_id,
       })
+      // 缓存同步到已确认的切分：否则材料化完成触发 refreshKey 重挂时，
+      // 会从缓存里读回"待确认"的旧分析结果，把重新材料化的入口整个锁死。
+      analyzedProfiles.set(selectedAnchor.anchor_id, confirmed)
       setProfile(confirmed)
     } catch (err) {
       setError(describeBridgeError(err, '章节边界确认失败。来源可能已变化。').message)
@@ -307,14 +319,14 @@ export default function ReferenceCorpusWorkspace({
   }
 
   const enqueue = async () => {
-    if (!selectedAnchor || !profile || profile.status !== 'confirmed') return
+    if (!selectedAnchor || !activeProfile || activeProfile.status !== 'confirmed') return
     setAction('enqueue')
     setError(null)
     try {
       const status = await app.EnqueueReferenceMaterialization({
         novel_id: novelId,
         anchor_id: selectedAnchor.anchor_id,
-        split_profile_id: profile.split_profile_id,
+        split_profile_id: activeProfile.split_profile_id,
         chapter_batch_size: batchSize,
       })
       setRun(status)
@@ -338,8 +350,25 @@ export default function ReferenceCorpusWorkspace({
       })
       setRun(status)
     } catch (err) {
-      setError(describeBridgeError(err, '材料化重试未能启动。请先修复模型或索引问题。').message)
-      setErrorRetry(() => () => { void retry() })
+      // 模型或资格模式在 run 启动后发生过变化时，旧 run 无法续跑：
+      // 转为用同一份已冻结章节切分新建 run，而不是把死路留给作者。
+      if (err instanceof BridgeError && err.code === 'materialization_retry_requires_new_run') {
+        try {
+          const status = await app.EnqueueReferenceMaterialization({
+            novel_id: novelId,
+            anchor_id: selectedAnchor.anchor_id,
+            split_profile_id: run.split_profile_id,
+            chapter_batch_size: batchSize,
+          })
+          setRun(status)
+        } catch (enqueueErr) {
+          setError(describeBridgeError(enqueueErr, '旧 run 已无法续跑，新建材料化 run 也未能启动。请检查模型与索引后重试。').message)
+          setErrorRetry(() => () => { void enqueue() })
+        }
+      } else {
+        setError(describeBridgeError(err, '材料化重试未能启动。请先修复模型或索引问题。').message)
+        setErrorRetry(() => () => { void retry() })
+      }
     } finally {
       setAction(null)
     }
@@ -395,7 +424,9 @@ export default function ReferenceCorpusWorkspace({
   }
 
   const isBusy = action !== null
-  const canStart = activeProfile?.status === 'confirmed' && !run
+  // 只有进行中的 run（排队/运行）挡住入口；完成、失败、取消都允许再次启动。
+  const hasActiveRun = run?.status === 'queued' || run?.status === 'running'
+  const canStart = activeProfile?.status === 'confirmed' && !hasActiveRun
 
   return (
     <main data-testid="reference-corpus-workspace" className="reference-materialization-surface min-w-0 flex-1 overflow-y-auto bg-background" aria-busy={isBusy}>
@@ -467,6 +498,18 @@ export default function ReferenceCorpusWorkspace({
               >
                 {action === 'analyze' ? <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden="true" /> : <Sparkles className="h-3.5 w-3.5" aria-hidden="true" />}
                 自动分析前 50K
+              </button>
+            )}
+            {activeProfile && (
+              <button
+                type="button"
+                onClick={() => { void reanalyze() }}
+                disabled={isBusy}
+                data-testid="reanalyze-split-button"
+                className="inline-flex h-8 items-center gap-1.5 rounded-md border border-border px-3 text-xs font-medium text-foreground hover:bg-secondary disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                {action === 'analyze' ? <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden="true" /> : <Sparkles className="h-3.5 w-3.5" aria-hidden="true" />}
+                重新分析
               </button>
             )}
           </div>
@@ -542,7 +585,7 @@ export default function ReferenceCorpusWorkspace({
                 </p>
               </div>
             </div>
-            {canStart && (
+            {canStart && !run && (
               <button
                 type="button"
                 onClick={() => { void enqueue() }}
@@ -551,6 +594,18 @@ export default function ReferenceCorpusWorkspace({
               >
                 {action === 'enqueue' ? <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden="true" /> : <Play className="h-3.5 w-3.5" aria-hidden="true" />}
                 启动材料化
+              </button>
+            )}
+            {canStart && run && (
+              <button
+                type="button"
+                onClick={() => { void enqueue() }}
+                disabled={isBusy}
+                data-testid="rematerialize-button"
+                className="inline-flex h-8 items-center gap-1.5 rounded-md bg-primary px-3 text-xs font-medium text-primary-foreground hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                {action === 'enqueue' ? <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden="true" /> : <Play className="h-3.5 w-3.5" aria-hidden="true" />}
+                重新材料化
               </button>
             )}
             {run?.status === 'failed' && (

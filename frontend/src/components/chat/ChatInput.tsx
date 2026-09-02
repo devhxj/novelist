@@ -1,6 +1,7 @@
-import { useState, useCallback, useRef, useEffect } from 'react'
+import { useState, useCallback, useRef, useEffect, useMemo } from 'react'
 import { ArrowUp, Square, Zap, Play, Star } from 'lucide-react'
 import type { app } from '@/hooks/useApp'
+import { rankSlashCommands } from '@/lib/slashCommands'
 import SlashMenu from './SlashMenu'
 
 interface Props {
@@ -24,9 +25,11 @@ export default function ChatInput({ disabled, isLoading, placeholder, slashItems
   const [slashPos, setSlashPos] = useState({ top: 0, left: 0, width: 0 })
   const [activeCommand, setActiveCommand] = useState<app.SlashCommand | null>(null)
 
-  const q = slashFilter.toLowerCase()
-  const filteredItems = slashItems.filter(c =>
-    c.name.toLowerCase().includes(q) || c.description.toLowerCase().includes(q)
+  // 打分排序在此处完成，SlashMenu 只负责渲染传入顺序：
+  // 键盘高亮用的 slashIndex 与菜单渲染的下标必须落在同一个数组上。
+  const filteredItems = useMemo(
+    () => rankSlashCommands(slashItems, slashFilter),
+    [slashItems, slashFilter],
   )
 
   const closeSlash = useCallback(() => {
@@ -102,7 +105,9 @@ export default function ChatInput({ disabled, isLoading, placeholder, slashItems
       }
       if (e.key === 'Enter' || e.key === 'Tab') {
         e.preventDefault()
-        applySlashSelection(filteredItems[slashIndex])
+        // slashItems 可能在打字后异步到达，索引未必仍然有效
+        const picked = filteredItems[slashIndex] ?? filteredItems[0]
+        if (picked) applySlashSelection(picked)
         return
       }
       if (e.key === 'Escape') {
@@ -116,7 +121,7 @@ export default function ChatInput({ disabled, isLoading, placeholder, slashItems
       e.preventDefault()
       const textarea = e.currentTarget as HTMLTextAreaElement
       const value = textarea.value.trim()
-      if (value && !disabled) {
+      if (value && !disabled && !isLoading) {
         onSend(value)
         textarea.value = ''
         textarea.style.height = 'auto'
@@ -125,7 +130,7 @@ export default function ChatInput({ disabled, isLoading, placeholder, slashItems
         closeSlash()
       }
     }
-  }, [slashOpen, filteredItems, slashIndex, disabled, onSend, applySlashSelection, closeSlash])
+  }, [slashOpen, filteredItems, slashIndex, disabled, isLoading, onSend, applySlashSelection, closeSlash])
 
   const handleInput = useCallback((e: React.FormEvent<HTMLTextAreaElement>) => {
     const target = e.currentTarget
@@ -139,7 +144,7 @@ export default function ChatInput({ disabled, isLoading, placeholder, slashItems
     const textarea = textareaRef.current
     if (!textarea) return
     const value = textarea.value.trim()
-    if (value && !disabled) {
+    if (value && !disabled && !isLoading) {
       onSend(value)
       textarea.value = ''
       textarea.style.height = 'auto'
@@ -147,7 +152,7 @@ export default function ChatInput({ disabled, isLoading, placeholder, slashItems
       setActiveCommand(null)
       closeSlash()
     }
-  }, [disabled, onSend, closeSlash])
+  }, [disabled, isLoading, onSend, closeSlash])
 
   const handleStopClick = useCallback(() => {
     onStop()
@@ -179,7 +184,7 @@ export default function ChatInput({ disabled, isLoading, placeholder, slashItems
           onInput={handleInput}
           className="flex-1 bg-transparent resize-none text-sm leading-relaxed text-foreground outline-none placeholder:text-muted-foreground/50 disabled:text-muted-foreground/40 py-2 px-2 min-h-[28px] max-h-[180px]"
         />
-        {isLoading && !hasContent ? (
+        {isLoading ? (
           <button
             type="button"
             aria-label="停止生成"
@@ -201,10 +206,9 @@ export default function ChatInput({ disabled, isLoading, placeholder, slashItems
         )}
       </div>
 
-      {slashOpen && filteredItems.length > 0 && (
+      {slashOpen && (
         <SlashMenu
           slashItems={filteredItems}
-          filterText={slashFilter}
           selectedIndex={slashIndex}
           position={slashPos}
           onSelect={applySlashSelection}

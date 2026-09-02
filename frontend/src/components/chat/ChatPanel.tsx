@@ -59,6 +59,14 @@ interface EventQueue {
   flushTimer: ReturnType<typeof setTimeout> | null
 }
 
+// 每一轮对话各自持有退订句柄：单槽 ref 会让"先结束的那一轮"拆掉仍在进行的另一轮，
+// 使后者的流式输出无处落地。backendTurnId 用于在收尾时只 flush 本轮的事件队列。
+interface TurnSubscription {
+  started: (() => void) | null
+  agent: (() => void) | null
+  backendTurnId: number | null
+}
+
 interface ChatStartedEvent {
   session_id?: string
   turn_id: number
@@ -122,9 +130,11 @@ export default function ChatPanel({
   const scrollContainerRef = useRef<HTMLDivElement>(null)
   const isNearBottomRef = useRef(true)
   const counterRef = useRef(0)
-  const startedUnsubRef = useRef<(() => void) | null>(null)
-  const agentUnsubRef = useRef<(() => void) | null>(null)
+  const turnSubsRef = useRef<Map<string, TurnSubscription>>(new Map())
   const eventQueuesRef = useRef<Map<number, EventQueue>>(new Map())
+  // 停止按钮可能在 chat:started 之前按下，此时会话 id 还是空串，
+  // 直接发取消会被后端的空 id 分支丢弃，只能先记意图、等 id 到手再补发。
+  const pendingCancelRef = useRef(false)
   const onApprovalFileEditRef = useRef(onApprovalFileEdit)
   useEffect(() => { onApprovalFileEditRef.current = onApprovalFileEdit }, [onApprovalFileEdit])
   const lastSessionIdRef = useRef('')
@@ -342,9 +352,13 @@ export default function ChatPanel({
   // 清理事件监听器
   useEffect(() => {
     const eventQueues = eventQueuesRef.current
+    const turnSubs = turnSubsRef.current
     return () => {
-      startedUnsubRef.current?.()
-      agentUnsubRef.current?.()
+      turnSubs.forEach(sub => {
+        sub.started?.()
+        sub.agent?.()
+      })
+      turnSubs.clear()
       eventQueues.forEach(queue => {
         if (queue.flushTimer) clearTimeout(queue.flushTimer)
       })
@@ -895,9 +909,13 @@ export default function ChatPanel({
   const handleSend = useCallback(async (content: string) => {
     if (!selectedKey) return
     const [p, m] = selectedKey.split('/')
+    // 上一轮遗留的"待取消"意图不能顺延到新一轮
+    pendingCancelRef.current = false
     activeCountRef.current++
     if (activeCountRef.current > 1 && sessionId) {
-      app.CancelChat(sessionId)
+      app.CancelChat(sessionId).catch(err => {
+        console.error('Cancel previous chat failed', err)
+      })
     }
     setIsLoading(true)
 
@@ -918,12 +936,23 @@ export default function ChatPanel({
     setTurns(prev => [...prev, newTurn])
 
     // 监听 chat:started，拿到 turnId 后订阅 agent 事件流
-    startedUnsubRef.current?.()
+    const subs: TurnSubscription = { started: null, agent: null, backendTurnId: null }
+    turnSubsRef.current.set(turnId, subs)
     const startedCleanup = EventsOn('chat:started', (data: ChatStartedEvent) => {
+      // chat:started 是全局事件，收到的第一条即属于本轮；立即退订，
+      // 避免这个监听器在后续轮次里再次触发、把别人的 turn_id 记到自己名下。
+      subs.started?.()
+      subs.started = null
+
       if (data.session_id) {
         setSessionId(data.session_id)
         setActiveSessionId(data.session_id)
         app.SetLastSession(data.session_id).catch(() => {})
+        // 作者在会话 id 到手之前就按了停止：此刻补发，否则取消请求会被后端空 id 分支丢弃
+        if (pendingCancelRef.current) {
+          pendingCancelRef.current = false
+          app.CancelChat(data.session_id).catch(() => {})
+        }
       }
 
       // 更新 turn 的 turnId 为后端分配的真实值
@@ -931,11 +960,11 @@ export default function ChatPanel({
         t.id === turnId ? { ...t, turnId: data.turn_id } : t
       ))
 
-      agentUnsubRef.current?.()
-      const agentCleanup = EventsOn(`agent:${data.turn_id}`, handleAgentEvent(data.turn_id))
-      agentUnsubRef.current = agentCleanup
+      subs.backendTurnId = data.turn_id
+      subs.agent?.()
+      subs.agent = EventsOn(`agent:${data.turn_id}`, handleAgentEvent(data.turn_id))
     })
-    startedUnsubRef.current = startedCleanup
+    subs.started = startedCleanup
 
     try {
       await app.Chat({
@@ -960,18 +989,18 @@ export default function ChatPanel({
         return { ...t, status: 'interrupted' as const, errorMessage: describeError(err) }
       }))
     } finally {
-      eventQueuesRef.current.forEach((queue, queuedTurnId) => {
-        if (queue.flushTimer) clearTimeout(queue.flushTimer)
-        const orderedEvents = [...queue.pending.entries()].sort(([a], [b]) => a - b)
-        queue.pending.clear()
-        for (const [seq, queuedEvent] of orderedEvents) {
-          if (seq >= queue.nextSeq) {
-            queue.nextSeq = seq + 1
-            applyAgentEvent(queuedTurnId, queuedEvent)
-          }
+      // 只收尾本轮的队列。此前这里遍历并清空了整张表，
+      // 于是先结束的一轮会把仍在进行的另一轮的待排序事件一起丢掉。
+      const backendTurnId = subs.backendTurnId
+      if (backendTurnId !== null) {
+        const queue = eventQueuesRef.current.get(backendTurnId)
+        if (queue?.flushTimer) {
+          clearTimeout(queue.flushTimer)
+          queue.flushTimer = null
         }
-      })
-      eventQueuesRef.current.clear()
+        flushEventQueue(backendTurnId, true)
+        eventQueuesRef.current.delete(backendTurnId)
+      }
       setTurns(prev => prev.map(t =>
         t.id === turnId && t.status === 'streaming'
           ? { ...t, status: 'done' as const, segments: t.segments.map(seg =>
@@ -983,12 +1012,45 @@ export default function ChatPanel({
       if (activeCountRef.current === 0) {
         setIsLoading(false)
       }
-      startedUnsubRef.current?.()
-      startedUnsubRef.current = null
-      agentUnsubRef.current?.()
-      agentUnsubRef.current = null
+      turnSubsRef.current.delete(turnId)
+      subs.started?.()
+      subs.started = null
+      subs.agent?.()
+      subs.agent = null
     }
-  }, [sessionId, novelId, selectedKey, reasoningEffort, app, handleAgentEvent, applyAgentEvent, activeSessionId])
+  }, [sessionId, novelId, selectedKey, reasoningEffort, app, handleAgentEvent, flushEventQueue, activeSessionId])
+
+  const handleStop = useCallback(() => {
+    setTurns(prev => prev.map(t =>
+      t.status === 'streaming'
+        ? { ...t, status: 'stopped' as const }
+        : t
+    ))
+    if (sessionId) {
+      pendingCancelRef.current = false
+      app.CancelChat(sessionId).catch(err => {
+        console.error('Cancel chat failed', err)
+      })
+      return
+    }
+    // 会话尚未建立，取消意图先挂起，由 chat:started 拿到 session id 后补发
+    pendingCancelRef.current = true
+  }, [app, sessionId])
+
+  // 审批提交失败后的出路：工具片段只会因后端后续 ToolCall 事件改变状态，
+  // 而提交失败时那个事件永远不会到，卡片会一直钉在"等待审批"。
+  // 这里把它标成失败并停掉本轮，作者才能继续往下写。
+  const handleAbandonApproval = useCallback((toolId: string) => {
+    setTurns(prev => prev.map(turn => ({
+      ...turn,
+      segments: turn.segments.map(seg =>
+        seg.type === 'tool' && seg.toolId === toolId && seg.toolStatus === 'awaiting_approval'
+          ? { ...seg, toolStatus: 'failed' as const, error: seg.error || '已结束本轮，审批未提交' }
+          : seg
+      ),
+    })))
+    handleStop()
+  }, [handleStop])
 
   const hasNovel = novelId > 0
   const hasTurns = turns.length > 0
@@ -1151,6 +1213,11 @@ export default function ChatPanel({
                             onReject={
                               seg.toolStatus === 'awaiting_approval'
                                 ? (feedback: string) => onReject(seg.toolId, feedback)
+                                : undefined
+                            }
+                            onEndTurn={
+                              seg.toolStatus === 'awaiting_approval'
+                                ? () => handleAbandonApproval(seg.toolId)
                                 : undefined
                             }
                           />
@@ -1452,14 +1519,7 @@ export default function ChatPanel({
         slashItems={slashCommands}
         onSend={handleSend}
         onListSlash={loadSlash}
-        onStop={() => {
-          setTurns(prev => prev.map(t =>
-            t.status === 'streaming'
-              ? { ...t, status: 'stopped' as const }
-              : t
-          ))
-          app.CancelChat(sessionId)
-        }}
+        onStop={handleStop}
       />
 
       <div className="border-t mx-4" />

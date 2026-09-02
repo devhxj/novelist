@@ -132,15 +132,41 @@
   border-color: var(--tool-amber-border);
 }
 
+.approval-hint {
+  margin-top: 0.4rem;
+  padding: 0.25rem 0.45rem;
+  border-radius: var(--radius-sm);
+  background: color-mix(in oklab, var(--tool-amber-border) 8%, transparent);
+  color: color-mix(in oklab, var(--tool-amber-border) 80%, var(--foreground));
+  font-size: 0.72rem;
+  font-weight: 400;
+  line-height: 1.4;
+}
+
+.approval-error {
+  margin-top: 0.4rem;
+  padding: 0.25rem 0.45rem;
+  border-radius: var(--radius-sm);
+  background: color-mix(in oklab, var(--tool-red-border) 8%, transparent);
+  color: color-mix(in oklab, var(--tool-red-border) 80%, var(--foreground));
+  font-size: 0.72rem;
+  font-weight: 400;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+
 .approval-actions {
   display: flex;
+  flex-wrap: wrap;
   justify-content: flex-end;
   gap: 0.5rem;
   margin-top: 0.4rem;
 }
 
 .approval-reject-btn,
-.approval-accept-btn {
+.approval-accept-btn,
+.approval-end-btn,
+.approval-retry-btn {
   display: inline-flex;
   align-items: center;
   gap: 0.25rem;
@@ -167,4 +193,20 @@
 }
 .approval-accept-btn:hover {
   background: color-mix(in oklab, var(--tool-green-border) 20%, transparent);
+}
+
+.approval-end-btn {
+  color: var(--muted-foreground);
+  background: color-mix(in oklab, var(--muted-foreground) 10%, transparent);
+}
+.approval-end-btn:hover {
+  background: color-mix(in oklab, var(--muted-foreground) 20%, transparent);
+}
+
+.approval-retry-btn {
+  color: var(--tool-amber-border);
+  background: color-mix(in oklab, var(--tool-amber-border) 12%, transparent);
+}
+.approval-retry-btn:hover {
+  background: color-mix(in oklab, var(--tool-amber-border) 22%, transparent);
 }

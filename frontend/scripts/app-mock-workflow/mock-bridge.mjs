@@ -829,7 +829,9 @@ referenceCorpusTechniqueSpecimenAnalysisRuns: [],
   async function handleRequest(envelope) {
     try {
       const args = Array.isArray(envelope.payload?.args) ? envelope.payload.args : []
-      state.calls.push({ method: envelope.method, args, payload: envelope.payload })
+      // 记下本条调用的下标：并发调用期间若按"最后一条"回填 result，
+      // 慢调用的返回值会被错记到它之后发生的快调用上。
+      const callIndex = state.calls.push({ method: envelope.method, args, payload: envelope.payload }) - 1
       const fault = nextFault(envelope.method)
 
       if (fault?.delayMs) {
@@ -860,7 +862,7 @@ referenceCorpusTechniqueSpecimenAnalysisRuns: [],
       }
 
       const result = fault?.hasResult ? fault.result : await route(envelope.method, args)
-      state.calls[state.calls.length - 1].result = result
+      state.calls[callIndex].result = result
       respond({ kind: 'response', id: envelope.id, ok: true, result })
     } catch (error) {
       respond({
@@ -887,6 +889,15 @@ referenceCorpusTechniqueSpecimenAnalysisRuns: [],
     state.emittedEvents.push({ name, payload })
     respond({ kind: 'event', name, payload })
   }
+
+  // 测试侧主动派发桥事件（如 file:changed）的入口，与 clearFaultQueue 同风格挂在 state 上。
+  Object.defineProperty(state, 'emitEvent', {
+    configurable: true,
+    enumerable: false,
+    value(name, payload) {
+      emit(name, payload)
+    },
+  })
 
   function normalizeFaultQueues(faults) {
     const queues = {}
@@ -1935,7 +1946,14 @@ case 'ListReferenceCorpusTechniqueSpecimens': return listReferenceCorpusTechniqu
     const sessionId = input?.session_id || `session-app-${state.nextSessionId++}`
     const turnId = state.nextTurnId++
     const message = String(input?.message ?? '')
-    emit('chat:started', { turn_id: turnId })
+    // 早期取消验收：这个分支刻意延迟 chat:started，作者按"停止"时前端还拿不到会话 id，
+    // 取消意图必须先挂起、待 chat:started 到手后补发（U9）。
+    // 注意：只有这个分支在 chat:started 里携带 session_id。普通分支带上它会触发
+    // 前端"加载历史消息" effect 在流式中途重建 turns，把正在流式的气泡整个冲掉。
+    const delayedStart = message.includes('早期取消')
+    if (!delayedStart) {
+      emit('chat:started', { turn_id: turnId })
+    }
 
     if (message.includes('注入失败')) {
       emit(`agent:${turnId}`, agentEvent(turnId, 1, {
@@ -1960,6 +1978,40 @@ case 'ListReferenceCorpusTechniqueSpecimens': return listReferenceCorpusTechniqu
         turn_id: turnId,
         final_text: degradeText,
         corpus_usage: null,
+      }
+    }
+
+    if (delayedStart) {
+      await wait(400)
+      emit('chat:started', { session_id: sessionId, turn_id: turnId })
+      await wait(150)
+      return {
+        session_id: sessionId,
+        turn_id: turnId,
+        final_text: '',
+      }
+    }
+
+    if (message.includes('等待审批')) {
+      await wait(40)
+      emit(`agent:${turnId}`, agentEvent(turnId, 1, {
+        type: 3,
+        tool_name: 'delete_character',
+        tool_id: `tool-approval-${turnId}`,
+        phase: 'awaiting_approval',
+        display_text: '确认删除角色',
+        activity_kind: 'delete',
+        metadata: {
+          approval_type: 'delete',
+          payload: { deleted: { type: 'character', id: 7, name: '林岚' } },
+        },
+      }))
+      // 故意不再发后续 ToolCall 事件：卡片停在"等待审批"，正是审批提交失败时作者遇到的状态。
+      // approval_type 取 delete 而非 file_edit，避免顺带打开 diff 标签页干扰断言。
+      return {
+        session_id: sessionId,
+        turn_id: turnId,
+        final_text: '',
       }
     }
 

@@ -413,7 +413,7 @@ GetReferenceCorpusFeatureAnalysisRun: appMethod<NovelistAppApi['GetReferenceCorp
   GetReferenceMaterialDetail: appMethod<NovelistAppApi['GetReferenceMaterialDetail']>('GetReferenceMaterialDetail'),
   GetReferenceMaterialCoverage: appMethod<NovelistAppApi['GetReferenceMaterialCoverage']>('GetReferenceMaterialCoverage'),
   GetReferenceCorpusAssetTotals: appMethod<NovelistAppApi['GetReferenceCorpusAssetTotals']>('GetReferenceCorpusAssetTotals'),
-  RegisterReferenceMaterializationSourceFromContent: appMethod<NovelistAppApi['RegisterReferenceMaterializationSourceFromContent']>('RegisterReferenceMaterializationSourceFromContent'),
+  RegisterReferenceMaterializationSourceFromContent: ((...args) => invokeAppArgs('RegisterReferenceMaterializationSourceFromContent', args, { timeoutMs: null })) as NovelistAppApi['RegisterReferenceMaterializationSourceFromContent'],
   AdvanceChapterPlan: appMethod<NovelistAppApi['AdvanceChapterPlan']>('AdvanceChapterPlan'),
   ExportReferenceCorpusPackage: ((...args) => invokeAppArgs('ExportReferenceCorpusPackage', args, { timeoutMs: null })) as NovelistAppApi['ExportReferenceCorpusPackage'],
   ImportReferenceCorpusPackage: ((...args) => invokeAppArgs('ImportReferenceCorpusPackage', args, { timeoutMs: null })) as NovelistAppApi['ImportReferenceCorpusPackage'],
