@@ -5,6 +5,14 @@ import { describeBridgeError } from '@/lib/novelist/bridgeErrors'
 import { describeAnchorStatus } from '@/lib/novelist/referenceAnchorStates'
 import type { reference, storage } from '@/lib/novelist/types'
 import { OBSERVATION_FAMILIES, SPECIMEN_FAMILIES } from '@/lib/novelist/corpusFamilies'
+import {
+  COVERAGE_FACET_LABELS,
+  FAMILY_LABELS,
+  FEATURE_VALUE_LABELS,
+  MATERIAL_TYPE_LABELS,
+  REVIEW_STATE_LABELS,
+  taxonomyLabel,
+} from '@/lib/novelist/corpusTaxonomy'
 import ReferenceCorpusWorkspace from './ReferenceCorpusWorkspace'
 
 type Props = {
@@ -157,11 +165,13 @@ function CorpusOverview({ novelId, anchors, refreshKey, onOpenBrowse }: {
         <div className="mt-2 space-y-2" data-testid="corpus-coverage-map">
           {coverage.facets.map((facet) => (
             <div key={facet.key} className="rounded-md border border-border bg-background px-3 py-2">
-              <div className="text-xs font-medium text-foreground">{facet.key} · {facet.distinct_value_count} 类</div>
+              <div className="text-xs font-medium text-foreground">{taxonomyLabel(COVERAGE_FACET_LABELS, facet.key)} · {facet.distinct_value_count} 类</div>
               <div className="mt-1.5 flex flex-wrap gap-1.5">
                 {facet.values.slice(0, 12).map((value) => (
                   <span key={value.value} className="inline-flex items-center gap-1 rounded-full border border-border bg-muted/40 px-2 py-0.5 text-[11px] text-foreground">
-                    {value.value}
+                    {taxonomyLabel(MATERIAL_TYPE_LABELS, value.value) !== value.value
+                      ? taxonomyLabel(MATERIAL_TYPE_LABELS, value.value)
+                      : taxonomyLabel(FEATURE_VALUE_LABELS, value.value)}
                     <span className="tabular-nums text-muted-foreground">{value.material_count}</span>
                   </span>
                 ))}
@@ -456,7 +466,7 @@ function ObservationCard({ observation, isExpanded, onToggle }: {
       >
         <span className="min-w-0 flex-1">
           <span className="block truncate text-xs font-medium text-foreground">
-            {observation.feature_family} · {observation.feature_key} → {observation.value_preview ?? ''}
+            {taxonomyLabel(FAMILY_LABELS, observation.feature_family)} · {taxonomyLabel(FEATURE_VALUE_LABELS, observation.feature_key)} → {observation.value_preview ?? ''}
           </span>
           <span className="mt-0.5 block truncate text-[11px] text-muted-foreground">{observation.observation_id}</span>
         </span>
@@ -480,7 +490,7 @@ function ObservationCard({ observation, isExpanded, onToggle }: {
             <dd className="mt-0.5 whitespace-pre-wrap break-words">{observation.explanation || '（无说明）'}</dd>
           </div>
           <div className="flex gap-3">
-            <span>复核状态：{observation.review_state}</span>
+            <span>复核状态：{taxonomyLabel(REVIEW_STATE_LABELS, observation.review_state)}</span>
             <span>节点：{observation.node_id}</span>
           </div>
         </dl>
@@ -531,7 +541,7 @@ function SpecimenCard({ specimen, isExpanded, onToggle }: {
       >
         <span className="min-w-0 flex-1">
           <span className="block truncate text-xs font-medium text-foreground">
-            {specimen.technique_family} · {specimen.technique_abstract}
+            {taxonomyLabel(FAMILY_LABELS, specimen.technique_family)} · {specimen.technique_abstract}
           </span>
           <span className="mt-0.5 block truncate text-[11px] text-muted-foreground">{specimen.specimen_id}</span>
         </span>
@@ -557,7 +567,7 @@ function SpecimenCard({ specimen, isExpanded, onToggle }: {
             <dd className="mt-0.5 whitespace-pre-wrap break-words">{specimen.trigger_context || '（无说明）'}</dd>
           </div>
           <div className="flex gap-3">
-            <span>复核状态：{specimen.review_state}</span>
+            <span>复核状态：{taxonomyLabel(REVIEW_STATE_LABELS, specimen.review_state)}</span>
             <span>节点：{specimen.source_node_id}</span>
           </div>
         </dl>

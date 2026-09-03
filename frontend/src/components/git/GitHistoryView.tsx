@@ -503,7 +503,7 @@ function FileButton({
         )}
         <span className="mt-1 flex flex-wrap gap-1 text-[11px] opacity-90">
           <ChangeBadge changeType={file.change_type} selected={selected} />
-          {file.binary ? <span>binary</span> : <span>+{formatInteger(file.additions, { locale: LOCALE })} -{formatInteger(file.deletions, { locale: LOCALE })}</span>}
+          {file.binary ? <span>二进制</span> : <span>+{formatInteger(file.additions, { locale: LOCALE })} -{formatInteger(file.deletions, { locale: LOCALE })}</span>}
         </span>
       </span>
     </button>
@@ -555,7 +555,7 @@ function DiffPanel({
         <div className="min-w-0">
           <div className="flex items-center gap-2">
             <FileCode2 className="h-4 w-4 text-primary" />
-            <h2 className="truncate text-sm font-semibold text-foreground">{file?.path ?? 'Diff'}</h2>
+            <h2 className="truncate text-sm font-semibold text-foreground">{file?.path ?? '文件差异'}</h2>
           </div>
           <p className="mt-1 truncate text-xs text-muted-foreground">
             {commit ? `${commit.short_commit_id} · ${commit.message}` : '未选择文件'}
@@ -594,7 +594,7 @@ function DiffPanel({
           <div className="mb-3 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
             <ChangeBadge changeType={diff.change_type} />
             {diff.old_path && <span className="rounded border border-border bg-background px-2 py-1">{diff.old_path} {'->'} {diff.path}</span>}
-            {diff.binary && <span className="rounded border border-border bg-background px-2 py-1">binary</span>}
+            {diff.binary && <span className="rounded border border-border bg-background px-2 py-1">二进制</span>}
             {diff.truncated && <span className="rounded border border-danger-border bg-danger-bg px-2 py-1 text-foreground">内容已截断</span>}
           </div>
           {diff.binary ? (
@@ -606,7 +606,7 @@ function DiffPanel({
               <ContentBlock title="原始内容" value={diff.original_content} emptyText="无原始内容" />
               <ContentBlock title="修改后内容" value={diff.modified_content} emptyText="无修改后内容" />
               <div className="2xl:col-span-2">
-                <ContentBlock title="Patch" value={diff.diff_text} emptyText="无 patch 内容" />
+                <ContentBlock title="变更补丁" value={diff.diff_text} emptyText="无补丁内容" />
               </div>
             </div>
           )}

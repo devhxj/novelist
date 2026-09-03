@@ -519,7 +519,7 @@ export default function GeneralConfigTab({ onBusyChange }: { onBusyChange?: (bus
             启用启动后自动检查
           </label>
           <div className="space-y-1.5">
-            <label htmlFor="update-check-endpoint" className="text-[11px] text-muted-foreground">Release endpoint</label>
+            <label htmlFor="update-check-endpoint" className="text-[11px] text-muted-foreground">更新检查地址（HTTPS）</label>
             <input
               id="update-check-endpoint"
               value={updateEndpoint}

@@ -214,32 +214,28 @@ export default function BookshelfView({
                 className={`group relative flex flex-col rounded-lg border bg-card hover:shadow-md transition-shadow cursor-pointer select-none
                   ${n.id === activeNovelId ? 'ring-2 ring-primary' : ''}`}
               >
-                {/* 点击卡片主体切换书：键盘作者用 Enter/Space 同样能进入（N2） */}
-                <div
-                  className="flex flex-col flex-1 p-3"
-                  role="button"
-                  tabIndex={0}
-                  aria-label={`打开作品 ${n.title}`}
-                  onClick={() => onSelectNovel(n)}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter' || e.key === ' ') {
-                      e.preventDefault()
-                      onSelectNovel(n)
-                    }
-                  }}
-                >
-                  <div className="w-full aspect-[3/4] mb-3 rounded-sm overflow-hidden relative">
+                {/* A1：打开动作与封面区分离——封面按钮不再嵌套在打开按钮里，
+                    读屏与键盘的焦点归属唯一。封面自带上传按钮（A2 键盘聚焦可见）。 */}
+                <div className="relative">
+                  <div className="w-full aspect-[3/4] rounded-sm overflow-hidden">
                     <BookCover novelId={n.id} refreshKey={coverKeys[n.id]} />
-                    {/* 悬浮封面上传按钮 */}
-                    <button
-                      onClick={(e) => handleCoverClick(n.id, e)}
-                      aria-label={`更换封面 ${n.title}`}
-                      className="absolute inset-0 flex items-center justify-center bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity"
-                      title="更换封面"
-                    >
-                      <Camera className="w-5 h-5 text-white" />
-                    </button>
                   </div>
+                  <button
+                    onClick={(e) => handleCoverClick(n.id, e)}
+                    aria-label={`更换封面 ${n.title}`}
+                    className="absolute inset-0 flex items-center justify-center bg-black/40 opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 transition-opacity"
+                    title="更换封面"
+                  >
+                    <Camera className="w-5 h-5 text-white" />
+                  </button>
+                </div>
+
+                {/* 打开作品：标题+简介区的独立按钮 */}
+                <button
+                  type="button"
+                  className="flex flex-col flex-1 p-3 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring rounded-lg"
+                  onClick={() => onSelectNovel(n)}
+                >
                   <h3 className="text-sm font-medium truncate mb-1">{n.title}</h3>
                   {n.genre ? (
                     <span className="inline-block self-start text-[11px] px-1.5 py-0.5 rounded bg-primary/10 text-primary mb-1.5">
@@ -255,10 +251,10 @@ export default function BookshelfView({
                       {n.description}
                     </p>
                   )}
-                </div>
+                </button>
 
-                {/* 悬浮操作按钮 */}
-                <div className="absolute top-2 right-2 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                {/* 悬浮操作按钮（A2：键盘聚焦同样显形） */}
+                <div className="absolute top-2 right-2 flex gap-1 opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 transition-opacity">
                   <button
                     onClick={(e) => { e.stopPropagation(); onExportNovel(n) }}
                     aria-label={`导出作品 ${n.title}`}

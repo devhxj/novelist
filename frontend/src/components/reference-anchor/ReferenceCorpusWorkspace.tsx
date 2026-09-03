@@ -16,6 +16,7 @@ import { useApp } from '@/hooks/useApp'
 import SettingsDialog from '@/components/settings/SettingsDialog'
 import { BridgeError } from '@/lib/novelist/bridge'
 import { describeBridgeError } from '@/lib/novelist/bridgeErrors'
+import { FEATURE_VALUE_LABELS, RUN_STATUS_LABELS, taxonomyLabel } from '@/lib/novelist/corpusTaxonomy'
 import ReferenceErrorStrip from './ReferenceErrorStrip'
 import type { reference } from '@/lib/novelist/types'
 
@@ -668,7 +669,11 @@ export default function ReferenceCorpusWorkspace({
             <div className="mt-3 border border-border bg-muted/20">
               <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border px-3 py-2">
                 <div className="min-w-0">
-                  <p className="truncate text-xs font-medium text-foreground">{activeProfile.delimiter_template || '已冻结章节配置'}</p>
+                  <p className="truncate text-xs font-medium text-foreground">
+                    {activeProfile.delimiter_template
+                      ? <span>分隔模板：<code className="rounded bg-muted px-1 py-0.5 font-mono">{activeProfile.delimiter_template}</code><span className="ml-1 font-normal text-muted-foreground">（{'{number}'} 表示章号，{'{title}'} 表示标题）</span></span>
+                      : '已冻结章节配置'}
+                  </p>
                   <p className="mt-0.5 text-[11px] text-muted-foreground">{activeProfile.split_mode === 'auto' ? '模型识别' : '手动模板'}{activeProfile.confidence != null ? ` · 置信度 ${Math.round(activeProfile.confidence * 100)}%` : ''}</p>
                 </div>
                 {profile?.status !== 'confirmed' && !run && (
@@ -706,7 +711,7 @@ export default function ReferenceCorpusWorkspace({
                 <h2 id="run-heading" className="text-sm font-semibold text-foreground">2. 材料化进度</h2>
                 <p className="mt-1 text-xs leading-5 text-muted-foreground">
                   {run
-                    ? `状态：${run.status.replaceAll('_', ' ')} · ${formatCount(run.processed_chapters)} / ${formatCount(run.total_chapters)} 章节`
+                    ? `状态：${taxonomyLabel(RUN_STATUS_LABELS, run.status)} · ${formatCount(run.processed_chapters)} / ${formatCount(run.total_chapters)} 章节`
                     : '确认章节边界后，按固定批次依次处理；批内可以并行，批次之间保持顺序。'}
                 </p>
               </div>
@@ -922,9 +927,9 @@ function ReviewCandidateCard({ candidate, busy, onReview }: {
         <div className="min-w-0 flex-1">
           <p className="text-xs leading-5 text-foreground">{candidate.text_preview}</p>
           <div className="mt-2 flex flex-wrap gap-1">
-            {candidateTags(candidate.tags).map((tag) => <span key={tag} className="border border-border bg-muted/35 px-1.5 py-0.5 text-[11px] text-muted-foreground">{tag.replaceAll('_', ' ')}</span>)}
+            {candidateTags(candidate.tags).map((tag) => <span key={tag} className="border border-border bg-muted/35 px-1.5 py-0.5 text-[11px] text-muted-foreground">{taxonomyLabel(FEATURE_VALUE_LABELS, tag) !== tag ? taxonomyLabel(FEATURE_VALUE_LABELS, tag) : tag.replaceAll('_', ' ')}</span>)}
           </div>
-          <p className="mt-2 text-[11px] text-muted-foreground">第 {candidate.chapter_index} 章 · {candidate.candidate_type.replaceAll('_', ' ')} · {candidate.reason_codes.join('；') || '需要人工判断'}</p>
+          <p className="mt-2 text-[11px] text-muted-foreground">第 {candidate.chapter_index} 章 · {candidate.candidate_type === 'observation' ? '观察' : candidate.candidate_type === 'specimen' ? '标本' : candidate.candidate_type.replaceAll('_', ' ')} · {candidate.reason_codes.map((code) => taxonomyLabel(FEATURE_VALUE_LABELS, code) !== code ? taxonomyLabel(FEATURE_VALUE_LABELS, code) : code.replaceAll('_', ' ')).join('；') || '需要人工判断'}</p>
           {candidate.source_spans.length > 0 && (
             <>
               <button

@@ -72,7 +72,7 @@ export default function SidebarReaderList({ novelId }: Props) {
               </span>
               <div className="flex-1 min-w-0">
                 <span className="text-xs truncate block text-foreground">{e.content.length > 30 ? e.content.slice(0, 30) + '…' : e.content}</span>
-                <span className="text-[10px] text-muted-foreground">{e.type} · 第{e.planted_chapter}章</span>
+                <span className="text-[10px] text-muted-foreground">{e.type === 'known' ? '已知' : e.type === 'suspense' ? '悬念' : e.type === 'misconception' ? '误解' : e.type} · 第{e.planted_chapter}章</span>
               </div>
               <span className={`shrink-0 h-1.5 w-1.5 rounded-full ${typeDot(e.type)}`} />
             </div>

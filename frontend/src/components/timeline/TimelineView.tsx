@@ -539,7 +539,7 @@ export default function TimelineView({ novelId, focusEntryId, onOpenInEditor }: 
               </div>
               <div className="flex items-center gap-2">
                 <span className="text-[11px] text-muted-foreground">
-                  第 {windowFrom}-{windowTo} 章 · 共 {minChapter}-{maxChapter} 章
+                  视图 {windowFrom}-{windowTo} 章 · 条目覆盖{minChapter === maxChapter ? `第 ${minChapter} 章` : `第 ${minChapter}-${maxChapter} 章`}
                 </span>
                 <button onClick={load} className="text-xs text-muted-foreground hover:text-muted-foreground transition-colors">刷新</button>
                 <button
@@ -677,6 +677,7 @@ export default function TimelineView({ novelId, focusEntryId, onOpenInEditor }: 
                                     onClick={() => handleQuickStatus(entry, 'resolved')}
                                     className="p-1 rounded text-muted-foreground hover:text-tag-green-foreground hover:bg-tag-green/20 transition-colors"
                                     title="标记已回收"
+                                    aria-label="标记已回收"
                                   >
                                     <span className="text-[11px]">✓</span>
                                   </button>

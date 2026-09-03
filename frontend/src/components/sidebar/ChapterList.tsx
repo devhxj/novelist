@@ -38,7 +38,20 @@ export default function ChapterList({ novelId, target, onSelectChapter, onSelect
   const [chapters, setChapters] = useState<chapter.Chapter[]>([])
   const [chapterTitle, setChapterTitle] = useState('')
   const [showCreateChapter, setShowCreateChapter] = useState(false)
-  const [expandedBlocks, setExpandedBlocks] = useState<Set<number>>(new Set())
+  // A3：首个分块默认展开（写作主入口不应折叠），展开状态持久化到 localStorage。
+  const EXPANDED_BLOCKS_KEY = 'novelist.chapterBlocks.expanded'
+  const [expandedBlocks, setExpandedBlocks] = useState<Set<number>>(() => {
+    try {
+      const raw = localStorage.getItem(EXPANDED_BLOCKS_KEY)
+      if (raw) return new Set(JSON.parse(raw) as number[])
+    } catch { /* 忽略损坏的持久化数据 */ }
+    return new Set([0])
+  })
+  useEffect(() => {
+    try {
+      localStorage.setItem(EXPANDED_BLOCKS_KEY, JSON.stringify([...expandedBlocks]))
+    } catch { /* 存储不可用时静默 */ }
+  }, [expandedBlocks])
   const [editingId, setEditingId] = useState<number | null>(null)
   const [editTitle, setEditTitle] = useState('')
   const [error, setError] = useState<VisibleError | null>(null)
@@ -341,7 +354,7 @@ export default function ChapterList({ novelId, target, onSelectChapter, onSelect
                               <button
                                 onClick={e => { e.stopPropagation(); startEdit(ch) }}
                                 aria-label={`编辑章节 ${ch.title}`}
-                                className="shrink-0 w-6 h-6 flex items-center justify-center rounded opacity-0 group-hover:opacity-100 hover:bg-muted text-muted-foreground hover:text-foreground transition-all"
+                                className="shrink-0 w-6 h-6 flex items-center justify-center rounded opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 hover:bg-muted text-muted-foreground hover:text-foreground transition-all"
                               >
                                 <Pencil className="w-3 h-3" />
                               </button>
@@ -349,7 +362,7 @@ export default function ChapterList({ novelId, target, onSelectChapter, onSelect
                                 onClick={e => { e.stopPropagation(); void handleDeleteChapter(ch) }}
                                 aria-label={`删除章节 ${ch.title}`}
                                 data-testid={`delete-chapter-${ch.id}`}
-                                className="shrink-0 w-6 h-6 flex items-center justify-center rounded opacity-0 group-hover:opacity-100 hover:bg-destructive/10 text-muted-foreground hover:text-destructive transition-all mr-1"
+                                className="shrink-0 w-6 h-6 flex items-center justify-center rounded opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 hover:bg-destructive/10 text-muted-foreground hover:text-destructive transition-all mr-1"
                               >
                                 <Trash2 className="w-3 h-3" />
                               </button>

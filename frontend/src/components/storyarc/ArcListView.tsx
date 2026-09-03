@@ -610,7 +610,7 @@ export default function ArcListView({ novelId, focusArcId }: Props) {
             </div>
             <div className="flex items-center gap-2">
               <span className="text-[11px] text-muted-foreground">
-                第 {windowFrom}-{windowTo} 章 · 共 {minChapter}-{maxChapter} 章
+                视图 {windowFrom}-{windowTo} 章 · 条目覆盖{minChapter === maxChapter ? `第 ${minChapter} 章` : `第 ${minChapter}-${maxChapter} 章`}
               </span>
               <button onClick={load} className="text-xs text-muted-foreground hover:text-muted-foreground transition-colors">刷新</button>
             </div>
@@ -796,7 +796,7 @@ export default function ArcListView({ novelId, focusArcId }: Props) {
                             {/* Hover actions */}
                             <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
                               {node.status === 'pending' && (
-                                <button onClick={() => handleQuickNodeStatus(node, 'completed')} className="p-1 rounded text-muted-foreground hover:text-tag-green-foreground hover:bg-tag-green/20 transition-colors" title="标记完成">
+                                <button onClick={() => handleQuickNodeStatus(node, 'completed')} className="p-1 rounded text-muted-foreground hover:text-tag-green-foreground hover:bg-tag-green/20 transition-colors" title="标记完成" aria-label="标记完成">
                                   <span className="text-[10px]">✓</span>
                                 </button>
                               )}
