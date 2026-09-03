@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react'
 import { BellRing, Folder, GitCommitHorizontal, RefreshCw } from 'lucide-react'
 import ErrorCallout from '@/components/shared/ErrorCallout'
 import { useApp, type novel } from '@/hooks/useApp'
+import { EventsOn } from '@/lib/novelist/events'
 import { buildCopyableDiagnostic, diagnosticMessage } from '@/lib/diagnostics'
 import type { diagnostics, update } from '@/lib/novelist/types'
 import UpdateDialog from '@/components/update/UpdateDialog'
@@ -37,6 +38,8 @@ export default function GeneralConfigTab({ onBusyChange }: { onBusyChange?: (bus
   const [rebuildFeedback, setRebuildFeedback] = useState<InlineSettingsFeedback | null>(null)
   const [migratingInputVisible, setMigratingInputVisible] = useState(false)
   const [migrating, setMigrating] = useState(false)
+  // 残余 2：复制进行中的进度（后端 datadir:migration:progress 事件驱动）。
+  const [migrationProgress, setMigrationProgress] = useState<{ copied_files: number; total_files: number } | null>(null)
   const [newDataDir, setNewDataDir] = useState('')
   const [migrateFeedback, setMigrateFeedback] = useState<InlineSettingsFeedback | null>(null)
   const [updateEnabled, setUpdateEnabled] = useState(false)
@@ -85,12 +88,22 @@ export default function GeneralConfigTab({ onBusyChange }: { onBusyChange?: (bus
     onBusyChange?.(migrating)
   }, [migrating, onBusyChange])
 
+  // 常驻订阅：进度事件可能在 migrating 状态渲染完成前就已发出（invoke 立即开始），
+  // 迁移期间才订阅会漏掉开头的事件；进度值只在迁移 UI 中展示。
+  useEffect(() => {
+    const unsub = EventsOn('datadir:migration:progress', (data: { copied_files?: number; total_files?: number }) => {
+      setMigrationProgress({ copied_files: data?.copied_files ?? 0, total_files: data?.total_files ?? 0 })
+    })
+    return () => unsub()
+  }, [])
+
   async function handleMigrateDataDir() {
     const target = newDataDir.trim()
     if (!target || target === dataDir) return
     // 最后确认：迁移会切换整个工作区数据源，作者必须明确知道即将发生什么（F10）。
     if (!window.confirm(`确定要把数据目录迁移到：\n${target}\n\n复制完成前不会改动原目录；迁移期间请勿关闭应用。`)) return
     setMigrating(true)
+    setMigrationProgress(null)
     setMigrateFeedback(null)
     try {
       const result = await app.UpdateDataDir(target)
@@ -111,6 +124,9 @@ export default function GeneralConfigTab({ onBusyChange }: { onBusyChange?: (bus
           `应用已切换到新目录。原目录未做任何改动，确认无误后可自行备份清理。` +
           (result?.manifest_path ? `迁移清单：${result.manifest_path}` : ''),
       })
+      // 残余 1：迁移后仍打开的旧 UI（作品列表、会话）指向已切换的数据源——
+      // 稍候片刻让作者看到结果，再整页刷新以新目录重新初始化。
+      window.setTimeout(() => { window.location.reload() }, 1200)
     } catch (err) {
       console.error('Data dir migration failed:', err)
       setMigrateFeedback({
@@ -126,6 +142,7 @@ export default function GeneralConfigTab({ onBusyChange }: { onBusyChange?: (bus
       })
     } finally {
       setMigrating(false)
+      setMigrationProgress(null)
     }
   }
 
@@ -394,6 +411,11 @@ export default function GeneralConfigTab({ onBusyChange }: { onBusyChange?: (bus
             <p className="text-[11px] leading-4 text-muted-foreground">
               迁移会把当前数据目录完整复制到新位置（copy-first：复制完成并校验前不动原目录）。
               大目录可能耗时较长，迁移期间请勿关闭应用。
+              {migrationProgress && (
+                <span className="ml-1 font-medium text-foreground" data-testid="migration-progress">
+                  已复制 {migrationProgress.copied_files} / {migrationProgress.total_files} 个文件。
+                </span>
+              )}
             </p>
             <div className="flex items-center gap-2">
               <input

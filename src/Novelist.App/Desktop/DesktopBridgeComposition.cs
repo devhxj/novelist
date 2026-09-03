@@ -137,7 +137,8 @@ referenceCorpusService);
  new FileSystemAppInitializationService(
  options,
  importRecovery: novelImportRecoveryService,
- referenceAnchorRecovery: referenceAnchorService),
+ referenceAnchorRecovery: referenceAnchorService,
+ progressEventSink: eventSink),
  referenceCorpusAnalysisWorker,
  referenceCorpusTechniqueVectorMaintenanceLoop,
  referenceMaterializationWorker);

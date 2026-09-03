@@ -1076,11 +1076,13 @@ export async function verifyDataDirMigrationWorkflow(browser, url, consoleErrors
   await expectVisible(page.getByText('迁移清单'), 'migration success feedback includes the manifest path')
   await expectInputValue(page.getByLabel('当前数据目录'), 'D:\\NovelistMigrated')
 
+  // 桥调用参数要在 reload 前取证——reload 会重置 mock 状态（残余 1 的整页刷新）。
   const migrateCall = await page.evaluate(() =>
     window.__appMockState.calls.filter((call) => call.method === 'UpdateDataDir').at(-1) ?? null)
   assert.equal(migrateCall?.args?.[0], 'D:\\NovelistMigrated', 'the migration must pass the new directory to the backend')
 
-  await page.locator('.fixed').getByRole('button', { name: '✕' }).click()
+  await page.waitForTimeout(1600)
+  await expectVisible(page.getByText('全局回归小说'), 'workspace re-initialized after post-migration reload')
   await page.close()
 
   // R1：迁移进行中锁定整个设置对话框——tab 切换会卸载表单、重置 busy，
@@ -1088,7 +1090,14 @@ export async function verifyDataDirMigrationWorkflow(browser, url, consoleErrors
   const busyPage = await newAppPage(browser, consoleErrors, pageErrors, {
     initialized: true,
     confirmResult: true,
-    faults: { UpdateDataDir: { mode: 'timeout' } },
+    faults: {
+      UpdateDataDir: {
+        // delayMs 给前端订阅留出渲染窗口，再发确定性进度事件（残余 2 断言用）。
+        mode: 'timeout',
+        delayMs: 400,
+        progressEvent: { name: 'datadir:migration:progress', payload: { copied_files: 12, total_files: 30 } },
+      },
+    },
   }, undefined, 'data-dir-migration-busy')
   await busyPage.goto(url, { waitUntil: 'domcontentloaded' })
   await expectVisible(busyPage.getByText('全局回归小说'), 'workspace title before busy migration')
@@ -1098,6 +1107,7 @@ export async function verifyDataDirMigrationWorkflow(browser, url, consoleErrors
   await busyForm.getByLabel('新的数据目录').fill('D:\\NovelistSlowMigration')
   await busyForm.getByRole('button', { name: '开始迁移' }).click()
   await expectVisible(busyForm.getByText('迁移中…'), 'migration marked as in-flight')
+  await expectVisible(busyPage.getByTestId('migration-progress').getByText('已复制 12 / 30 个文件'), 'copy progress surfaces from the backend event (residual 2)')
   await assertDisabled(busyPage.getByRole('button', { name: '模型配置' }), 'tab nav locked while migrating (R1)')
   // ✕ 带 aria-disabled（读屏语义），Playwright 会拒绝普通点击；force 模拟真实用户
   // 仍然点到按钮——guardedClose 必须拦下并给出提示。

@@ -326,6 +326,44 @@ public sealed class AppInitializationServiceTests : IDisposable
         Assert.Equal("completed", ReadManifestStatus(result.ManifestPath));
     }
 
+    [Fact]
+    public async Task RelocationReportsProgressWithMonotonicCountsAndFinalTotal()
+    {
+        var source = Path.Combine(_root, "progress-source");
+        var target = Path.Combine(_root, "progress-target");
+        Directory.CreateDirectory(Path.Combine(source, "novels", "1", "chapters"));
+        for (var i = 1; i <= 5; i++)
+        {
+            await File.WriteAllTextAsync(Path.Combine(source, "novels", "1", "chapters", $"{i:000}.md"), $"第{i}章正文 {i}");
+        }
+
+        var reports = new List<DataDirectoryRelocationProgress>();
+        // Progress<T> 会把回调投递到同步上下文（异步时序），这里用同步实现保证确定性。
+        var progress = new SynchronousProgress<DataDirectoryRelocationProgress>(reports.Add);
+        var result = await new DataDirectoryRelocationService().RelocateAsync(
+            source,
+            target,
+            CancellationToken.None,
+            progress);
+
+        // 残余 2：进度上报单调递增，末次报告为最终复制数（= 全部文件）。
+        Assert.Equal(5, result.CopiedFiles);
+        Assert.NotEmpty(reports);
+        Assert.True(reports.SequenceEqual(reports.OrderBy(report => report.CopiedFiles).ToArray()), "progress counts must be monotonic");
+        var last = reports[^1];
+        Assert.Equal(result.CopiedFiles, last.CopiedFiles);
+        Assert.Equal(5, last.TotalFiles);
+    }
+
+    private sealed class SynchronousProgress<T> : IProgress<T>
+    {
+        private readonly Action<T> _callback;
+
+        public SynchronousProgress(Action<T> callback) => _callback = callback;
+
+        public void Report(T value) => _callback(value);
+    }
+
     private static string ReadManifestStatus(string manifestPath)
     {
         using var document = JsonDocument.Parse(File.ReadAllBytes(manifestPath));

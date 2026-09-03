@@ -87,6 +87,37 @@ public sealed class PlanningPlanMirrorTests : IDisposable
         Assert.Equal(string.Empty, fine);
     }
 
+    [Fact]
+    public async Task GetChapterPlansLazilyRecreatesMissingMirrorsForExistingNovels()
+    {
+        var options = CreateOptions();
+        Directory.CreateDirectory(options.DefaultDataDirectory);
+        var settings = new FileSystemAppSettingsService(options);
+        var initialization = new FileSystemAppInitializationService(options);
+        await initialization.InitializeAsync(options.DefaultDataDirectory, CancellationToken.None);
+        var novels = new FileSystemNovelService(options, settings);
+        var novel = await novels.CreateNovelAsync(new CreateNovelPayload("存量镜像", "", ""), CancellationToken.None);
+        var planning = new FileSystemPlanningService(options, novels);
+        await planning.UpdateChapterPlanAsync(novel.Id, new UpdateChapterPlanPayload("next", "- 存量细纲 beat"), CancellationToken.None);
+        var plansDirectory = Path.Combine(options.DefaultDataDirectory, "novels", novel.Id.ToString(), "plans");
+
+        // 模拟存量小说：镜像从未生成过（第三轮残余事项）。
+        File.Delete(Path.Combine(plansDirectory, "细纲.md"));
+        Assert.False(File.Exists(Path.Combine(plansDirectory, "细纲.md")));
+
+        // 读取计划即补写缺失镜像（空槽位不需要镜像文件）。
+        var plans = await planning.GetChapterPlansAsync(novel.Id, CancellationToken.None);
+
+        Assert.Contains("- 存量细纲 beat", plans.Single(plan => plan.Scope == "next").Content, StringComparison.Ordinal);
+        Assert.True(File.Exists(Path.Combine(plansDirectory, "细纲.md")));
+        Assert.Contains("- 存量细纲 beat", await File.ReadAllTextAsync(Path.Combine(plansDirectory, "细纲.md")), StringComparison.Ordinal);
+
+        // 幂等：镜像齐全时读取不再改写文件。
+        var beforeWrite = File.GetLastWriteTimeUtc(Path.Combine(plansDirectory, "细纲.md"));
+        await planning.GetChapterPlansAsync(novel.Id, CancellationToken.None);
+        Assert.Equal(beforeWrite, File.GetLastWriteTimeUtc(Path.Combine(plansDirectory, "细纲.md")));
+    }
+
     public void Dispose()
     {
         try

@@ -5,6 +5,9 @@ import './ToolCallCard.css'
 
 // 审批提交走本地桥，超过这个时长基本就是卡住了：给作者一条"结束本轮"的出路，别让卡片干等。
 const APPROVAL_SLOW_MS = 6000
+// 残余 4（前端可做部分）：后端不做审批自动击杀（误杀合法长审批的风险大于收益），
+// 但等待远超正常范围时把提示升级为明确的行动建议。
+const APPROVAL_STUCK_MS = 60_000
 
 interface Props {
   toolName: string
@@ -108,16 +111,34 @@ export default memo(function ToolCallCard({ displayText, status, activityKind, e
   const [feedback, setFeedback] = useState('')
   const [submitting, setSubmitting] = useState<'approve' | 'reject' | null>(null)
   const [slow, setSlow] = useState(false)
+  const [stuck, setStuck] = useState(false)
   const [submitError, setSubmitError] = useState<{ decision: 'approve' | 'reject'; message: string } | null>(null)
 
   // O17：慢路径计时覆盖整个"等待审批"时长（含提交成功后后端已死、
   // 后续工具事件永远不来的场景），不只盯提交瞬间——否则作者会被钉死在
   // "等待审批"常态里，唯一出路是故意制造一次提交失败。
+  // 残余 4：60 秒无进展升级为"后端可能已失效"的行动建议（后端不做自动击杀，
+  // 避免误杀合法长审批；离开等待态时两条计时一并复位）。
+  // 计时状态以"等待期"为单位复位：status/submitting 组成的键变化即新等待期，
+  // 渲染期同步重置（React 官方推荐的 adjust-state-on-prop-change 模式，effect 只挂定时器）。
+  const timerKey = `${status}:${submitting ?? ''}`
+  const [prevTimerKey, setPrevTimerKey] = useState(timerKey)
+  if (prevTimerKey !== timerKey) {
+    setPrevTimerKey(timerKey)
+    setSlow(false)
+    setStuck(false)
+  }
+
   useEffect(() => {
     if (status !== 'awaiting_approval') return
-    const timer = window.setTimeout(() => setSlow(true), APPROVAL_SLOW_MS)
-    return () => window.clearTimeout(timer)
-  }, [status, submitting])
+    const slowTimer = window.setTimeout(() => setSlow(true), APPROVAL_SLOW_MS)
+    const stuckTimer = window.setTimeout(() => setStuck(true), APPROVAL_STUCK_MS)
+    return () => {
+      window.clearTimeout(slowTimer)
+      window.clearTimeout(stuckTimer)
+    }
+    // timerKey 已编码 status 与 submitting；status 仅作守卫读取。
+  }, [status, timerKey])
 
   // 审批中状态
   if (status === 'awaiting_approval' && onApprove && onReject) {
@@ -127,7 +148,6 @@ export default memo(function ToolCallCard({ displayText, status, activityKind, e
 
     const submit = async (decision: 'approve' | 'reject') => {
       setSubmitting(decision)
-      setSlow(false)
       setSubmitError(null)
       try {
         await (decision === 'approve' ? onApprove(feedback) : onReject(feedback))
@@ -140,7 +160,6 @@ export default memo(function ToolCallCard({ displayText, status, activityKind, e
         })
       } finally {
         setSubmitting(null)
-        setSlow(false)
       }
     }
 
@@ -169,13 +188,17 @@ export default memo(function ToolCallCard({ displayText, status, activityKind, e
             <div className="approval-error" role="alert">
               {submitError.message}
             </div>
+          ) : stuck ? (
+            <div className="approval-hint" role="alert">
+              审批等待已超过 60 秒仍无进展，后端本轮可能已失效，建议结束本轮后重试。
+            </div>
           ) : slow ? (
             <div className="approval-hint" role="status">
               审批等待已超过 6 秒没有进展，可以继续等，也可以结束本轮。
             </div>
           ) : null}
           <div className="approval-actions">
-            {(submitError || slow) && onEndTurn && (
+            {(submitError || slow || stuck) && onEndTurn && (
               <button
                 onClick={onEndTurn}
                 className="approval-end-btn cursor-pointer select-none"

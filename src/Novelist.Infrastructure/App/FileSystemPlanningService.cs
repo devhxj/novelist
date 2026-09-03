@@ -48,7 +48,7 @@ public sealed class FileSystemPlanningService : IPlanningService
         try
         {
             var store = await LoadOrCreateAsync(cancellationToken);
-            return PlanScopes
+            var plans = PlanScopes
                 .Select(scope =>
                 {
                     var stored = store.ChapterPlans.SingleOrDefault(plan =>
@@ -57,10 +57,50 @@ public sealed class FileSystemPlanningService : IPlanningService
                     return stored ?? new ChapterPlanPayload(novelId, scope, string.Empty);
                 })
                 .ToArray();
+
+            // 懒迁移（轮 3 遗留）：存量小说的镜像文件在下一次保存前不会出现——
+            // 读取时补写缺失的镜像，镜像失败不得影响读取（派生数据，下次保存自愈）。
+            try
+            {
+                await EnsurePlanMirrorsExistAsync(novelId, store, cancellationToken);
+            }
+            catch
+            {
+                // 镜像缺失可容忍：编辑器打开细纲镜像时得到旧内容/不存在，保存后恢复一致。
+            }
+
+            return plans;
         }
         finally
         {
             _mutex.Release();
+        }
+    }
+
+    private async ValueTask EnsurePlanMirrorsExistAsync(
+        long novelId,
+        PlanningStoreDocument store,
+        CancellationToken cancellationToken)
+    {
+        var dataDirectory = await AppDataDirectoryResolver.ResolveAsync(_options, cancellationToken);
+        var plansDirectory = Path.Combine(dataDirectory, "novels", novelId.ToString(System.Globalization.CultureInfo.InvariantCulture), "plans");
+        var hasMissingMirror = PlanScopeFileNames.Any(entry =>
+        {
+            var stored = store.ChapterPlans.SingleOrDefault(plan =>
+                plan.NovelId == novelId &&
+                string.Equals(plan.Scope, entry.Scope, StringComparison.Ordinal));
+            // 空槽位本就镜像为空文件，无需补写；只补"有内容但镜像缺失"的槽位。
+            if (stored is null || string.IsNullOrWhiteSpace(stored.Content))
+            {
+                return false;
+            }
+
+            return !File.Exists(Path.Combine(plansDirectory, entry.FileName));
+        });
+
+        if (hasMissingMirror)
+        {
+            await WritePlanMirrorsAsync(novelId, store, cancellationToken);
         }
     }
 

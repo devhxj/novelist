@@ -2,6 +2,7 @@ using System.Text.Json;
 using System.Text.Json.Serialization;
 using Novelist.Contracts.App;
 using Novelist.Core.App;
+using Novelist.Core.Bridge;
 
 namespace Novelist.Infrastructure.App;
 
@@ -21,6 +22,7 @@ public sealed class FileSystemAppInitializationService : IAppInitializationServi
     private readonly INovelImportRecoveryService _importRecovery;
     private readonly IReferenceAnchorProcessingRecoveryService? _referenceAnchorRecovery;
     private readonly IDataDirectoryRelocationService _relocation;
+    private readonly IBridgeEventSink? _progressEventSink;
     private readonly SemaphoreSlim _startupRecoveryMutex = new(1, 1);
     private NovelImportReconciliationResultPayload? _lastImportRecoveryResult;
     private bool _referenceAnchorRecoveryCompleted;
@@ -30,7 +32,8 @@ public sealed class FileSystemAppInitializationService : IAppInitializationServi
         ILegacyDataMigrationService? legacyMigration = null,
         INovelImportRecoveryService? importRecovery = null,
         IReferenceAnchorProcessingRecoveryService? referenceAnchorRecovery = null,
-        IDataDirectoryRelocationService? relocation = null)
+        IDataDirectoryRelocationService? relocation = null,
+        IBridgeEventSink? progressEventSink = null)
     {
         _options = options ?? new AppInitializationOptions();
         _legacyMigration = legacyMigration ??
@@ -38,6 +41,7 @@ public sealed class FileSystemAppInitializationService : IAppInitializationServi
         _importRecovery = importRecovery ?? new FileSystemNovelImportRecoveryService(_options);
         _referenceAnchorRecovery = referenceAnchorRecovery;
         _relocation = relocation ?? new DataDirectoryRelocationService();
+        _progressEventSink = progressEventSink;
     }
 
     public async ValueTask<bool> IsInitializedAsync(CancellationToken cancellationToken)
@@ -104,7 +108,11 @@ public async ValueTask<UpdateDataDirResultPayload> UpdateDataDirectoryAsync(stri
  UpdateDataDirResultPayload? relocation = null;
  if (currentConfig is not null)
  {
-  var relocationResult = await _relocation.RelocateAsync(currentConfig.DataDir, dataDirectory, cancellationToken);
+  var relocationResult = await _relocation.RelocateAsync(
+  currentConfig.DataDir,
+  dataDirectory,
+  cancellationToken,
+  progress: CreateMigrationProgress());
   relocation = new UpdateDataDirResultPayload(
    relocationResult.CopiedFiles,
    relocationResult.SkippedFiles,
@@ -138,6 +146,31 @@ public async ValueTask<UpdateDataDirResultPayload> UpdateDataDirectoryAsync(stri
 
  return relocation ?? new UpdateDataDirResultPayload(0, 0, 0, string.Empty);
 }
+
+ // 残余 2：把复制进度经 bridge 事件推给前端。进度发射绝不能让迁移失败，
+ // 也不随请求取消（取消的是等待，不是复制本身）。
+ private IProgress<DataDirectoryRelocationProgress>? CreateMigrationProgress()
+ {
+ if (_progressEventSink is null)
+ {
+ return null;
+ }
+
+ return new Progress<DataDirectoryRelocationProgress>(progress =>
+ {
+ try
+ {
+ _ = _progressEventSink.EmitAsync(
+ "datadir:migration:progress",
+ new { copied_files = progress.CopiedFiles, total_files = progress.TotalFiles },
+ CancellationToken.None);
+ }
+ catch
+ {
+ // 进度是 best-effort 信号。
+ }
+ });
+ }
 
     public ValueTask<PlatformPayload> GetPlatformAsync(CancellationToken cancellationToken)
     {

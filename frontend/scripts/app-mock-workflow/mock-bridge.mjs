@@ -837,6 +837,10 @@ referenceCorpusTechniqueSpecimenAnalysisRuns: [],
       }
 
       if (fault?.mode === 'timeout') {
+        // R1 场景：挂起的调用可先发出确定性进度事件（迁移进度 UI 断言用）。
+        if (fault.progressEvent) {
+          emit(fault.progressEvent.name, fault.progressEvent.payload)
+        }
         return
       }
 
@@ -939,6 +943,8 @@ referenceCorpusTechniqueSpecimenAnalysisRuns: [],
       result: fault.result,
       hasResult: Object.hasOwn(fault, 'result'),
       once: fault.once,
+      // 挂起类故障可携带的确定性进度事件（迁移进度 UI 断言用）。
+      progressEvent: fault.progressEvent,
     }
   }
 

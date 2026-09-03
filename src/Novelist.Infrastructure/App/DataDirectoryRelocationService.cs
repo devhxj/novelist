@@ -8,7 +8,8 @@ public interface IDataDirectoryRelocationService
     ValueTask<DataDirectoryRelocationResult> RelocateAsync(
         string sourceDataDirectory,
         string targetDataDirectory,
-        CancellationToken cancellationToken);
+        CancellationToken cancellationToken,
+        IProgress<DataDirectoryRelocationProgress>? progress = null);
 }
 
 public sealed record DataDirectoryRelocationResult(
@@ -16,6 +17,11 @@ public sealed record DataDirectoryRelocationResult(
     int SkippedFiles,
     int WarningCount,
     string ManifestPath);
+
+/// <summary>迁移进度快照（残余 2）：复制进行中的累计值，供 UI 呈现"已复制 X / Y"。</summary>
+public sealed record DataDirectoryRelocationProgress(
+    int CopiedFiles,
+    int TotalFiles);
 
 /// <summary>
 /// 数据目录 copy-first 搬迁（U13）：先把源目录完整复制到目标并写清单，
@@ -34,7 +40,8 @@ public sealed class DataDirectoryRelocationService : IDataDirectoryRelocationSer
     public async ValueTask<DataDirectoryRelocationResult> RelocateAsync(
         string sourceDataDirectory,
         string targetDataDirectory,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        IProgress<DataDirectoryRelocationProgress>? progress = null)
     {
         if (string.IsNullOrWhiteSpace(sourceDataDirectory))
         {
@@ -61,6 +68,7 @@ public sealed class DataDirectoryRelocationService : IDataDirectoryRelocationSer
         // 本轮对内容冲突的文件改"覆盖"而不是跳过，源目录始终是权威版本。
         var priorStatus = TryReadManifestStatus(manifestPath);
         var overwriteConflicts = priorStatus is "failed" or "running";
+        var totalFiles = CountFiles(source);
         var result = new CopyResult();
         var manifest = new RelocationManifest
         {
@@ -74,6 +82,7 @@ public sealed class DataDirectoryRelocationService : IDataDirectoryRelocationSer
         try
         {
             await CopyDirectoryRecursiveAsync(source, target, result, overwriteConflicts, cancellationToken);
+            progress?.Report(new DataDirectoryRelocationProgress(result.Copied, totalFiles));
             manifest.CompletedAt = DateTimeOffset.UtcNow;
             manifest.Status = result.Warnings.Count == 0 ? "completed" : "completed_with_warnings";
             manifest.CopiedFiles = result.Copied;
@@ -98,6 +107,29 @@ public sealed class DataDirectoryRelocationService : IDataDirectoryRelocationSer
             result.Skipped,
             result.Warnings.Count,
             manifestPath);
+    }
+
+    private int CountFiles(string directory)
+    {
+        var total = 0;
+        foreach (var entry in Directory.EnumerateFileSystemEntries(directory))
+        {
+            if (IsReparsePoint(entry))
+            {
+                continue;
+            }
+
+            if (Directory.Exists(entry))
+            {
+                total += CountFiles(entry);
+            }
+            else if (File.Exists(entry))
+            {
+                total++;
+            }
+        }
+
+        return total;
     }
 
     private static void EnsureDistinctLocations(string source, string target)
