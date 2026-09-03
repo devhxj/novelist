@@ -351,7 +351,7 @@ function CorpusBrowse({ novelId, anchors, refreshKey }: {
           >
             <option value="">全部</option>
             {(kind === 'observations' ? OBSERVATION_FAMILIES : SPECIMEN_FAMILIES).map((value) => (
-              <option key={value} value={value}>{value}</option>
+              <option key={value} value={value}>{taxonomyLabel(FAMILY_LABELS, value)}</option>
             ))}
           </select>
         </label>

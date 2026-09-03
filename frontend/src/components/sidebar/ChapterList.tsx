@@ -39,20 +39,33 @@ export default function ChapterList({ novelId, target, onSelectChapter, onSelect
   const [chapters, setChapters] = useState<chapter.Chapter[]>([])
   const [chapterTitle, setChapterTitle] = useState('')
   const [showCreateChapter, setShowCreateChapter] = useState(false)
-  // A3：首个分块默认展开（写作主入口不应折叠），展开状态持久化到 localStorage。
-  const EXPANDED_BLOCKS_KEY = 'novelist.chapterBlocks.expanded'
-  const [expandedBlocks, setExpandedBlocks] = useState<Set<number>>(() => {
+  // A3：首个分块默认展开（写作主入口不应折叠），展开状态按作品持久化到 localStorage。
+  // 按小说命名空间 + 切书重载：分块键是"降序分块后的下标"，跨书复用会把 A 书的展开
+  // 错位到 B 书（如 A 书的块 0 = 第 201-300 章，B 书的块 0 = 第 1-6 章）。
+  const expandedBlocksKey = `novelist.chapterBlocks.expanded.${novelId}`
+  const loadExpandedBlocks = useCallback((): Set<number> => {
     try {
-      const raw = localStorage.getItem(EXPANDED_BLOCKS_KEY)
-      if (raw) return new Set(JSON.parse(raw) as number[])
+      const raw = localStorage.getItem(expandedBlocksKey)
+      const parsed = raw ? JSON.parse(raw) : null
+      if (Array.isArray(parsed) && parsed.every((item) => typeof item === 'number')) {
+        return new Set(parsed as number[])
+      }
     } catch { /* 忽略损坏的持久化数据 */ }
     return new Set([0])
-  })
+  }, [expandedBlocksKey])
+  const [expandedBlocks, setExpandedBlocks] = useState<Set<number>>(loadExpandedBlocks)
+  // 切书时在渲染期重载该书自己的展开集（React 官方 adjust-state-on-prop-change 模式，
+  // 避免 effect 内同步 setState 的级联渲染）。
+  const [loadedBlocksKey, setLoadedBlocksKey] = useState(expandedBlocksKey)
+  if (loadedBlocksKey !== expandedBlocksKey) {
+    setLoadedBlocksKey(expandedBlocksKey)
+    setExpandedBlocks(loadExpandedBlocks())
+  }
   useEffect(() => {
     try {
-      localStorage.setItem(EXPANDED_BLOCKS_KEY, JSON.stringify([...expandedBlocks]))
+      localStorage.setItem(expandedBlocksKey, JSON.stringify([...expandedBlocks]))
     } catch { /* 存储不可用时静默 */ }
-  }, [expandedBlocks])
+  }, [expandedBlocksKey, expandedBlocks])
   const [editingId, setEditingId] = useState<number | null>(null)
   const [editTitle, setEditTitle] = useState('')
   const [error, setError] = useState<VisibleError | null>(null)
@@ -260,10 +273,13 @@ export default function ChapterList({ novelId, target, onSelectChapter, onSelect
         title={`删除第${pendingDelete?.chapter_number ?? ''}章「${pendingDelete?.title ?? ''}」`}
         description={'章号不会复用。删除后可在通知里选择「撤销」，正文与大纲将以新章号恢复。'}
         onClose={() => setPendingDelete(null)}
-        onConfirm={() => {
-          const target = pendingDelete
-          setPendingDelete(null)
-          if (target) return performDeleteChapter(target)
+        onConfirm={async () => {
+          // 对话框在 await 期间保持挂载（内置 busy 态）：成功由对话框自行关闭，
+          // 失败在对话框内呈现可重试错误——提前清空 pendingDelete 会让对话框
+          // 先卸载、错误无处落地（R6 语义回归）。
+          if (pendingDelete) {
+            await performDeleteChapter(pendingDelete)
+          }
         }}
       />
 

@@ -332,12 +332,12 @@ export async function verifyUpdateWorkflow(page, browser, url, consoleErrors, pa
 
   await page.locator('header').getByTitle('设置').click()
   const dialog = settingsDialog(page)
-  await expectVisible(dialog.getByText('更新检查'), 'update settings section')
+  await expectVisible(dialog.getByText('更新检查', { exact: true }), 'update settings section')
   await expectInputValue(dialog.locator('#update-check-endpoint'), 'https://updates.example.test/latest', 'persisted update endpoint')
 
   await dialog.locator('#update-check-endpoint').fill('file:///tmp/latest.json')
   await dialog.getByRole('button', { name: '立即检查' }).click()
-  await expectVisible(dialog.getByText('更新检查 endpoint 必须是 HTTPS 地址'), 'update endpoint validation')
+  await expectVisible(dialog.getByText('更新检查地址必须是 HTTPS'), 'update endpoint validation')
 
   await dialog.locator('#update-check-endpoint').fill('https://updates.example.test/latest')
   await page.evaluate(() => { window.__appMockState.nextUpdateCheckMode = 'no_update' })

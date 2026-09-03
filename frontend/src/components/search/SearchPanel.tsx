@@ -11,6 +11,11 @@ interface Props {
   onResultsChange: (query: string, results: SearchResult[]) => void
   onNavigateEntity: (panelId: string, entityId: number) => void
   onNavigateChapter: (filePath: string, title: string, chapterNum: number, matchPos: number, matchLen: number) => void
+  /**
+   * compact：侧栏紧凑档——只保留输入入口与提示，不发请求、不渲染结果
+   * （A4 后主区已有完整搜索视图，避免双实例每次击键触发两次 SearchAll）。
+   */
+  variant?: 'full' | 'compact'
 }
 
 const TYPE_CONFIG: Record<string, { icon: typeof Search; label: string }> = {
@@ -27,7 +32,8 @@ const TYPE_CONFIG: Record<string, { icon: typeof Search; label: string }> = {
 
 const GROUP_ORDER = ['content', 'character', 'location', 'chapter', 'timeline', 'storyarc', 'preference', 'story_memory', 'rag']
 
-export default function SearchPanel({ novelId, query, results, onResultsChange, onNavigateEntity, onNavigateChapter }: Props) {
+export default function SearchPanel({ novelId, query, results, onResultsChange, onNavigateEntity, onNavigateChapter, variant = 'full' }: Props) {
+  const compact = variant === 'compact'
   const app = useApp()
   const [loading, setLoading] = useState(false)
   const [searchError, setSearchError] = useState<string | null>(null)
@@ -67,12 +73,13 @@ export default function SearchPanel({ novelId, query, results, onResultsChange, 
   }, [app, novelId])
 
   useEffect(() => {
+    if (compact) return
     clearTimeout(timerRef.current)
     reqIdRef.current++
     const id = reqIdRef.current
     timerRef.current = window.setTimeout(() => doSearch(query, id), 300)
     return () => clearTimeout(timerRef.current)
-  }, [query, doSearch])
+  }, [query, doSearch, compact])
 
   // 按分组整理结果
   const grouped = (() => {
@@ -96,6 +103,10 @@ export default function SearchPanel({ novelId, query, results, onResultsChange, 
   const flatList = grouped.flatMap(g => g.items)
 
   function handleKeyDown(e: React.KeyboardEvent) {
+    // 紧凑档没有可见结果列表：方向键/回车不得在不可见选择上导航（Escape 清空仍可用）。
+    if (compact && (e.key === 'ArrowDown' || e.key === 'ArrowUp' || e.key === 'Enter')) {
+      return
+    }
     if (e.key === 'ArrowDown') {
       e.preventDefault()
       setSelectedIdx(prev => Math.min(prev + 1, flatList.length - 1))
@@ -168,9 +179,13 @@ export default function SearchPanel({ novelId, query, results, onResultsChange, 
         </div>
       </div>
 
-      {/* 结果区 */}
+      {/* 结果区（紧凑档：主区已展示结果，这里只留指引，不发请求） */}
       <div ref={listRef} className="flex-1 overflow-y-auto overscroll-contain">
-        {!query.trim() ? (
+        {compact ? (
+          <div className="flex h-full items-center justify-center px-4">
+            <p className="text-center text-xs text-muted-foreground">搜索结果在中间内容区展示。</p>
+          </div>
+        ) : !query.trim() ? (
           <div className="flex items-center justify-center h-full">
             <p className="text-xs text-muted-foreground">输入关键词搜索</p>
           </div>

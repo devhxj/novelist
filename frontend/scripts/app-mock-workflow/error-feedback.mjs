@@ -319,7 +319,7 @@ async function verifyMetadataCrudErrorFeedback(context) {
   await assertCopyableDiagnostic(metadataPage, arcNodeQuickAlert, 'UpdateArcNode')
 
   const storyArcUpdateBefore = await bridgeCallCount(metadataPage, 'UpdateStoryArc')
-  await metadataPage.locator('button').filter({ hasText: '雨夜调查线' }).getByTitle('编辑').click({ force: true })
+  await metadataPage.getByRole('button', { name: '编辑弧线 雨夜调查线' }).click()
   await metadataPage.getByPlaceholder('弧线名称').fill('雨夜调查线-错误反馈')
   await metadataPage.locator('main').getByRole('button', { name: '保存' }).last().click()
   await waitForBridgeCallCountAfter(metadataPage, 'UpdateStoryArc', storyArcUpdateBefore)
@@ -330,7 +330,7 @@ async function verifyMetadataCrudErrorFeedback(context) {
   await metadataPage.locator('main').getByRole('button', { name: '取消' }).last().click()
 
   const storyArcDeleteBefore = await bridgeCallCount(metadataPage, 'DeleteStoryArc')
-  await metadataPage.locator('button').filter({ hasText: '雨夜调查线' }).getByTitle('删除').click({ force: true })
+  await metadataPage.getByRole('button', { name: '删除弧线 雨夜调查线' }).click()
   await waitForBridgeCallCountAfter(metadataPage, 'DeleteStoryArc', storyArcDeleteBefore)
   const storyArcDeleteAlert = errorAlert(metadataPage, '删除弧线失败')
   await expectVisible(storyArcDeleteAlert, 'story arc delete error callout')
@@ -360,7 +360,13 @@ async function verifyMetadataCrudErrorFeedback(context) {
   await assertCopyableDiagnostic(metadataPage, arcNodeUpdateAlert, 'UpdateArcNode')
 
   const arcNodeDeleteBefore = await bridgeCallCount(metadataPage, 'DeleteArcNode')
-  await metadataPage.locator('main').getByRole('button', { name: '删除' }).first().click()
+  const arcNodeEditor = metadataPage
+    .locator('main')
+    .locator('div.rounded-lg')
+    .filter({ hasText: '编辑：桌面水痕触发调查' })
+    .last()
+  await expectVisible(arcNodeEditor, 'arc node editor before delete')
+  await arcNodeEditor.getByRole('button', { name: '删除', exact: true }).click()
   await waitForBridgeCallCountAfter(metadataPage, 'DeleteArcNode', arcNodeDeleteBefore)
   const arcNodeDeleteAlert = errorAlert(metadataPage, '删除节点失败')
   await expectVisible(arcNodeDeleteAlert, 'arc node delete error callout')
@@ -617,7 +623,7 @@ async function verifyStoryArcErrorLifecycle(context) {
   )
   await page.locator('main').getByRole('button', { name: '取消' }).last().click()
   await expectErrorPersistsAfter(
-    async () => { await page.locator('button').filter({ hasText: '雨夜调查线' }).getByTitle('编辑').click({ force: true }) },
+    async () => { await page.getByRole('button', { name: '编辑弧线 雨夜调查线' }).click() },
     alert,
     expectVisible,
     'story arc create error after opening edit arc form',

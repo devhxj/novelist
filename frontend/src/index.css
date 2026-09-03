@@ -85,10 +85,6 @@
   .reference-side-panel {
     width: 210px !important;
   }
-
-  .reference-blueprint-panel {
-    width: min(32vw, 320px) !important;
-  }
 }
 
 /* ── 深色主题 ────────────────────────────────────────────── */
@@ -125,7 +121,7 @@
   --sidebar-accent: oklch(0.22 0.012 258);
   --sidebar-accent-foreground: oklch(0.92 0.003 255);
   --sidebar-border: oklch(0.28 0.012 258);
-  --sidebar-ring: oklch(0.65 0.15 255);
+  --sidebar-ring: oklch(0.72 0.13 148);
   --tag-blue: oklch(0.58 0.15 255 / 0.15);
   --tag-blue-foreground: oklch(0.72 0.15 255);
   --tag-green: oklch(0.58 0.16 145 / 0.15);
@@ -146,8 +142,8 @@
   --tool-red-border: oklch(0.55 0.18 22);
   --danger-bg: oklch(0.48 0.18 15 / 0.12);
   --danger-border: oklch(0.5 0.18 15 / 0.25);
-  --bubble-user: oklch(0.546 0.245 262.881 / 0.2);
-  --bubble-user-foreground: var(--foreground);
+  --bubble-user: oklch(0.30 0.05 148);
+  --bubble-user-foreground: oklch(0.95 0.02 148);
   --action-extract: oklch(0.42 0.12 80);
   --action-extract-foreground: oklch(0.95 0.02 90);
   --action-save: oklch(0.34 0.09 155);

@@ -29,7 +29,7 @@
 
 ### 文案与本地化（B1–B5，全部落地；契约不动）
 
-- **B1 taxonomy 中文映射**：新增 `lib/novelist/corpusTaxonomy.ts`——素材类型（sentence/passage→句子/段落）、覆盖度维度（material_type→素材类型等 8 维）、12 个 family、60+ 特征值（按 `ReferenceMaterializationChatCompletionQualifier` 的 Allowed* 词表与 `MaterialCoverageFacetColumns` 逐项对译）、复核状态 4 态。覆盖度地图（维度名 + 值）、浏览观察卡/标本卡头部、复核候选标签/类型/原因码全部走映射；未命中键回退原文，数据契约零变更。
+- **B1 taxonomy 中文映射**：新增 `lib/novelist/corpusTaxonomy.ts`——素材类型（sentence/passage→句子/段落）、覆盖度维度（material_type→素材类型等 6 维，与 MaterialCoverageFacetColumns 一致）、12 个 family、60+ 特征值（按 `ReferenceMaterializationChatCompletionQualifier` 的 Allowed* 词表与 `MaterialCoverageFacetColumns` 逐项对译）、复核状态 4 态。覆盖度地图（维度名 + 值）、浏览观察卡/标本卡头部、复核候选标签/类型/原因码全部走映射；未命中键回退原文，数据契约零变更。
 - **B2 中英混排**：`run.status` → `RUN_STATUS_LABELS`（排队中/进行中/…）；读者视角侧栏裸 `known` → 已知/悬念/误解；Git 历史 `Diff`→文件差异、`Patch`→变更补丁、`binary`→二进制；`Release endpoint` → 更新检查地址（HTTPS）。`stageLabel` 已有全量映射（fallback 仅对未知新键），维持。
 - **B3 分隔模板像乱码**：冻结配置区改为「分隔模板：`<code>`第{number}章 {title}`</code>`（{number} 表示章号，{title} 表示标题）」。
 - **B4 时间线标题难读**：时间线/读者视角/弧线三处标题拆为「视图 {windowFrom}-{windowTo} 章 · 条目覆盖第 N 章」，单章显示「第 N 章」而非「N - N 章」。
@@ -55,6 +55,31 @@
 
 ## 四、提交
 
-- `0b3bdc9` fix: land 2026-09-03 full-product review fixes (theme unification, structure A1-A7, localization B1-B5, a11y C1-C2)
+- `5406e59` fix: land round-4 review fixes（主题统一、A1/A3/A5、ConfirmDialog、corpusTaxonomy、B1–B4 主体）
+- `0b3bdc9` fix: land 2026-09-03 full-product review fixes（A4/A6/A7、aria 标签）
 - `6709959` chore: ignore .freebuff local config（清理误入提交的本地文件）
-- A2 全量收口（13 处补 `group-focus-within`）随本轮后续提交。
+- `181b796` docs + A2 全量收口（13 处补 `group-focus-within`）
+
+## 五、复盘走查与二次修复（2026-09-03）
+
+对上述提交做独立缺陷走查（自查 + 独立评审双通道），发现并修复 13 项：
+
+| # | 问题 | 处置 |
+|---|---|---|
+| 1 | **A5 接线回归（🟠）**：onConfirm 先清 pendingDelete 再异步删除——对话框提前卸载，读取/删除失败无处呈现（R6 静默化） | 对话框保持挂载直到 await 结束；成功由对话框自行关闭，失败在对话框内呈现可复制诊断 |
+| 2 | **A4 双实例双查询（🟠）**：侧栏与主区各挂一个 SearchPanel，每次击键触发两次 SearchAll | SearchPanel 增加 `variant`——侧栏紧凑档（仅输入 + 指引，不发请求不渲染列表），主区为唯一查询实例 |
+| 3 | **A4 死路（🟠）**：点击搜索结果导航后 sidebarPanel 仍为 search——紧凑框提示指向已不存在的结果区，输入无任何实例响应 | 两个导航处理器补 `setSidebarPanel(null)`，侧栏跟随目标面板 |
+| 4 | **紧凑档键盘盲选（🟡）**：无可见列表时方向键/回车仍可在不可见选择上导航 | compact 下门控 ArrowUp/Down/Enter（Escape 清空保留） |
+| 5 | **A3 跨书泄漏（🟠）**：展开集是全局键且组件跨书复用 state——A 书的块 0 会错位到 B 书；全折叠保存后默认展开永不恢复 | 持久化键按 novelId 命名空间 + novelId 变化时重载；解析校验数组类型 |
+| 6 | **A2 残余（🟡）**：弧线泳道编辑/删除是 span onClick，键盘不可达 | 改为真按钮 + aria-label 带弧线名 |
+| 7 | **B1 残余（🟡）**：浏览"维度"下拉仍显示英文 family 键 | 选项走 `taxonomyLabel(FAMILY_LABELS, …)`（value 保持枚举） |
+| 8 | **投机映射键（🟡）**：COVERAGE_FACET_LABELS 含后端不存在的 continuity/emotion_evidence；RUN_STATUS_LABELS 含不存在的 completed_with_warnings/stale | 删除（fallback 本就兜底，去除误导）；文档"8 维"纠正为 6 维 |
+| 9 | **深色用户气泡仍蓝（🟡）**：`--bubble-user` 深色是 hue 262 蓝，与绿色强调冲突 | 深色气泡对齐 hue 148；顺带 `--sidebar-ring` 同步 |
+| 10 | **死 CSS（🟡）**：`.reference-blueprint-panel` 规则无引用；TSX 残留 `reference-materialization-surface/-sidebar` 类名 | 删除规则与类名（`reference-side-panel` 仍在用，保留） |
+| 11 | **空态标题（🟡）**：无条目时三个视图渲染"视图 1-0 章 · 条目覆盖第 0 章" | 标题按 minChapter>0 门控 |
+| 12 | **B2 残余（🟡）**：更新检查校验/错误文案仍有 "endpoint" 英文 | 三处中文化 |
+| 13 | **文档与注释过时**：本文件提交归属、双实例注释 | 纠正（本节） |
+
+另有一处测试侧连带修复：第 6 项给泳道按钮补 `aria-label` 后，`@error` 套件里 `main` 内首个可访问名含「删除」的按钮变成了泳道的「删除弧线 雨夜调查线」，导致节点删除步骤误点、`DeleteArcNode` 永不递增。改为先定位内联编辑器容器（`编辑：…` 卡片）再用 `{ name: '删除', exact: true }` 精确匹配。
+
+二次验证：`tsc`/`lint`/`build`/`test:node`（23/23）/`test:error-ui`/`test:app:full`/`test:phase15`（补跑，9 子套件）/`test:phase16`/`test:app:stress` 全绿；`dotnet test` 216 + 713 通过（`WarmRetrievalAcrossOneThousandNodesStaysWithinControlledBudget` 在与 Playwright 并发时超预算一次，单独复跑 4/4 通过）。

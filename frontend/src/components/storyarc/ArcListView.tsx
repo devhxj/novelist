@@ -609,9 +609,11 @@ export default function ArcListView({ novelId, focusArcId }: Props) {
               </h2>
             </div>
             <div className="flex items-center gap-2">
-              <span className="text-[11px] text-muted-foreground">
-                视图 {windowFrom}-{windowTo} 章 · 条目覆盖{minChapter === maxChapter ? `第 ${minChapter} 章` : `第 ${minChapter}-${maxChapter} 章`}
-              </span>
+              {minChapter > 0 && (
+                <span className="text-[11px] text-muted-foreground">
+                  视图 {windowFrom}-{windowTo} 章 · 条目覆盖{minChapter === maxChapter ? `第 ${minChapter} 章` : `第 ${minChapter}-${maxChapter} 章`}
+                </span>
+              )}
               <button onClick={load} className="text-xs text-muted-foreground hover:text-muted-foreground transition-colors">刷新</button>
             </div>
           </div>
@@ -629,35 +631,47 @@ export default function ArcListView({ novelId, focusArcId }: Props) {
               const c = PALETTE[i % PALETTE.length]
               const hidden = hiddenArcIds.has(arc.id)
               return (
-                <button
+                // 泳道 chip：切换显隐的按钮与编辑/删除按钮是兄弟节点（A1 同款拆分，禁止 button 嵌套）。
+                <span
                   key={arc.id}
-                  onClick={() => toggleArc(arc.id)}
-                  className={`group px-3 py-1 rounded text-xs font-medium transition-colors border relative ${
+                  className={`group relative inline-flex items-center rounded border text-xs font-medium transition-colors ${
                     hidden
                       ? 'text-muted-foreground border-transparent hover:text-muted-foreground hover:bg-card/60'
                       : 'border-border shadow-sm text-foreground'
                   }`}
                   style={hidden ? {} : { backgroundColor: c.fill, borderColor: c.stroke, color: c.text }}
                 >
-                  {arc.name}{arcStatusTag(arc.status)}
+                  <button
+                    type="button"
+                    onClick={() => toggleArc(arc.id)}
+                    className="rounded-l px-3 py-1 font-medium focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                    aria-pressed={!hidden}
+                    aria-label={`显示或隐藏弧线 ${arc.name}`}
+                  >
+                    {arc.name}{arcStatusTag(arc.status)}
+                  </button>
                   {/* Hover actions */}
-                  <span className="ml-1 opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 inline-flex items-center gap-1 transition-opacity" style={{ color: hidden ? undefined : c.text }}>
-                    <span
-                      onClick={(e) => { e.stopPropagation(); openEditArc(arc) }}
-                      className="p-0.5 rounded hover:opacity-70"
+                  <span className="mr-1 inline-flex items-center gap-1 opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 transition-opacity" style={{ color: hidden ? undefined : c.text }}>
+                    <button
+                      type="button"
+                      onClick={() => openEditArc(arc)}
+                      aria-label={`编辑弧线 ${arc.name}`}
+                      className="p-0.5 rounded hover:opacity-70 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                       title="编辑"
                     >
                       <Pencil className="h-3.5 w-3.5" />
-                    </span>
-                    <span
-                      onClick={(e) => { e.stopPropagation(); handleDeleteArc(arc.id) }}
-                      className="p-0.5 rounded hover:opacity-70"
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleDeleteArc(arc.id)}
+                      aria-label={`删除弧线 ${arc.name}`}
+                      className="p-0.5 rounded hover:opacity-70 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                       title="删除"
                     >
                       <Trash2 className="h-3.5 w-3.5" />
-                    </span>
+                    </button>
                   </span>
-                </button>
+                </span>
               )
             })}
             <button

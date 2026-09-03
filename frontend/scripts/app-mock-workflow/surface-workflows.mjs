@@ -667,8 +667,7 @@ export async function verifySearchWorkflow(page) {
   await expectVisible(searchPanel.getByText('无搜索结果'), 'empty search state')
 
   await searchInput.fill('搜索失败后恢复')
-  // 侧栏与主区各有一个 SearchPanel 实例（各自 debounce 触发 SearchAll），
-  // mock 的 failure-once 语义会让其中一份直接拿到恢复结果——失败文本用 first 宽松断言。
+  // 侧栏为紧凑档（不发请求），主区是唯一查询实例；first() 保留以兼容历史布局。
   await expectVisible(page.getByText('搜索失败，请稍后重试').first(), 'search failure state')
   // 双实例下失败态只落在一个实例上（mock failure-once），用 first 点「重试」。
   await page.getByRole('button', { name: '重试' }).first().click()

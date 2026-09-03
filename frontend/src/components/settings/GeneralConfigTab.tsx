@@ -212,12 +212,12 @@ export default function GeneralConfigTab({ onBusyChange }: { onBusyChange?: (bus
   async function handleSaveUpdateSettings(nextDismissedVersion = updateDismissedVersion) {
     const endpoint = updateEndpoint.trim()
     if (updateEnabled && !endpoint) {
-      setUpdateValidationError('启用更新检查时必须填写 HTTPS endpoint', endpoint)
+      setUpdateValidationError('启用更新检查时必须填写更新检查地址（HTTPS）', endpoint)
       return
     }
 
     if (endpoint && !isHttpsUrl(endpoint)) {
-      setUpdateValidationError('更新检查 endpoint 必须是 HTTPS 地址', endpoint)
+      setUpdateValidationError('更新检查地址必须是 HTTPS', endpoint)
       return
     }
 
@@ -248,12 +248,12 @@ export default function GeneralConfigTab({ onBusyChange }: { onBusyChange?: (bus
   async function handleManualUpdateCheck() {
     const endpoint = updateEndpoint.trim()
     if (!endpoint) {
-      setUpdateValidationError('请先填写更新检查 endpoint', endpoint)
+      setUpdateValidationError('请先填写更新检查地址', endpoint)
       return
     }
 
     if (!isHttpsUrl(endpoint)) {
-      setUpdateValidationError('更新检查 endpoint 必须是 HTTPS 地址', endpoint)
+      setUpdateValidationError('更新检查地址必须是 HTTPS', endpoint)
       return
     }
 

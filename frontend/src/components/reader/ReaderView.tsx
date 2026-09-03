@@ -412,9 +412,11 @@ export default function ReaderView({ novelId, focusId }: Props) {
               </h2>
             </div>
             <div className="flex items-center gap-2">
-              <span className="text-[11px] text-muted-foreground">
-                视图 {windowFrom}-{windowTo} 章 · 条目覆盖{minChapter === maxChapter ? `第 ${minChapter} 章` : `第 ${minChapter}-${maxChapter} 章`}
-              </span>
+              {minChapter > 0 && (
+                <span className="text-[11px] text-muted-foreground">
+                  视图 {windowFrom}-{windowTo} 章 · 条目覆盖{minChapter === maxChapter ? `第 ${minChapter} 章` : `第 ${minChapter}-${maxChapter} 章`}
+                </span>
+              )}
               <button onClick={load} className="text-xs text-muted-foreground hover:text-muted-foreground transition-colors">
                 刷新
               </button>

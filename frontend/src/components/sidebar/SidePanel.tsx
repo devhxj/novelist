@@ -165,6 +165,7 @@ export default function SidePanel({
           onResultsChange={onSearchChange}
           onNavigateEntity={onSearchNavigateEntity}
           onNavigateChapter={onSearchNavigateChapter}
+          variant="compact"
         />
       ) : activePanel === 'skills' ? (
         <SkillList

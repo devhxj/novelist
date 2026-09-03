@@ -266,6 +266,8 @@ export default function WorkspaceView({ initialNovelId, initialShowHelp, startup
   }
 
   function handleSearchNavigateEntity(panelId: string, entityId: number) {
+    // A4：离开搜索视图——侧栏跟随目标面板，紧凑搜索框不再悬空（否则它的提示指向已不存在的结果区）。
+    setSidebarPanel(null)
     setCharacterFocusId(0)
     setLocationFocusId(0)
     setTimelineFocusId(0)
@@ -284,6 +286,7 @@ export default function WorkspaceView({ initialNovelId, initialShowHelp, startup
   }
 
   function handleSearchNavigateChapter(filePath: string, title: string, _chapterNum: number, matchPos: number, matchLen: number) {
+    setSidebarPanel(null)
     flushSync(() => setActivePanel('chapters'))
     if (matchPos >= 0 && matchLen > 0) {
       contentRef.current?.openFileWithHighlight(filePath, title, matchPos, matchLen)

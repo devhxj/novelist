@@ -329,7 +329,7 @@ export default function ReferenceBookSidebar({
   return (
     <section
       data-testid="reference-book-sidebar"
-      className={`reference-materialization-sidebar relative flex min-h-0 flex-1 flex-col bg-sidebar ${dragActive ? 'ring-2 ring-inset ring-primary/50' : ''}`}
+      className={`relative flex min-h-0 flex-1 flex-col bg-sidebar ${dragActive ? 'ring-2 ring-inset ring-primary/50' : ''}`}
       aria-busy={isLoading}
       onDragOver={(event) => { event.preventDefault(); setDragActive(true) }}
       onDragLeave={(event) => { if (!event.currentTarget.contains(event.relatedTarget as Node)) setDragActive(false) }}

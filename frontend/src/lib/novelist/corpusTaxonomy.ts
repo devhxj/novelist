@@ -14,10 +14,8 @@ export const RUN_STATUS_LABELS: Record<string, string> = {
   queued: '排队中',
   running: '进行中',
   completed: '已完成',
-  completed_with_warnings: '已完成（有警告）',
   failed: '失败',
   cancelled: '已取消',
-  stale: '已过期',
 }
 
 export const REVIEW_STATE_LABELS: Record<string, string> = {
@@ -35,8 +33,6 @@ export const COVERAGE_FACET_LABELS: Record<string, string> = {
   scene_tag: '场景节拍',
   pov_tag: '视角',
   technique_tag: '技法',
-  continuity: '连贯性',
-  emotion_evidence: '情绪证据',
 }
 
 export const FAMILY_LABELS: Record<string, string> = {

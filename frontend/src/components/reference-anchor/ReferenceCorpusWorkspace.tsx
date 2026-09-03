@@ -543,7 +543,7 @@ export default function ReferenceCorpusWorkspace({
 
   if (!selectedAnchor) {
     return (
-      <main data-testid="reference-corpus-workspace" className="reference-materialization-surface min-w-0 flex-1 overflow-y-auto bg-background">
+      <main data-testid="reference-corpus-workspace" className="min-w-0 flex-1 overflow-y-auto bg-background">
         <div className="mx-auto flex min-h-full max-w-5xl flex-col items-center justify-center px-6 text-center">
           <FileStack className="h-8 w-8 text-muted-foreground/55" aria-hidden="true" />
           <h1 className="mt-3 text-base font-semibold text-foreground">选择一个参考来源</h1>
@@ -559,7 +559,7 @@ export default function ReferenceCorpusWorkspace({
   const canStart = activeProfile?.status === 'confirmed' && !hasActiveRun
 
   return (
-    <main data-testid="reference-corpus-workspace" className="reference-materialization-surface min-w-0 flex-1 overflow-y-auto bg-background" aria-busy={isBusy}>
+    <main data-testid="reference-corpus-workspace" className="min-w-0 flex-1 overflow-y-auto bg-background" aria-busy={isBusy}>
       <div className="mx-auto flex min-h-full w-full max-w-6xl flex-col px-4 py-5 sm:px-6 lg:px-8">
         <header className="flex flex-wrap items-start justify-between gap-3 border-b border-border pb-4">
           <div className="min-w-0">
