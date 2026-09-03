@@ -641,7 +641,7 @@ export default function ArcListView({ novelId, focusArcId }: Props) {
                 >
                   {arc.name}{arcStatusTag(arc.status)}
                   {/* Hover actions */}
-                  <span className="ml-1 opacity-0 group-hover:opacity-100 inline-flex items-center gap-1 transition-opacity" style={{ color: hidden ? undefined : c.text }}>
+                  <span className="ml-1 opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 inline-flex items-center gap-1 transition-opacity" style={{ color: hidden ? undefined : c.text }}>
                     <span
                       onClick={(e) => { e.stopPropagation(); openEditArc(arc) }}
                       className="p-0.5 rounded hover:opacity-70"
@@ -794,7 +794,7 @@ export default function ArcListView({ novelId, focusArcId }: Props) {
                               </div>
                             </div>
                             {/* Hover actions */}
-                            <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                            <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 transition-opacity">
                               {node.status === 'pending' && (
                                 <button onClick={() => handleQuickNodeStatus(node, 'completed')} className="p-1 rounded text-muted-foreground hover:text-tag-green-foreground hover:bg-tag-green/20 transition-colors" title="标记完成" aria-label="标记完成">
                                   <span className="text-[10px]">✓</span>

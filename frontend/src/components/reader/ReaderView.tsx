@@ -595,7 +595,7 @@ export default function ReaderView({ novelId, focusId }: Props) {
                               </div>
                             </div>
                             {/* Quick actions */}
-                            <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity" onClick={e => e.stopPropagation()}>
+                            <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 transition-opacity" onClick={e => e.stopPropagation()}>
                               {!isRevealed && (
                                 <button
                                   onClick={() => handleQuickReveal(entry)}

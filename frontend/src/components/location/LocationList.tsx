@@ -145,7 +145,7 @@ export default function LocationList({ novelId }: Props) {
           </button>
           <button
             onClick={(e) => { e.stopPropagation(); handleDelete(loc.id) }}
-            className="mr-3 shrink-0 p-0.5 rounded text-muted-foreground hover:text-destructive opacity-0 group-hover:opacity-100 transition-opacity"
+            className="mr-3 shrink-0 p-0.5 rounded text-muted-foreground hover:text-destructive opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 transition-opacity"
             title="删除"
           >
             <Trash2 className="h-3 w-3" />

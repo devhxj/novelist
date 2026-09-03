@@ -517,7 +517,7 @@ export default function TimelineView({ novelId, focusEntryId, onOpenInEditor }: 
                   )}
                   <button
                     onClick={() => openPlanEdit(planTab, planMap[planTab])}
-                    className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity p-1 rounded text-muted-foreground hover:text-foreground hover:bg-secondary"
+                    className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 transition-opacity p-1 rounded text-muted-foreground hover:text-foreground hover:bg-secondary"
                     title="编辑"
                   >
                     <Pencil className="h-3.5 w-3.5" />
@@ -671,7 +671,7 @@ export default function TimelineView({ novelId, focusEntryId, onOpenInEditor }: 
                                 </div>
                               </div>
                               {/* Quick actions */}
-                              <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                              <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 transition-opacity">
                                 {entry.status === 'pending' && (
                                   <button
                                     onClick={() => handleQuickStatus(entry, 'resolved')}

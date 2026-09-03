@@ -247,7 +247,7 @@ export default function PreferenceView({ novelId }: Props) {
                       {item.category || '未分类'}
                     </span>
                     <p className="flex-1 text-sm text-foreground leading-relaxed whitespace-pre-wrap">{item.content}</p>
-                    <div className="shrink-0 flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                    <div className="shrink-0 flex items-center gap-1 opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 transition-opacity">
                       <button
                         onClick={() => openEdit(item)}
                         className="p-1 rounded text-muted-foreground hover:text-foreground hover:bg-secondary transition-colors"

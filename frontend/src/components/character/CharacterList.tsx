@@ -122,7 +122,7 @@ export default function CharacterList({ novelId }: Props) {
               <span className="flex-1 text-sm truncate">{c.name}</span>
               <button
                 onClick={(e) => { e.stopPropagation(); handleDelete(c.id) }}
-                className="shrink-0 p-0.5 rounded text-muted-foreground hover:text-destructive opacity-0 group-hover:opacity-100 transition-opacity"
+                className="shrink-0 p-0.5 rounded text-muted-foreground hover:text-destructive opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 transition-opacity"
                 title="删除"
               >
                 <Trash2 className="h-3 w-3" />

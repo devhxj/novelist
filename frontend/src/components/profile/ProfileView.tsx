@@ -134,7 +134,7 @@ export default function ProfileView() {
                 className="w-14 h-14 rounded-full object-cover"
               />
             )}
-            <div className="absolute inset-0 rounded-full flex items-center justify-center bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity">
+            <div className="absolute inset-0 rounded-full flex items-center justify-center bg-black/40 opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 transition-opacity">
               <Camera className="w-5 h-5 text-white" />
             </div>
           </button>

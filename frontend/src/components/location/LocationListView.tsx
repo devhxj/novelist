@@ -385,7 +385,7 @@ export default function LocationListView({ novelId, focusId }: Props) {
                           </div>
                         </div>
                         {/* Hover actions */}
-                        <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity shrink-0">
+                        <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 transition-opacity shrink-0">
                           <button onClick={() => openEdit(loc)} className="p-1 rounded text-muted-foreground hover:text-foreground hover:bg-secondary transition-colors" title="编辑">
                             <Pencil className="h-3.5 w-3.5" />
                           </button>

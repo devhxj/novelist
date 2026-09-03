@@ -290,7 +290,7 @@ function SkillGroup({ title, skills, activeSkillName, onSelect, onEdit, onDelete
               )}
             </button>
             {!isBuiltin && (
-              <div className="absolute right-2 top-1/2 -translate-y-1/2 flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
+              <div className="absolute right-2 top-1/2 -translate-y-1/2 flex items-center gap-0.5 opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 transition-opacity">
                 <button
                   onClick={e => {
                     e.stopPropagation()
