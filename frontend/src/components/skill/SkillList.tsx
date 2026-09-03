@@ -168,7 +168,7 @@ export default function SkillList({ novelId, activeSkillName, onSelectSkill, onE
             type="text"
             value={search}
             onChange={e => setSearch(e.target.value)}
-            placeholder="搜索..."
+            placeholder="搜索..." aria-label="搜索技能"
             className="w-full pl-7 pr-2 py-1 text-xs bg-muted/40 rounded border-0 outline-none focus:ring-1 focus:ring-ring"
           />
         </div>

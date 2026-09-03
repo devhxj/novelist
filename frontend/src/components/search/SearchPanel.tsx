@@ -153,12 +153,13 @@ export default function SearchPanel({ novelId, query, results, onResultsChange, 
             value={query}
             onChange={e => handleQueryChange(e.target.value)}
             onKeyDown={handleKeyDown}
-            placeholder="搜索人物、地点、时间线、正文..."
+            placeholder="搜索人物、地点、时间线、正文..." aria-label="全局搜索"
             className="w-full h-7 rounded-md border bg-background pl-7 pr-7 text-xs focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
           />
           {(query || loading) && (
             <button
               onClick={clearSearch}
+              aria-label="清空搜索"
               className="absolute right-1.5 top-1/2 -translate-y-1/2 w-4 h-4 flex items-center justify-center text-muted-foreground hover:text-foreground"
             >
               {loading ? <Loader2 className="w-3 h-3 animate-spin" /> : <X className="w-3 h-3" />}

@@ -178,8 +178,9 @@ function QuickStartTab() {
         <div className="space-y-3 text-sm text-muted-foreground leading-relaxed">
           <div>
             <span className="text-foreground font-medium">左侧活动栏</span>
-            —— 切换不同功能面板：搜索、小说、章节、偏好、角色、地点、故事弧线、时间线、读者视角、技能。
-            点击图标即可进入对应面板。
+            —— 从上到下依次为：书架、素材库（全局），打开作品后出现本书工具：章节、搜索、技能、
+            角色、地点、弧线、时间线、读者视角、偏好、Git 历史。点击图标即可进入对应面板；
+            全局搜索的结果会在中间内容区展开，设置入口在右上角齿轮。
           </div>
           <div>
             <span className="text-foreground font-medium">中间内容区</span>

@@ -589,8 +589,13 @@ export async function runStressSuite(browser, url) {
   await expectVisible(page.getByText(`章节 (${chapterCount})`), 'stress chapter count')
 
   const stressBlockStart = Math.max(1, chapterCount - 99)
-  await page.getByRole('button', { name: new RegExp(`第 ${stressBlockStart} - ${chapterCount} 章`) }).click()
-  await chapterButton(page, stressTitle).click()
+  // A3 后首块默认展开；250 章的首块即「第 151 - 250 章」，直接点会把它折叠掉。
+  // 用目标章按钮的可见性判断，不可见才点分块条。
+  const stressTarget = chapterButton(page, stressTitle)
+  if (!await stressTarget.isVisible()) {
+    await page.getByRole('button', { name: new RegExp(`第 ${stressBlockStart} - ${chapterCount} 章`) }).click()
+  }
+  await stressTarget.click()
   await expectVisible(page.getByText(`第${stressChapterNumber}章 ${stressTitle}`).first(), 'stress chapter tab')
   await expectVisible(page.locator('.monaco-editor').first(), 'stress monaco editor')
   await waitForBridgeCallArg(page, 'GetContent', 1, stressPath)

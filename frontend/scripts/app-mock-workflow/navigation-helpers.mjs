@@ -20,7 +20,7 @@ export async function getActivityStates(page) {
       const label = title.replace(/（即将推出）$/, '')
       return {
         label,
-        isActiveBackground: button.classList.contains('bg-muted'),
+        isActiveBackground: button.classList.contains('bg-muted') || button.classList.contains('bg-primary/15'),
         hasActiveIndicator: Array.from(button.querySelectorAll('span')).some((span) =>
           span.classList.contains('bg-primary')),
       }

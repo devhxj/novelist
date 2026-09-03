@@ -146,7 +146,7 @@ export default function BookshelfView({
                 type="search"
                 value={searchQuery}
                 onChange={event => setSearchQuery(event.target.value)}
-                placeholder="搜索作品、分类或简介..."
+                placeholder="搜索作品、分类或简介..." aria-label="搜索作品"
                 className="h-8 w-full rounded-md border bg-background pl-8 pr-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
               />
             </div>

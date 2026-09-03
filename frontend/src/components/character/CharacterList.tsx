@@ -85,7 +85,7 @@ export default function CharacterList({ novelId }: Props) {
             type="text"
             value={search}
             onChange={e => setSearch(e.target.value)}
-            placeholder="搜索角色..."
+            placeholder="搜索角色..." aria-label="搜索角色"
             className="w-full h-7 rounded-md border bg-background pl-7 pr-2 text-xs focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
           />
         </div>

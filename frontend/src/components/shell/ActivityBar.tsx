@@ -1,5 +1,5 @@
 import type { LucideIcon } from 'lucide-react'
-import { BookMarked, GitCommitHorizontal, Library, List, Search, Settings, SlidersHorizontal, Users, MapPin, GitBranch, History, Eye, Wrench } from 'lucide-react'
+import { BookMarked, GitCommitHorizontal, Library, List, Search, SlidersHorizontal, Users, MapPin, GitBranch, History, Eye, Wrench } from 'lucide-react'
 
 interface Activity {
   id: string
@@ -8,11 +8,10 @@ interface Activity {
   disabled?: boolean
 }
 
-// 三主区：书籍 / 语料 / 设置。设置在壳层当前为动作（打开设置对话框），不参与面板高亮。
+// 三主区：书籍 / 语料。设置统一走顶栏齿轮（A6：消除双入口），不占活动栏面板位。
 const primaryActivities: Activity[] = [
   { id: 'novels', icon: Library, label: '书架' },
   { id: 'reference', icon: BookMarked, label: '素材库' },
-  { id: 'settings', icon: Settings, label: '设置' },
 ]
 
 // 本书工具：只要打开了一本书就稳定可见（跨书架/语料区导航不隐藏，避免导航断链），数据范围限定当前作品。
@@ -46,12 +45,13 @@ function ActivityButton({ activity, isActive, onSelect }: { activity: Activity; 
         ${activity.disabled
           ? 'text-muted-foreground/40 cursor-not-allowed'
           : isActive
-            ? 'text-foreground bg-muted'
+            ? 'text-primary bg-primary/15 font-medium'
             : 'text-muted-foreground hover:text-foreground hover:bg-muted/60'
         }`}
     >
+      {/* 视觉项：选中态增强——指示条加粗 + 图标着主色，不再只是细线 */}
       {isActive && !activity.disabled && (
-        <span className="absolute left-0 top-1/2 -translate-y-1/2 w-0.5 h-5 bg-primary rounded-r-full" />
+        <span className="absolute left-0 top-1/2 -translate-y-1/2 w-1 h-6 bg-primary rounded-r-full" />
       )}
       <activity.icon className="w-5 h-5" />
     </button>

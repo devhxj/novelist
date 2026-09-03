@@ -54,7 +54,7 @@ export default function SidebarReaderList({ novelId }: Props) {
             type="text"
             value={search}
             onChange={e => setSearch(e.target.value)}
-            placeholder="搜索条目..."
+            placeholder="搜索条目..." aria-label="搜索读者视角条目"
             className="w-full h-7 rounded-md border bg-background pl-7 pr-2 text-xs focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
           />
         </div>

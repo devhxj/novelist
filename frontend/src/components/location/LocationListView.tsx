@@ -389,7 +389,7 @@ export default function LocationListView({ novelId, focusId }: Props) {
                           <button onClick={() => openEdit(loc)} className="p-1 rounded text-muted-foreground hover:text-foreground hover:bg-secondary transition-colors" title="编辑">
                             <Pencil className="h-3.5 w-3.5" />
                           </button>
-                          <button onClick={() => handleDelete(loc.id)} className="p-1 rounded text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors" title="删除">
+                          <button onClick={() => handleDelete(loc.id)} className="p-1 rounded text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors" title={`删除地点 ${loc.name}`} aria-label={`删除地点 ${loc.name}`}>
                             <Trash2 className="h-3.5 w-3.5" />
                           </button>
                           {loc.parent_location_id && (

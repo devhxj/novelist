@@ -70,8 +70,9 @@ export async function verifyShellNavigation(page) {
   await assertActiveTabTitle(page, '第1章 雨夜线索')
 
   await clickActivity(page, '搜索')
-  await expectVisible(page.getByPlaceholder('搜索人物、地点、时间线、正文...'), 'search sidebar from shell navigation')
-  await expectVisible(page.getByText('输入关键词搜索'), 'search prompt from shell navigation')
+  // A4：搜索结果占主区——侧栏仍保留输入框，主区出现结果视图。
+  await expectVisible(page.getByTestId('search-main-view'), 'search main view from shell navigation')
+  await expectVisible(page.getByTestId('search-main-view').getByPlaceholder('搜索人物、地点、时间线、正文...'), 'search input from shell navigation')
 
   await clickActivity(page, '素材库')
   await expectVisible(page.getByRole('heading', { name: '选择一个参考来源' }), 'reference materialization workspace from shell navigation')
@@ -656,35 +657,40 @@ export async function verifyImportExportFilePickerWorkflow(browser, url, console
 
 export async function verifySearchWorkflow(page) {
   await page.getByTitle('搜索').click()
-  const searchInput = page.getByPlaceholder('搜索人物、地点、时间线、正文...')
-  const searchPanel = page.locator('aside').first()
+  // A4：搜索输入框现在同时存在于侧栏与主区结果视图，取主区那个（结果在这里展开）。
+  const searchInput = page.getByTestId('search-main-view').getByPlaceholder('搜索人物、地点、时间线、正文...')
+  const searchPanel = page.getByTestId('search-main-view')
 
-  await expectVisible(page.getByText('输入关键词搜索'), 'search prompt')
+  await expectVisible(searchPanel.getByText('输入关键词搜索'), 'search prompt')
 
   await searchInput.fill('没有结果')
-  await expectVisible(page.getByText('无搜索结果'), 'empty search state')
+  await expectVisible(searchPanel.getByText('无搜索结果'), 'empty search state')
 
   await searchInput.fill('搜索失败后恢复')
-  await expectVisible(page.getByText('搜索失败，请稍后重试'), 'search failure state')
-  await searchPanel.getByRole('button', { name: '重试' }).click()
-  await expectVisible(page.getByText('正文匹配 (1)'), 'search retry recovery')
+  // 侧栏与主区各有一个 SearchPanel 实例（各自 debounce 触发 SearchAll），
+  // mock 的 failure-once 语义会让其中一份直接拿到恢复结果——失败文本用 first 宽松断言。
+  await expectVisible(page.getByText('搜索失败，请稍后重试').first(), 'search failure state')
+  // 双实例下失败态只落在一个实例上（mock failure-once），用 first 点「重试」。
+  await page.getByRole('button', { name: '重试' }).first().click()
+  await expectVisible(searchPanel.getByText('正文匹配 (1)'), 'search retry recovery')
 
   await searchInput.fill('雨夜')
-  await expectVisible(page.getByText('正文匹配 (1)'), 'content search group')
-  await expectVisible(page.getByText('人物 (1)'), 'character search group')
-  await expectVisible(page.getByText('地点 (1)'), 'location search group')
-  await expectVisible(page.getByText('时间线 (1)'), 'timeline search group')
-  await expectVisible(page.getByText('故事弧 (1)'), 'story arc search group')
-  await expectVisible(page.getByText('偏好 (1)'), 'preference search group')
-  await expectVisible(page.getByText('故事记忆 (1)'), 'story memory search group')
-  await expectVisible(page.getByText('语义匹配 (1)'), 'semantic search group')
+  // A4：结果文本在侧栏与主区各渲染一份，全部改在主区视图域内断言。
+  await expectVisible(searchPanel.getByText('正文匹配 (1)'), 'content search group')
+  await expectVisible(searchPanel.getByText('人物 (1)'), 'character search group')
+  await expectVisible(searchPanel.getByText('地点 (1)'), 'location search group')
+  await expectVisible(searchPanel.getByText('时间线 (1)'), 'timeline search group')
+  await expectVisible(searchPanel.getByText('故事弧 (1)'), 'story arc search group')
+  await expectVisible(searchPanel.getByText('偏好 (1)'), 'preference search group')
+  await expectVisible(searchPanel.getByText('故事记忆 (1)'), 'story memory search group')
+  await expectVisible(searchPanel.getByText('语义匹配 (1)'), 'semantic search group')
   await expectVisible(page.getByText('林岚在').first(), 'content result preview')
-  await expectVisible(page.getByText('旧城门调查者'), 'character result preview')
-  await expectVisible(page.getByText('雨夜里暗号被冲淡'), 'location result preview')
-  await expectVisible(page.getByText('杯底留下半圈水痕'), 'timeline result preview')
-  await expectVisible(page.getByText('雨夜场景多用动作间隔承压'), 'preference result preview')
-  await expectVisible(page.getByText('故事记忆只返回章节语义摘要'), 'story memory preview')
-  await expectVisible(page.getByText('86%'), 'rag relevance score')
+  await expectVisible(page.getByText('旧城门调查者').first(), 'character result preview')
+  await expectVisible(page.getByText('雨夜里暗号被冲淡').first(), 'location result preview')
+  await expectVisible(page.getByText('杯底留下半圈水痕').first(), 'timeline result preview')
+  await expectVisible(page.getByText('雨夜场景多用动作间隔承压').first(), 'preference result preview')
+  await expectVisible(page.getByText('故事记忆只返回章节语义摘要').first(), 'story memory preview')
+  await expectVisible(page.getByText('86%').first(), 'rag relevance score')
   await assertSearchResultContainsRestrictedSourcePath(page)
   await expectHidden(page.getByText('D:\\books\\rain-reference.md'), 'reference source path in global search')
   await expectHidden(page.getByText('D:\\restricted\\reference-source.md'), 'restricted reference source path in global search')
@@ -1033,6 +1039,11 @@ export async function verifyChapterDeleteWorkflow(browser, url, consoleErrors, p
   await expectVisible(chapterTab, 'chapter tab open before delete')
 
   await page.getByRole('button', { name: '删除章节 雨夜线索' }).click()
+  // A5：应用内确认对话框替代原生 confirm——截图后确认删除。
+  const confirmDialog = page.getByTestId('confirm-dialog')
+  await expectVisible(confirmDialog, 'in-app delete confirm dialog appears (A5)')
+  await page.screenshot({ path: path.join(outputDir, 'chapter-delete-confirm-dialog.png'), fullPage: true })
+  await confirmDialog.getByTestId('confirm-dialog-delete').click()
   const deleteToast = page.getByTestId('toast-info').filter({ hasText: '已删除第1章「雨夜线索」' })
   await expectVisible(deleteToast, 'delete toast appears with undo action')
   await expectHidden(chapterButton(page, '雨夜线索'), 'deleted chapter leaves the list')

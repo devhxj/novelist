@@ -327,7 +327,7 @@ export default function CharacterListView({ novelId, focusId }: Props) {
                           <button onClick={() => openEdit(c)} className="p-1 rounded text-muted-foreground hover:text-foreground hover:bg-secondary transition-colors" title="编辑">
                             <Pencil className="h-3.5 w-3.5" />
                           </button>
-                          <button onClick={() => handleDelete(c.id)} className="p-1 rounded text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors" title="删除">
+                          <button onClick={() => handleDelete(c.id)} className="p-1 rounded text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors" title={`删除角色 ${c.name}`} aria-label={`删除角色 ${c.name}`}>
                             <Trash2 className="h-3.5 w-3.5" />
                           </button>
                         </div>

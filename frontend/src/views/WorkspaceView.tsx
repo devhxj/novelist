@@ -8,6 +8,7 @@ import { pushToast } from '@/lib/toast'
 import ActivityBar from '@/components/shell/ActivityBar'
 import StatusBar from '@/components/shell/StatusBar'
 import SidePanel from '@/components/sidebar/SidePanel'
+import SearchPanel from '@/components/search/SearchPanel'
 import ContentPanel, { type ContentPanelHandle } from '@/components/content/ContentPanel'
 import CharacterListView from '@/components/character/CharacterListView'
 import LocationListView from '@/components/location/LocationListView'
@@ -254,7 +255,9 @@ export default function WorkspaceView({ initialNovelId, initialShowHelp, startup
       return
     }
     if (id === 'search') {
+      // A4：搜索结果占主区——左侧窄栏挤不下结果列表，且旧视图留在主区会误导。
       setSidebarPanel('search')
+      setActivePanel('search')
     } else {
       setSidebarPanel(null)
       setActivePanel(id)
@@ -572,7 +575,24 @@ export default function WorkspaceView({ initialNovelId, initialShowHelp, startup
           />
         )}
 
-        {activePanel === 'novels' ? (
+        {activePanel === 'search' ? (
+          <div className="flex min-w-0 flex-1 flex-col overflow-hidden bg-background" data-testid="search-main-view">
+            <div className="border-b px-4 py-2.5">
+              <h2 className="text-sm font-semibold text-foreground">全局搜索</h2>
+              <p className="mt-0.5 text-[11px] text-muted-foreground">搜索人物、地点、时间线与正文；点击结果跳转到对应位置。</p>
+            </div>
+            <div className="min-h-0 flex-1 overflow-y-auto">
+              <SearchPanel
+                novelId={activeNovelId}
+                query={searchQuery}
+                results={searchResults}
+                onResultsChange={(q, r) => { setSearchQuery(q); setSearchResults(r) }}
+                onNavigateEntity={handleSearchNavigateEntity}
+                onNavigateChapter={handleSearchNavigateChapter}
+              />
+            </div>
+          </div>
+        ) : activePanel === 'novels' ? (
           <BookshelfView
             novels={novels}
             activeNovelId={activeNovelId}
@@ -588,7 +608,7 @@ export default function WorkspaceView({ initialNovelId, initialShowHelp, startup
             onCancelNovelImportSelection={novelImportController.markSelectionCancelled}
             onStartNovelImportFromPath={novelImportController.startFromPath}
           />
-        ) : activePanel !== 'characters' && activePanel !== 'locations' && activePanel !== 'storyarcs' && activePanel !== 'timeline' && activePanel !== 'reader' && activePanel !== 'preferences' && activePanel !== 'reference' && activePanel !== 'git-history' && activePanel !== 'profile' && (
+        ) : activePanel !== 'characters' && activePanel !== 'locations' && activePanel !== 'storyarcs' && activePanel !== 'timeline' && activePanel !== 'reader' && activePanel !== 'preferences' && activePanel !== 'reference' && activePanel !== 'git-history' && activePanel !== 'profile' && activePanel !== 'search' && (
           <ContentPanel
             ref={contentRef}
             novelId={activeNovelId}

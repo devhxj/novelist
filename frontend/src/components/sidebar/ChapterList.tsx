@@ -5,6 +5,7 @@ import { useApp } from '@/hooks/useApp'
 import type { chapter } from '@/hooks/useApp'
 import { EventsOn } from '@/lib/novelist/events'
 import ErrorCallout from '@/components/shared/ErrorCallout'
+import ConfirmDialog from '@/components/shared/ConfirmDialog'
 import { buildCopyableDiagnostic, diagnosticMessage } from '@/lib/diagnostics'
 import { pushToast } from '@/lib/toast'
 import { outlinePath } from '@/components/content/types'
@@ -55,6 +56,8 @@ export default function ChapterList({ novelId, target, onSelectChapter, onSelect
   const [editingId, setEditingId] = useState<number | null>(null)
   const [editTitle, setEditTitle] = useState('')
   const [error, setError] = useState<VisibleError | null>(null)
+  // A5：章节删除改用应用内确认对话框（替代原生 confirm）。
+  const [pendingDelete, setPendingDelete] = useState<chapter.Chapter | null>(null)
 
   const loadChapters = useCallback(async () => {
     if (!novelId) { setChapters([]); return }
@@ -138,54 +141,48 @@ export default function ChapterList({ novelId, target, onSelectChapter, onSelect
     }
   }
 
-  async function handleDeleteChapter(ch: chapter.Chapter) {
-    // O7：软删除——章号不复用；U14：撤销恢复正文与大纲（以新章号），
-    // 因此删除前先把内容读进内存，删除是本地操作，读取不会引入等待。
-    if (!confirm(`确定要删除第${ch.chapter_number}章「${ch.title}」吗？\n\n章号不会复用。删除后可在通知里选择「撤销」，正文与大纲将以新章号恢复。`)) return
-    try {
-      // U14：撤销要恢复正文与大纲，删除前先把内容读进内存。
-      // R6：读取失败（非"文件不存在"——缺失本就返回空串）必须中止删除，
-      // 否则撤销会静默降级成"只恢复标题"，与 U14 修复前无异。
-      const content = await app.GetContent(novelId, ch.file_path)
-      const outline = await app.GetContent(novelId, outlinePath(ch.chapter_number))
-      await app.DeleteChapter({ novel_id: novelId, chapter_id: ch.id })
-      // O15：编辑器里开着的正文/大纲 tab 随删除关闭，残留 tab 的保存会被后端守卫拒绝。
-      onChapterDeleted?.(ch)
-      await loadChapters()
-      pushToast({
-        kind: 'info',
-        message: `已删除第${ch.chapter_number}章「${ch.title}」`,
-        description: '撤销会把正文与大纲恢复为一个新章节（章号不复用）。',
-        action: {
-          label: '撤销',
-          run: () => {
-            void (async () => {
-              try {
-                const created = await app.CreateChapter({ novel_id: novelId, title: ch.title })
-                if (content) {
-                  await app.SaveContent({ novel_id: novelId, path: created.file_path, content })
-                }
-                if (outline) {
-                  await app.SaveContent({ novel_id: novelId, path: outlinePath(created.chapter_number), content: outline })
-                }
-                await loadChapters()
-                pushToast({
-                  kind: 'success',
-                  message: `已恢复「${ch.title}」为第${created.chapter_number}章，正文与大纲已还原。`,
-                })
-              } catch (err) {
-                setError(buildVisibleError(err, '撤销删除失败', '撤销删除', 'CreateChapter', { novel_id: novelId }))
+  function handleDeleteChapter(ch: chapter.Chapter) {
+    // A5：应用内确认对话框替代原生 confirm，与主题一致。
+    setPendingDelete(ch)
+  }
+
+  async function performDeleteChapter(ch: chapter.Chapter) {
+    // O7：软删除——章号不复用；U14/R6：撤销要恢复正文与大纲，先读进内存；
+    // 读取或删除失败会向上抛给确认对话框呈现，不会静默降级。
+    const content = await app.GetContent(novelId, ch.file_path)
+    const outline = await app.GetContent(novelId, outlinePath(ch.chapter_number))
+    await app.DeleteChapter({ novel_id: novelId, chapter_id: ch.id })
+    // O15：编辑器里开着的正文/大纲 tab 随删除关闭，残留 tab 的保存会被后端守卫拒绝。
+    onChapterDeleted?.(ch)
+    await loadChapters()
+    pushToast({
+      kind: 'info',
+      message: `已删除第${ch.chapter_number}章「${ch.title}」`,
+      description: '撤销会把正文与大纲恢复为一个新章节（章号不复用）。',
+      action: {
+        label: '撤销',
+        run: () => {
+          void (async () => {
+            try {
+              const created = await app.CreateChapter({ novel_id: novelId, title: ch.title })
+              if (content) {
+                await app.SaveContent({ novel_id: novelId, path: created.file_path, content })
               }
-            })()
-          },
+              if (outline) {
+                await app.SaveContent({ novel_id: novelId, path: outlinePath(created.chapter_number), content: outline })
+              }
+              await loadChapters()
+              pushToast({
+                kind: 'success',
+                message: `已恢复「${ch.title}」为第${created.chapter_number}章，正文与大纲已还原。`,
+              })
+            } catch (err) {
+              setError(buildVisibleError(err, '撤销删除失败', '撤销删除', 'CreateChapter', { novel_id: novelId }))
+            }
+          })()
         },
-      })
-    } catch (err) {
-      setError(buildVisibleError(err, '删除章节失败', '删除章节', 'DeleteChapter', {
-        novel_id: novelId,
-        chapter_id: ch.id,
-      }))
-    }
+      },
+    })
   }
 
   function startEdit(ch: chapter.Chapter) {
@@ -257,6 +254,18 @@ export default function ChapterList({ novelId, target, onSelectChapter, onSelect
           </div>
         </div>
       )}
+
+      <ConfirmDialog
+        open={pendingDelete !== null}
+        title={`删除第${pendingDelete?.chapter_number ?? ''}章「${pendingDelete?.title ?? ''}」`}
+        description={'章号不会复用。删除后可在通知里选择「撤销」，正文与大纲将以新章号恢复。'}
+        onClose={() => setPendingDelete(null)}
+        onConfirm={() => {
+          const target = pendingDelete
+          setPendingDelete(null)
+          if (target) return performDeleteChapter(target)
+        }}
+      />
 
       {error && (
         <div className="border-b p-2">
