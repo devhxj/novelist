@@ -23,6 +23,7 @@ import {
   assertSearchResultContainsRestrictedSourcePath,
   assertSelectedChapterPath,
   assertStoredContent,
+  assertDisabled,
   bridgeCallCount,
   dispatchNovelImportDrop,
   expectHidden,
@@ -1081,6 +1082,30 @@ export async function verifyDataDirMigrationWorkflow(browser, url, consoleErrors
 
   await page.locator('.fixed').getByRole('button', { name: '✕' }).click()
   await page.close()
+
+  // R1：迁移进行中锁定整个设置对话框——tab 切换会卸载表单、重置 busy，
+  // 让进行中的调用失去归属；✕ 也不得放行。
+  const busyPage = await newAppPage(browser, consoleErrors, pageErrors, {
+    initialized: true,
+    confirmResult: true,
+    faults: { UpdateDataDir: { mode: 'timeout' } },
+  }, undefined, 'data-dir-migration-busy')
+  await busyPage.goto(url, { waitUntil: 'domcontentloaded' })
+  await expectVisible(busyPage.getByText('全局回归小说'), 'workspace title before busy migration')
+  await busyPage.locator('header').getByRole('button', { name: '设置' }).click()
+  await busyPage.getByTestId('start-data-dir-migration').click()
+  const busyForm = busyPage.getByTestId('migrate-data-dir-form')
+  await busyForm.getByLabel('新的数据目录').fill('D:\\NovelistSlowMigration')
+  await busyForm.getByRole('button', { name: '开始迁移' }).click()
+  await expectVisible(busyForm.getByText('迁移中…'), 'migration marked as in-flight')
+  await assertDisabled(busyPage.getByRole('button', { name: '模型配置' }), 'tab nav locked while migrating (R1)')
+  // ✕ 带 aria-disabled（读屏语义），Playwright 会拒绝普通点击；force 模拟真实用户
+  // 仍然点到按钮——guardedClose 必须拦下并给出提示。
+  await busyPage.locator('.fixed').getByRole('button', { name: '✕' }).click({ force: true })
+  await expectVisible(busyPage.getByText('操作正在进行中，完成前无法关闭设置。'), 'close attempt surfaces a notice instead of closing')
+  await expectVisible(busyPage.getByText('基础设置'), 'dialog stays open during migration')
+  await busyPage.screenshot({ path: path.join(outputDir, 'data-dir-migration-busy.png'), fullPage: true })
+  await busyPage.close()
 }
 
 export async function verifyReferenceSmoke(page) {

@@ -148,6 +148,12 @@ export default function ChatPanel({
   // session_id，它会置 activeSessionId 并触发"加载历史消息" effect——若不区分，
   // 首轮流式输出会在中途被 rebuildTurns 整体冲掉（第三轮 mock 规避记录的真实缺陷）。
   const liveTurnsSessionIdRef = useRef<string | null>(null)
+  // R5：离开"仍在流式的会话"时留存 turns 快照——切回时恢复快照而非重放历史，
+  // 否则在途回复会在作者眼前消失（服务端落库不受影响，纯展示层丢失）。
+  const liveTurnsSnapshotsRef = useRef<Map<string, Turn[]>>(new Map())
+  const turnsRef = useRef<Turn[]>([])
+  // R5：历史加载的响应竞态守卫——快速连续切换会话时，慢的旧响应不得覆盖新会话。
+  const historySeqRef = useRef(0)
   const onApprovalFileEditRef = useRef(onApprovalFileEdit)
   useEffect(() => { onApprovalFileEditRef.current = onApprovalFileEdit }, [onApprovalFileEdit])
   // 待恢复的上次会话 ID：设置加载完成后由恢复 effect 消费（F12）。
@@ -156,6 +162,8 @@ export default function ChatPanel({
   useEffect(() => {
     latestWidthRef.current = width
   }, [width])
+
+  useEffect(() => { turnsRef.current = turns }, [turns])
 
   // 章节语料覆盖度：打开章节后按细纲 beat 聚合检索命中，写作前给出“语料不足”信号。
   // seq guard 防止章节快速切换时旧请求覆盖新结果；失败显式呈现，不再静默吞掉。
@@ -264,6 +272,7 @@ export default function ChatPanel({
     setTurns([])
     setSessionId('')
     liveTurnsSessionIdRef.current = null
+    liveTurnsSnapshotsRef.current.clear()
     app.GetSessions({ novel_id: novelId, page: 1, size: 5, search: '' }).then(r => {
       if (r) {
         setSessions(r.items)
@@ -292,20 +301,33 @@ export default function ChatPanel({
   // 加载历史消息
   useEffect(() => {
     if (!activeSessionId || !novelId) return
-    // O21：会话就是刚流式完/正在流式的这一场，turns 已是权威状态，
-    // 重放历史只会把流式气泡冲掉——只有切换到别的会话才走重放。
-    if (liveTurnsSessionIdRef.current === activeSessionId) return
+    const seq = ++historySeqRef.current
+    // O21/R5：会话仍在流式时 turns 是权威状态——恢复离开时的快照而不是重放历史，
+    // 重放会把在途气泡冲掉；快照恢复后，后续流式事件按 turn id 继续嫁接。
+    if (liveTurnsSessionIdRef.current === activeSessionId) {
+      setSessionId(activeSessionId)
+      const snapshot = liveTurnsSnapshotsRef.current.get(activeSessionId)
+      if (snapshot) {
+        setTurns(snapshot)
+        liveTurnsSnapshotsRef.current.delete(activeSessionId)
+      }
+      return
+    }
     setSessionId(activeSessionId)
     setHistoryLoadError(false)
     setIsLoadingHistory(true)
     app.GetSessionMessages(activeSessionId).then(msgs => {
+      if (seq !== historySeqRef.current) return
       if (msgs) {
         setTurns(rebuildTurns(msgs))
       }
     }).catch((err) => {
+      if (seq !== historySeqRef.current) return
       console.error('Load messages failed', err)
       setHistoryLoadError(true)
-    }).finally(() => setIsLoadingHistory(false))
+    }).finally(() => {
+      if (seq === historySeqRef.current) setIsLoadingHistory(false)
+    })
   }, [app, activeSessionId, novelId, historyLoadRetry])
 
   const handleMouseDown = useCallback((e: ReactMouseEvent) => {
@@ -399,8 +421,11 @@ export default function ChatPanel({
   }, [])
 
   const handleSelectSession = useCallback((sid: string) => {
-    if (liveTurnsSessionIdRef.current !== sid) {
-      liveTurnsSessionIdRef.current = null
+    // R5：离开仍在流式的会话时留存快照，等效关系保留到本轮收尾——
+    // 切回时恢复快照，而不是重放历史把在途回复冲掉。
+    const liveSessionId = liveTurnsSessionIdRef.current
+    if (liveSessionId && liveSessionId !== sid) {
+      liveTurnsSnapshotsRef.current.set(liveSessionId, turnsRef.current)
     }
     setActiveSessionId(sid)
     app.SetLastSession(sid).catch(() => {})
@@ -414,10 +439,14 @@ export default function ChatPanel({
   }, [app])
 
   const handleNewChat = useCallback(() => {
+    const liveSessionId = liveTurnsSessionIdRef.current
+    if (liveSessionId) {
+      liveTurnsSnapshotsRef.current.set(liveSessionId, turnsRef.current)
+      liveTurnsSessionIdRef.current = null
+    }
     setActiveSessionId(null)
     setTurns([])
     setSessionId('')
-    liveTurnsSessionIdRef.current = null
     setLastUsage(null)
     app.GetSessions({ novel_id: novelId, page: 1, size: 5, search: '' }).then(r => {
       if (r) { setSessions(r.items); setSessionsTotal(r.total) }
@@ -1047,6 +1076,12 @@ export default function ChatPanel({
       if (activeCountRef.current === 0) {
         setIsLoading(false)
         activeTurnSessionIdRef.current = null
+        // 本轮流式结束：快照作废（服务端已有完整记录），之后切回应走正常历史重放。
+        const finishedLiveSessionId = liveTurnsSessionIdRef.current
+        liveTurnsSessionIdRef.current = null
+        if (finishedLiveSessionId) {
+          liveTurnsSnapshotsRef.current.delete(finishedLiveSessionId)
+        }
       }
       turnSubsRef.current.delete(turnId)
       subs.started?.()

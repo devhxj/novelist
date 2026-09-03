@@ -57,6 +57,10 @@ public sealed class DataDirectoryRelocationService : IDataDirectoryRelocationSer
 
         Directory.CreateDirectory(target);
         var manifestPath = Path.Combine(target, ManifestFileName);
+        // R2：目标里留着上次失败/中断的清单时，其部分复制产物不可当作作者数据——
+        // 本轮对内容冲突的文件改"覆盖"而不是跳过，源目录始终是权威版本。
+        var priorStatus = TryReadManifestStatus(manifestPath);
+        var overwriteConflicts = priorStatus is "failed" or "running";
         var result = new CopyResult();
         var manifest = new RelocationManifest
         {
@@ -69,7 +73,7 @@ public sealed class DataDirectoryRelocationService : IDataDirectoryRelocationSer
         await WriteManifestAsync(manifestPath, manifest, cancellationToken);
         try
         {
-            await CopyDirectoryRecursiveAsync(source, target, result, cancellationToken);
+            await CopyDirectoryRecursiveAsync(source, target, result, overwriteConflicts, cancellationToken);
             manifest.CompletedAt = DateTimeOffset.UtcNow;
             manifest.Status = result.Warnings.Count == 0 ? "completed" : "completed_with_warnings";
             manifest.CopiedFiles = result.Copied;
@@ -127,6 +131,7 @@ public sealed class DataDirectoryRelocationService : IDataDirectoryRelocationSer
         string sourceDirectory,
         string targetDirectory,
         CopyResult result,
+        bool overwriteConflicts,
         CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
@@ -152,7 +157,7 @@ public sealed class DataDirectoryRelocationService : IDataDirectoryRelocationSer
             var target = Path.Combine(targetDirectory, Path.GetFileName(entry));
             if (Directory.Exists(entry))
             {
-                await CopyDirectoryRecursiveAsync(entry, target, result, cancellationToken);
+                await CopyDirectoryRecursiveAsync(entry, target, result, overwriteConflicts, cancellationToken);
                 continue;
             }
 
@@ -176,8 +181,36 @@ public sealed class DataDirectoryRelocationService : IDataDirectoryRelocationSer
                 continue;
             }
 
+            if (overwriteConflicts)
+            {
+                // 上次失败尝试留下的部分产物：以源为准覆盖（R2 重试语义）。
+                File.Copy(entry, target, overwrite: true);
+                result.Copied++;
+                continue;
+            }
+
             result.Skipped++;
             result.Warnings.Add($"Skipped conflicting existing file: {target}");
+        }
+    }
+
+    private static string? TryReadManifestStatus(string manifestPath)
+    {
+        if (!File.Exists(manifestPath))
+        {
+            return null;
+        }
+
+        try
+        {
+            using var document = JsonDocument.Parse(File.ReadAllBytes(manifestPath));
+            return document.RootElement.TryGetProperty("status", out var value) && value.ValueKind == JsonValueKind.String
+                ? value.GetString()
+                : null;
+        }
+        catch
+        {
+            return null;
         }
     }
 

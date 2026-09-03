@@ -28,6 +28,9 @@ type Listener = (toasts: ToastItem[]) => void
 
 const AUTO_DISMISS_MS: Record<ToastKind, number> = { info: 5000, success: 6000, error: 10000 }
 const MAX_VISIBLE = 4
+// R9：带动作的 toast 不参与无动作条的挤出，但自身也要有界——多本书材料化完成会一次
+// 推 N 条动作通知，无界堆叠会把旧卡片顶出屏幕、动作按钮再也点不到。超限从最老的丢起。
+const MAX_ACTION_VISIBLE = 4
 
 let toasts: ToastItem[] = []
 let nextId = 1
@@ -48,6 +51,11 @@ export function pushToast(input: ToastInput): number {
   const item: ToastItem = { id, kind, message: input.message, description: input.description, action: input.action }
   if (item.action) {
     // U14/U16：带动作的通知（撤销、跳转、重试）不自动消失——动作没被处理就消失等于吞掉作者的出路。
+    const actionToasts = toasts.filter((toast) => toast.action)
+    if (actionToasts.length >= MAX_ACTION_VISIBLE) {
+      const evictIds = new Set(actionToasts.slice(0, actionToasts.length - MAX_ACTION_VISIBLE + 1).map((toast) => toast.id))
+      toasts = toasts.filter((toast) => !evictIds.has(toast.id))
+    }
     toasts = [...toasts, item]
   } else {
     const plain = toasts.filter((toast) => !toast.action)

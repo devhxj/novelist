@@ -66,14 +66,22 @@ await SaveConfigAsync(dataDirectory, cancellationToken);
 
             await ReconcileStartupRecoveryAsync(cancellationToken);
         }
-catch
-{
+ catch
+ {
+ // R10：回滚自身的失败不得掩盖原始错误（与 UpdateDataDirectoryAsync 同口径）。
+ try
+ {
  await RestoreConfigAsync(previousConfig);
  ResetRecoveryState();
  if (previousConfig is not null)
  await ReconcileAfterRollbackAsync();
-throw;
-}
+ }
+ catch
+ {
+ }
+
+ throw;
+ }
     }
 
     public async ValueTask<AppConfigPayload> GetAppConfigAsync(CancellationToken cancellationToken)
@@ -112,10 +120,19 @@ public async ValueTask<UpdateDataDirResultPayload> UpdateDataDirectoryAsync(stri
  }
  catch
  {
+ // R10：回滚自身的失败不得掩盖原始错误——恢复失败只放弃回滚，原始异常照常上抛。
+ try
+ {
  await RestoreConfigAsync(previousConfig);
  ResetRecoveryState();
  if (previousConfig is not null)
  await ReconcileAfterRollbackAsync();
+ }
+ catch
+ {
+ // 指针可能仍指向新目录；config.json 可由重新初始化修复。
+ }
+
  throw;
  }
 

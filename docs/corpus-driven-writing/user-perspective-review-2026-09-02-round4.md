@@ -202,6 +202,29 @@
 
 补跑结果：`test:error-ui`、`test:app:full`、`test:phase16`、`test:node`（23）、`lint` 全绿。
 
+## 九、复盘二轮：落地代码缺陷走查（2026-09-03，R1–R10 全部处置）
+
+对 `834dbfb`/`5f6981e` 两批落地代码做独立缺陷走查（不复述第六、八节已修项），发现 10 处新缺口——全部是"修复自身引入的次生问题"或"修复覆盖面不全"两类。逐项处置如下：
+
+| # | 缺口 | 严重度 | 处置 |
+|---|---|---|---|
+| R1 | 设置对话框 busy 守卫可被绕过且会"粘死"：迁移中切换到「模型配置」tab 会卸载 GeneralConfigTab——busy 既可能永久滞留 true（对话框关不掉），也可能在重挂载后归零（迁移进行中却能关闭、还能再发起第二次） | 🟠 | busy 期间禁用 tab 导航（`disabled`）；工作流新增"迁移挂起"场景（UpdateDataDir timeout fault）：断言 tab 锁定、✕ 强制点击被 guardedClose 拦截并提示、对话框保持打开（截图 `data-dir-migration-busy.png`） |
+| R2 | 迁移重试进入上次失败的目标目录时，遗留的部分复制产物被当作作者数据"冲突跳过"——源此后改过的内容永远进不了目标，成功提示却宣布迁移完成 | 🟠 | `RelocateAsync` 启动时读取目标既有清单：status 为 failed/running 时本轮对冲突文件改为**以源覆盖**（源始终权威）；成功文案区分"内容冲突跳过（N 个，见清单）"与"相同文件跳过"；集成测试 `RelocationRetryOverwritesStaleFilesFromFailedPriorAttempt` |
+| R3 | O15 复活守卫只覆盖 `chapters/`：`ParseChapterNumber` 不认 outline 路径，Agent 编辑或残留 tab 仍可把已删章节的 `outlines/NNN.md` 复活成孤儿（照常 git 提交） | 🟠 | 新增 `OutlinePathPattern`，守卫改为正文与大纲同查章节库（`guardedChapterNumber`）；元数据/字数更新仍只认正文路径；集成测试断言 outline 保存被拒且文件不复活 |
+| R4 | N6 的统计扣减位于"元数据已持久化之后、文件清理之前"且不容错：统计存储损坏会让删除在半途抛错——文件残留、stale 标记与 git 提交全部丢失，前端报"删除失败"但章节其实已删 | 🟠 | 扣减改尽力而为（try/catch，与 stale 标记同口径）——统计是派生数据，删除主流程不可被其中断；集成测试注入抛错的 recorder 断言删除仍完整（文件删除 + stale 标记 + 列表清空） |
+| R5 | O21 的等效标记在"切走"时被清除：流式中切到别的会话再切回，历史重放会把在途回复整体冲掉且永不落地显示（服务端落库正常，纯展示层丢失）；另历史加载无响应竞态守卫（快速 S2→S1 切换时慢响应覆盖新会话） | 🟠 | 新增 `liveTurnsSnapshotsRef`（离开流式会话时留存 turns 快照，切回时恢复而非重放，本轮收尾作废快照）；历史加载加 seq 守卫（过期响应丢弃）；`handleNewChat` 同步留存快照 |
+| R6 | U14 的撤销读取用 `.catch(() => '')` 吞掉真实读取故障——撤销会静默降级成"只恢复标题"，却仍提示"正文与大纲已还原" | 🟡 | 读取失败即中止删除并显式报错（后端对缺失文件本就返回空串，真正抛错的只有桥/IO 故障） |
+| R7 | localStorage 恢复的章节 tab 若指向已删章节：打开是空白编辑器（像数据丢失），直到保存才见到英文报错 | 🟡 | ContentPanel 恢复 tab 后与 `GetChapters` 一次性核对，失效章节 tab 自动关闭并 toast 说明（校验失败不阻塞编辑） |
+| R8 | 章节守卫的英文异常消息直达中文作者 | 🟡 | `doSave` 识别守卫消息特征并替换为中文动作指引（"该章节已被删除……请关闭标签页或新建章节"），诊断详情仍保留原文 |
+| R9 | 动作 toast 不自动消失也不参与挤出，但自身无界——多本书材料化完成一次推 N 条，旧卡片被顶出屏幕、动作按钮点不到；容器也无溢出处理 | 🟡 | 动作条上限 4 条（超限从最老丢起，`MAX_ACTION_VISIBLE`）；容器加 `max-h` + `overflow-y-auto`；单测覆盖"推 7 条动作条只剩最新 4 条" |
+| R10 | 迁移回滚路径若自身抛错（恢复 config 失败），新异常会掩盖原始迁移错误，前端拿到错误的失败原因；极端时指针仍指向新目录 | 🟡 | `InitializeAsync`/`UpdateDataDirectoryAsync` 的回滚体各自包 try/catch——回滚失败只放弃回滚，原始异常照常上抛 |
+
+**走查同时核实为无问题的项**（避免下轮重复怀疑）：`TryLoadConfigAsync` 重构未改变其它调用方行为；高水位对存量 store（`next_chapter_number` 缺省 0）与 999_999 边界均正确；前端三处 outline 路径拼法（padStart(3)/D3）对千章以上一致；O20 keep-current 与工作区可见性不变量兼容；stale 标记移入章节互斥锁无重入；迁移复制窗口被 bridge Exclusive 门与 worker 停止完整隔离。
+
+### 复盘二轮验证基线
+
+后端：`dotnet test` 全绿（新增 outline 守卫、统计容错、迁移重试覆盖 ×3）。前端：`build`、`lint` 0 警告、`test:node`（23 例，含动作条上限）、`test:app:full`（含新增"迁移挂起"场景）全绿。新增截图：`data-dir-migration-busy.png`。
+
 ### 残余事项（不阻塞）
 
 1. 迁移完成后仍打开的旧 UI 状态（作品列表、会话）不会被强制刷新——已切换数据源后的陈旧写风险由各服务的目录解析器兜底，完整的"迁移后全量刷新"留给后续。

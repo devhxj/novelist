@@ -7,6 +7,7 @@ import { useEditorTabs } from '@/hooks/useEditorTabs'
 import { useTheme, type Theme } from '@/hooks/useTheme'
 import { EventsOn } from '@/lib/novelist/events'
 import { buildCopyableDiagnostic, diagnosticMessage } from '@/lib/diagnostics'
+import { pushToast } from '@/lib/toast'
 import type { diagnostics } from '@/lib/novelist/types'
 import ErrorCallout from '@/components/shared/ErrorCallout'
 import TabBar from './TabBar'
@@ -160,6 +161,35 @@ const ContentPanel = forwardRef<ContentPanelHandle, Props>(function ContentPanel
     }
   }, [app, tabs, novelId, updateTab, initRef])
 
+  // R7：localStorage 恢复的章节 tab 可能指向已删除的章节（跨重启场景）——
+  // 与章节库核对一次，失效的 tab 直接关闭并提示，避免"打开即空白、保存才报错"。
+  const validatedChapterTabsRef = useRef<number>(0)
+  useEffect(() => {
+    if (!initRef.current || !novelId || validatedChapterTabsRef.current === novelId) return
+    const chapterTabs = tabsRef.current.filter(
+      (tab) => tab.type === 'file' && tab.path.startsWith('chapters/') && tab.path.endsWith('.md'))
+    if (chapterTabs.length === 0) {
+      validatedChapterTabsRef.current = novelId
+      return
+    }
+    validatedChapterTabsRef.current = novelId
+    void app.GetChapters(novelId).then((chapters) => {
+      const livePaths = new Set((chapters ?? []).map((chapter) => chapter.file_path))
+      const stale = chapterTabs.filter((tab) => !livePaths.has(tab.path))
+      for (const tab of stale) {
+        closeTab(tab.id)
+        const numberText = tab.path.replace(/^chapters\//, '').replace(/\.md$/, '')
+        pushToast({
+          kind: 'info',
+          message: `第${Number(numberText)}章已被删除，已关闭对应标签页。`,
+        })
+      }
+    }).catch(() => {
+      // 校验失败不阻塞编辑（可能只是章节列表暂不可用）。
+      validatedChapterTabsRef.current = 0
+    })
+  }, [app, novelId, initRef, closeTab, tabs])
+
   // Ctrl+Shift+V 的实际动作（N3）：监听器同样上收到 WorkspaceView 层。
   const toggleActivePreview = useCallback(() => {
     const tab = tabs.find(t => t.id === activeTabId)
@@ -209,10 +239,15 @@ const ContentPanel = forwardRef<ContentPanelHandle, Props>(function ContentPanel
         saveTimerRef.current = null
       }
     } catch (error) {
-      const fallbackMessage = '保存失败，请重试'
+      // R8：后端章节守卫（O15/R3）的英文消息直达作者可读文案。
+      const rawMessage = error instanceof Error ? error.message : String(error ?? '')
+      const deletedChapter = rawMessage.includes('does not exist (it may have been deleted)')
+      const fallbackMessage = deletedChapter
+        ? '该章节已被删除，无法保存。请关闭此标签页，或从章节列表新建章节继续写作。'
+        : '保存失败，请重试'
       setSaveError({
         tabId,
-        message: diagnosticMessage(error, fallbackMessage),
+        message: deletedChapter ? fallbackMessage : diagnosticMessage(error, fallbackMessage),
         diagnostic: buildCopyableDiagnostic({
           error,
           fallbackMessage,

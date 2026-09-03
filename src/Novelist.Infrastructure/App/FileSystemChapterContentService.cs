@@ -24,6 +24,11 @@ public sealed class FileSystemChapterContentService : IChapterContentService
         @"^chapters/(\d{3,6})\.md$",
         RegexOptions.Compiled | RegexOptions.CultureInvariant);
 
+    // 大纲伴生文件与正文同生命周期：删除章节时两者一并移除，守卫也须一并覆盖（R3）。
+    private static readonly Regex OutlinePathPattern = new(
+        @"^outlines/(\d{3,6})\.md$",
+        RegexOptions.Compiled | RegexOptions.CultureInvariant);
+
     private static readonly Regex UserSkillPathPattern = new(
         @"^~/\.novelist/skills/([^/\\:]+)\.md$",
         RegexOptions.Compiled | RegexOptions.CultureInvariant);
@@ -237,13 +242,22 @@ public sealed class FileSystemChapterContentService : IChapterContentService
             await SaveAsync(input.NovelId, store, cancellationToken);
 
             // 删除的章节字数要从写作统计里扣掉（N6），否则速度数据永远虚高。
+            // 统计是派生数据：扣减失败不得中断删除（元数据已持久化，中断会让
+            // 文件清理、stale 标记与版本提交全部丢失），按尽力而为处理。
             if (_writingDeltaRecorder is not null && chapter.WordCount != 0)
             {
-                await _writingDeltaRecorder.RecordWordDeltaAsync(
-                    input.NovelId,
-                    chapter.Id,
-                    -chapter.WordCount,
-                    cancellationToken);
+                try
+                {
+                    await _writingDeltaRecorder.RecordWordDeltaAsync(
+                        input.NovelId,
+                        chapter.Id,
+                        -chapter.WordCount,
+                        cancellationToken);
+                }
+                catch
+                {
+                    // 写作速度数据缺失一次扣减可接受；删除主流程必须继续。
+                }
             }
 
             try
@@ -325,20 +339,22 @@ public sealed class FileSystemChapterContentService : IChapterContentService
         var shouldMarkRagStale = false;
         var shouldCommitRepositoryChanges = !IsUserSkillPath(relativePath);
         var chapterNumber = ParseChapterNumber(relativePath);
+        // R3：大纲伴生文件与正文同一守卫——否则 Agent 编辑或残留 tab 仍可把已删章节的大纲复活成孤儿。
+        var guardedChapterNumber = chapterNumber ?? ParseOutlineChapterNumber(relativePath);
 
         await _mutex.WaitAsync(cancellationToken);
         try
         {
-            // O15：章节文件必须先过章节库守卫再写盘——章号已删除/不存在时拒绝保存，
+            // O15/R3：章节正文与大纲都必须先过章节库守卫再写盘——章号已删除/不存在时拒绝保存，
             // 防止编辑器残留 tab、自动保存或 Agent 编辑把已删除章节复活成无元数据的孤儿文件。
             ChapterStoreDocument? store = null;
-            if (chapterNumber is not null)
+            if (guardedChapterNumber is not null)
             {
                 store = await LoadOrCreateAsync(input.NovelId, cancellationToken);
-                if (store.Items.FindIndex(chapter => chapter.ChapterNumber == chapterNumber.Value) < 0)
+                if (store.Items.FindIndex(chapter => chapter.ChapterNumber == guardedChapterNumber.Value) < 0)
                 {
                     throw new ArgumentException(
-                        $"Chapter {chapterNumber.Value.ToString(CultureInfo.InvariantCulture)} does not exist (it may have been deleted). " +
+                        $"Chapter {guardedChapterNumber.Value.ToString(CultureInfo.InvariantCulture)} does not exist (it may have been deleted). " +
                         "Create a new chapter instead of saving to the retired chapter file.",
                         nameof(input));
                 }
@@ -666,6 +682,12 @@ public sealed class FileSystemChapterContentService : IChapterContentService
     private static int? ParseChapterNumber(string relativePath)
     {
         var match = ChapterPathPattern.Match(relativePath);
+        return match.Success ? int.Parse(match.Groups[1].Value, CultureInfo.InvariantCulture) : null;
+    }
+
+    private static int? ParseOutlineChapterNumber(string relativePath)
+    {
+        var match = OutlinePathPattern.Match(relativePath);
         return match.Success ? int.Parse(match.Groups[1].Value, CultureInfo.InvariantCulture) : null;
     }
 

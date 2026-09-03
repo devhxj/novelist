@@ -52,7 +52,10 @@ export default function SettingsDialog({ open, onClose, onSaved, initialTab = 'm
             <button
               key={tab.id}
               onClick={() => setActiveTab(tab.id)}
-              className={`flex items-center gap-2 px-3 py-2 rounded-lg text-sm transition-colors w-full text-left ${
+              // R1：独占操作（数据目录迁移）进行中锁定 tab 切换——否则 GeneralConfigTab 卸载会
+              // 重置 busy（对话框在迁移进行中变得可关），进行中的调用失去归属与反馈。
+              disabled={busy}
+              className={`flex items-center gap-2 px-3 py-2 rounded-lg text-sm transition-colors w-full text-left disabled:cursor-not-allowed disabled:opacity-50 ${
                 activeTab === tab.id
                   ? 'bg-primary/10 text-primary font-medium'
                   : 'text-muted-foreground hover:text-foreground hover:bg-muted/50'

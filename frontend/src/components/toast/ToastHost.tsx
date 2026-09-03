@@ -65,7 +65,7 @@ export default function ToastHost() {
       aria-live="polite"
       aria-label="应用通知"
       data-testid="toast-host"
-      className="fixed bottom-14 right-4 z-[70] flex flex-col gap-2"
+      className="fixed bottom-14 right-4 z-[70] flex max-h-[calc(100vh-6rem)] flex-col gap-2 overflow-y-auto"
     >
       {toasts.map((toast) => <ToastCard key={toast.id} toast={toast} />)}
     </div>

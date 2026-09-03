@@ -179,6 +179,55 @@ public sealed class ChapterContentServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task SaveContentToDeletedChapterOutlineIsRejectedToo()
+    {
+        var options = CreateOptions();
+        await InitializeAsync(options);
+        var novelService = new FileSystemNovelService(options, new FileSystemAppSettingsService(options));
+        var novel = await novelService.CreateNovelAsync(new CreateNovelPayload("大纲守卫", "", ""), CancellationToken.None);
+        var service = new FileSystemChapterContentService(options, novelService);
+        var chapter = await service.CreateChapterAsync(new CreateChapterPayload(novel.Id, "带大纲的一章"), CancellationToken.None);
+        await service.SaveContentAsync(
+            new SaveContentPayload(novel.Id, "outlines/001.md", "这一章的三幕结构"),
+            CancellationToken.None);
+
+        await service.DeleteChapterAsync(new DeleteChapterPayload(novel.Id, chapter.Id), CancellationToken.None);
+
+        // R3：大纲伴生文件与正文同守卫——Agent 编辑或残留 tab 不得复活已删章节的大纲。
+        await Assert.ThrowsAsync<ArgumentException>(
+            () => service.SaveContentAsync(
+                new SaveContentPayload(novel.Id, "outlines/001.md", "迟到的大纲改动"),
+                CancellationToken.None).AsTask());
+        Assert.False(File.Exists(Path.Combine(options.DefaultDataDirectory, "novels", novel.Id.ToString(), "outlines", "001.md")));
+    }
+
+    [Fact]
+    public async Task DeleteChapterToleratesWritingDeltaRecorderFailure()
+    {
+        var options = CreateOptions();
+        await InitializeAsync(options);
+        var novelService = new FileSystemNovelService(options, new FileSystemAppSettingsService(options));
+        var novel = await novelService.CreateNovelAsync(new CreateNovelPayload("统计容错", "", ""), CancellationToken.None);
+        var notifier = new RecordingRagIndexRefreshNotifier();
+        var service = new FileSystemChapterContentService(
+            options,
+            novelService,
+            writingDeltaRecorder: new ThrowingWritingDeltaRecorder(),
+            ragRefreshNotifier: notifier);
+        var chapter = await service.CreateChapterAsync(new CreateChapterPayload(novel.Id, "长章"), CancellationToken.None);
+        await service.SaveContentAsync(
+            new SaveContentPayload(novel.Id, chapter.FilePath, "正文内容若干字"),
+            CancellationToken.None);
+
+        // R4：统计扣减失败不得中断删除——元数据已持久化，中断会丢掉文件清理/stale/提交。
+        await service.DeleteChapterAsync(new DeleteChapterPayload(novel.Id, chapter.Id), CancellationToken.None);
+
+        Assert.False(File.Exists(Path.Combine(options.DefaultDataDirectory, "novels", novel.Id.ToString(), "chapters", "001.md")));
+        Assert.Contains(notifier.Notifications, notification => notification.Reason.Contains("chapters/001.md", StringComparison.Ordinal));
+        Assert.Empty(await service.GetChaptersAsync(novel.Id, CancellationToken.None));
+    }
+
+    [Fact]
     public async Task DeleteChapterRecordsNegativeWordDeltaInWritingStatistics()
     {
         var options = CreateOptions();
@@ -447,6 +496,24 @@ public sealed class ChapterContentServiceTests : IDisposable
         {
             cancellationToken.ThrowIfCancellationRequested();
             Deltas.Add((chapterId, wordDelta));
+            return ValueTask.CompletedTask;
+        }
+    }
+
+    private sealed class ThrowingWritingDeltaRecorder : IWritingDeltaRecorder
+    {
+        public ValueTask RecordWordDeltaAsync(
+            long novelId,
+            long chapterId,
+            int wordDelta,
+            CancellationToken cancellationToken)
+        {
+            // 只让"删除扣减"这条路径失败：保存时的正向记录是另一条语义（保存失败应如实上抛）。
+            if (wordDelta < 0)
+            {
+                throw new InvalidOperationException("writing statistics store is corrupt");
+            }
+
             return ValueTask.CompletedTask;
         }
     }

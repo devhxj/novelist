@@ -100,12 +100,15 @@ export default function GeneralConfigTab({ onBusyChange }: { onBusyChange?: (bus
       setNewDataDir('')
       // 如实呈现复制结果（U13）：copy-first 完成后才切换指针，原目录保持原样。
       const copied = result?.copied_files ?? 0
+      const warnings = result?.warnings ?? 0
       const skipped = result?.skipped_files ?? 0
       setMigrateFeedback({
         kind: 'success',
         message: `数据目录迁移完成：已复制 ${copied} 个文件` +
-          (skipped > 0 ? `（${skipped} 个已存在的相同/冲突文件跳过）` : '') +
-          `，应用已切换到新目录。原目录未做任何改动，确认无误后可自行备份清理。` +
+          (warnings > 0
+            ? `；${warnings} 个目标已有、内容不同的文件被跳过（未覆盖，详见迁移清单）。`
+            : skipped > 0 ? `（${skipped} 个已存在的相同文件跳过）` : '') +
+          `应用已切换到新目录。原目录未做任何改动，确认无误后可自行备份清理。` +
           (result?.manifest_path ? `迁移清单：${result.manifest_path}` : ''),
       })
     } catch (err) {

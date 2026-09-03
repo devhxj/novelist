@@ -89,6 +89,18 @@ try {
     assert.equal(toast.getToastSnapshot().length, 0, 'dismissToast removes an action toast')
   }
 
+  {
+    // R9：动作条自身有界（多本书材料化完成会一次推 N 条）——超限从最老的丢起，
+    // 否则旧卡片被顶出屏幕、动作按钮再也点不到。
+    clearAll()
+    for (let i = 1; i <= 7; i += 1) {
+      toast.pushToast({ kind: 'success', message: `action-${i}`, action: { label: `动作${i}`, run: () => {} } })
+    }
+    const snapshot = toast.getToastSnapshot()
+    assert.equal(snapshot.length, 4, 'action toasts cap at MAX_ACTION_VISIBLE')
+    assert.deepEqual(snapshot.map((item) => item.message), ['action-4', 'action-5', 'action-6', 'action-7'], 'oldest action toasts dropped first')
+  }
+
   console.log('toast store tests passed')
 } finally {
   await rm(tempDir, { recursive: true, force: true })

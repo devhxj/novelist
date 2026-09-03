@@ -130,10 +130,11 @@ export default function ChapterList({ novelId, target, onSelectChapter, onSelect
     // 因此删除前先把内容读进内存，删除是本地操作，读取不会引入等待。
     if (!confirm(`确定要删除第${ch.chapter_number}章「${ch.title}」吗？\n\n章号不会复用。删除后可在通知里选择「撤销」，正文与大纲将以新章号恢复。`)) return
     try {
-      const [content, outline] = await Promise.all([
-        app.GetContent(novelId, ch.file_path).catch(() => ''),
-        app.GetContent(novelId, outlinePath(ch.chapter_number)).catch(() => ''),
-      ])
+      // U14：撤销要恢复正文与大纲，删除前先把内容读进内存。
+      // R6：读取失败（非"文件不存在"——缺失本就返回空串）必须中止删除，
+      // 否则撤销会静默降级成"只恢复标题"，与 U14 修复前无异。
+      const content = await app.GetContent(novelId, ch.file_path)
+      const outline = await app.GetContent(novelId, outlinePath(ch.chapter_number))
       await app.DeleteChapter({ novel_id: novelId, chapter_id: ch.id })
       // O15：编辑器里开着的正文/大纲 tab 随删除关闭，残留 tab 的保存会被后端守卫拒绝。
       onChapterDeleted?.(ch)

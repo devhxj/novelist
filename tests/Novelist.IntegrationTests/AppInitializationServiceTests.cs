@@ -303,6 +303,29 @@ public sealed class AppInitializationServiceTests : IDisposable
         Assert.Equal("completed_with_warnings", ReadManifestStatus(result.ManifestPath));
     }
 
+    [Fact]
+    public async Task RelocationRetryOverwritesStaleFilesFromFailedPriorAttempt()
+    {
+        var source = Path.Combine(_root, "retry-source");
+        var target = Path.Combine(_root, "retry-target");
+        Directory.CreateDirectory(Path.Combine(source, "novels"));
+        await File.WriteAllTextAsync(Path.Combine(source, "novels", "index.json"), "{\"v\":2}");
+
+        // 模拟上次失败尝试：目标里留下 failed 清单 + 一份过期的部分复制产物（源此后又改过）。
+        Directory.CreateDirectory(Path.Combine(target, "novels"));
+        await File.WriteAllTextAsync(
+            Path.Combine(target, DataDirectoryRelocationService.ManifestFileName),
+            "{\"status\":\"failed\",\"started_at\":\"2026-01-01T00:00:00Z\"}");
+        await File.WriteAllTextAsync(Path.Combine(target, "novels", "index.json"), "{\"v\":1}");
+
+        var result = await new DataDirectoryRelocationService().RelocateAsync(source, target, CancellationToken.None);
+
+        // R2：重试以源为权威覆盖上次的部分产物，而不是跳过陈旧文件。
+        Assert.Equal("{\"v\":2}", await File.ReadAllTextAsync(Path.Combine(target, "novels", "index.json")));
+        Assert.Equal(0, result.WarningCount);
+        Assert.Equal("completed", ReadManifestStatus(result.ManifestPath));
+    }
+
     private static string ReadManifestStatus(string manifestPath)
     {
         using var document = JsonDocument.Parse(File.ReadAllBytes(manifestPath));
