@@ -31,9 +31,9 @@
 
 Novelist is built for long-form fiction. Fiction depends on emotional resonance, and current AI is not reliable at controlling emotional progression, expressive restraint, or a character's inner reaction. Raw generation often slips out of the character's inner view and starts explaining the plot. If the character's emotion, misunderstanding, blind spots, and bodily reactions are not prepared first, the model easily falls into explanatory sentences, screenplay-like action, and parenthetical notes.
 
-Novelist keeps character state, reference material, Skills, RAG, and Git in one local-first workspace. Before generation, it organizes narrative point of view and constraints. After generation, audits, diffs, and save boundaries keep final manuscript writes under author control.
+Novelist keeps character state, reference corpus, Skills, RAG, and Git in one local-first workspace. Before generation, it organizes narrative point of view and constraints. After generation, coverage signals, diffs, and save boundaries keep final manuscript writes under author control.
 
-It does not treat AI as the independent author. Story direction, character relationships, themes, and key plot decisions stay author-defined. AI mainly expands, continues, rewrites, and imitates within reference-anchored boundaries, turning author intent and approved reference material into auditable candidates.
+It does not treat AI as the independent author. Story direction, character relationships, themes, and key plot decisions stay author-defined. AI mainly expands, continues, rewrites, and refines with corpus guidance, turning author intent and approved reference corpus into confirmable candidates.
 
 ## Design Rationale
 
@@ -47,7 +47,7 @@ It does not treat AI as the independent author. Story direction, character relat
   <tbody>
     <tr>
       <td><strong>The author sets the core</strong></td>
-      <td>Story direction, character relationships, themes, and key plot decisions are set by the author first. AI expands, continues, rewrites, and performs reference-anchored imitation within those boundaries.</td>
+      <td>Story direction, character relationships, themes, and key plot decisions are set by the author first. AI expands, continues, rewrites, and refines with corpus guidance within those boundaries.</td>
     </tr>
     <tr>
       <td><strong>Weak emotional control</strong></td>
@@ -95,8 +95,8 @@ It does not treat AI as the independent author. Story direction, character relat
       <td>Store reusable writing procedures in Markdown, such as scene beats, dialogue subtext, pacing, revision, and de-AI passes.</td>
     </tr>
     <tr>
-      <td><strong>Reference anchoring and audit</strong></td>
-      <td>Record where reference novels or materials came from, what may be used, and whether a draft leaks source text or crosses a risk boundary.</td>
+      <td><strong>Corpus area and chapter injection</strong></td>
+      <td>The <code>素材库</code>/corpus area imports, processes, reviews, retrieves, and packs shared reference corpus across four views (Overview / Make / Browse / Pack). Chapter-scoped chat turns auto-inject top-5 materials and show coverage and usage; prose writes still require author confirmation.</td>
     </tr>
     <tr>
       <td><strong>Local search and history</strong></td>
@@ -107,55 +107,43 @@ It does not treat AI as the independent author. Story direction, character relat
 
 ## Phase 15 Features
 
-The current Phase 15 line ports user-facing behavior from the legacy `goink-master` snapshot into the active `.NET 10 + Photino.NET + React/Vite` architecture. `goink-master` is a read-only behavior reference only; it is not an implementation directory or build path.
+Phase 15 has ported user-facing behavior from the legacy `goink-master` snapshot into the active `.NET 10 + Photino.NET + React/Vite` architecture and shipped it. `goink-master` is a read-only behavior reference only; it is not an implementation directory or build path. The style material library and narrative pattern extraction were retired into the corpus channel by the 2026-08-31 lightweight refocus (see [Corpus-Driven Writing](#corpus-driven-writing)).
 
 - **Novel import**: the bookshelf can import `.epub`, `.txt`, `.md`, and `.markdown` files through the desktop picker or drag and drop. TXT/Markdown parsing detects UTF-8, UTF-16 LE/BE, GB18030, and related edge cases. Import runs expose progress, cancellation, skipped-chapter diagnostics, Git commits, failure cleanup, and startup recovery. Default limits are 50 MB for TXT/Markdown, 100 MB for compressed EPUB, and 250 MB for cumulative EPUB uncompressed content inspected during parsing.
-- **Style material library**: save global or per-novel style samples, filter by tags/scope/search, inspect deterministic text statistics, and generate previewed, validated Skill drafts from selected samples. Samples can feed reference style profiles, but they do not bypass source audit or approval boundaries.
-- **Narrative pattern extraction**: analyze all chapters or selected chapter ranges to produce boundaries, summaries, narrative phases, and reusable narrative Skill drafts. Runs show progress, trace entries, cancellation, and strict model-output validation, and they never mutate chapter prose directly.
+- **Style material library** (retired into the corpus channel on 2026-08-31): previously saved global or per-novel style samples with tag/scope/search filtering and Skill draft generation. Style samples now enter the same pipeline as a corpus import source.
+- **Narrative pattern extraction** (retired on 2026-08-31): previously analyzed chapter ranges into boundaries, summaries, phases, and reusable narrative Skill drafts. Extraction-style features were replaced by structured corpus assets.
 - **Git history panel**: local history is read through bundled LibGit2Sharp/libgit2 assets, not the system Git CLI. The UI supports paged commits, changed-file lists, rename/delete/binary markers, and lazy read-only diffs with truncation for large text.
 - **Update checks and Git author identity**: settings expose a release endpoint, manual update check, dismissed version, and Git commit author name/email. Startup automatic checks are disabled by default and non-blocking; Git author settings fall back to safe defaults and are applied before import and normal save commits.
 
-## Reference Anchoring
+## Corpus-Driven Writing
 
-Skills store writing methods. Reference anchoring constrains material use and risk. Sources, factual boundaries, POV, blueprints, material bindings, and draft audits leave records here, so the model does not invent freely, leak source text, or write risky prose directly into the manuscript.
+The current mainline follows the [lightweight refocus proposal](docs/corpus-driven-writing/lightweight-refocus-proposal-2026-08-31.md): the author controls the macro structure and AI refines and expands. Since 2026-08-31, the legacy assembly line (blueprint iteration, fidelity assembly, orchestration runs, insertion audits, license/similarity gates) has been fully retired with data retained; the style material library and narrative pattern extraction were merged into the corpus channel and no longer have standalone entries.
 
-The current automatic chapter path is:
+The corpus area has four lightweight views:
 
-```text
-enter a chapter target
-  -> generate multiple blueprints across enabled corpora
-  -> select a blueprint or request a feedback-driven regroup
-  -> generate and select a prose candidate
-  -> explicitly insert an audited candidate into the editor buffer
-```
+- **Overview**: asset cards (reference books / feature observations / technique specimens / corpus entries) and the coverage map;
+- **Make**: drop in a reference book → background analysis → review card flow (source text + dimension judgment, one-click confirm/reject);
+- **Browse**: filter observations and specimens by book and dimension, with evidence-side-by-side comparison;
+- **Corpus pack**: export/import JSONL per reference book; imports merge by same-book recovery semantics and skip existing entries.
 
-The advanced reference workflow remains available when source policy, fact boundaries, material binding, and approvals need explicit review:
+The dialog writing loop is the single main loop:
 
 ```text
-author confirms source policy, chapter target, known facts, and forbidden facts
-  -> start orchestration run
-  -> generate chapter blueprint
-  -> run deterministic blueprint review
-  -> author approves the blueprint or approves AI-proposed field-level revisions
-  -> retrieve and bind reference materials
-  -> generate beat-level draft candidates
-  -> run draft audit
-  -> stop at final chapter-insertion confirmation
+the author raises an idea point
+  -> AI interviews with choice cards (options cite corpus examples when possible)
+  -> asks "shall I start writing?" when done
+  -> author confirms -> writing:
+      corpus coverage sufficient -> auto-inject top-5 materials per chapter, refine + expand
+      corpus insufficient (coverage <50%) -> clearly say so; write directly or add a reference book first
+  -> the author answers choice cards (beat options / prose candidates / how to proceed)
+  -> repeat until the chapter is done
 ```
 
-The default chapter UI now uses the persistent blueprint session. Server state restores the target, iterations, and selected blueprint after refresh or restart, and browser automation covers the single automatic path plus long-task and error recovery. Unmoderated target-user walks and writing-effect evaluation remain open, so the current slice is not presented as product completion.
+- Chapter-scoped chat turns run corpus injection through the same retrieval path used for writing, injecting top-5 materials as a system message and reporting usage through both a tool event and `corpus_usage` (source book, tags, preview);
+- coverage is the share of chapter-plan beats matched by that retrieval path: <50% is "corpus insufficient", 50%–90% injects normally and lists the beats lacking material; the author can always choose to write directly (honestly labeled) without blocking writing;
+- prose writes require author confirmation: chat and corpus flows never call `SaveContent` automatically. AI may propose candidates and revisions; final prose still goes through author-confirmed editing and saving.
 
-The corpus library is a separate working surface: a left-side reference-book manager supports filtering, file selection, add, delete, and ready-book selection; the center shows six-facet material coverage and on-demand search for ready sources; a right-side temporary blueprint preview compares candidates for those selected books. This preview neither creates a chapter session nor writes prose or editor content; chapter writing remains in the chapter reference panel.
-
-The workflow stops for author confirmation when:
-
-- source, license, known-fact, or forbidden-fact boundaries are unclear;
-- the blueprint is stale, materials are missing, retrieval is weak, or material hashes mismatch;
-- blueprint review fails and needs revision;
-- rewrite level, POV, fact boundaries, or audit findings are high risk;
-- a candidate draft is ready to be inserted into chapter prose.
-
-The reference anchor workflow does not automatically call `SaveContent` or write chapter prose. AI may propose candidates and revisions; final insertion still goes through author-confirmed editing and saving.
+The old reference-anchor guardrails (sources, fact boundaries, POV, blueprints, material bindings) retired with the assembly line; SafePath, approval flows, git/diff audits, and copy-first migration boundaries remain in force (see Quality Boundaries below).
 
 ## Custom Skills
 
@@ -215,15 +203,15 @@ Adjust narrative pacing according to the current chapter target.
     </tr>
     <tr>
       <td><strong>Reference anchoring</strong></td>
-      <td>Shared corpus processing and chapter-level reference use have a separated thin slice. The default chapter path now uses the persistent session, with automated restart, long-task, and error-recovery coverage. Unmoderated target-user validation remains open.</td>
+      <td>The assembly line is retired (2026-08-31 lightweight refocus): blueprint iteration, fidelity assembly, orchestration runs, and insertion audits were physically removed with data retained; chapter writing is now served by the dialog loop. Unmoderated target-user validation remains open.</td>
     </tr>
     <tr>
       <td><strong>Corpus-driven writing</strong></td>
-      <td>The M1 product thin slice is established; the M2 50K full-pipeline standard gate has passed; M3-M5 await real-effect evidence; M6-M8 are frozen; M9 chapter-default automation is closed, while the Corpus Library workspace still needs focused browser acceptance and target-user task validation. The system remains at S maturity, not production P or scale L.</td>
+      <td>The M1 product thin slice is established and the M2 50K full-pipeline standard gate has passed; the M4/M5 assembly line and M6 insertion audit are retired; the four-view corpus area and the dialog writing loop (interview choice cards, chapter injection, coverage signals) have browser-workflow coverage. Unmoderated target-user walks remain open. The system stays at S maturity, not production P or scale L.</td>
     </tr>
     <tr>
       <td><strong>Phase 15</strong></td>
-      <td>In progress: novel import, style material library, narrative pattern extraction, Git history UI, and product hardening.</td>
+      <td>Shipped: novel import, Git history UI, update checks, and Git author configuration; the style material library and narrative pattern extraction were retired into the corpus channel by the lightweight refocus.</td>
     </tr>
     <tr>
       <td><strong>Frontend build</strong></td>
@@ -237,6 +225,12 @@ Adjust narrative pacing according to the current chapter target.
 </table>
 
 ## Latest Updates
+
+### 2026-09-03
+
+- The lightweight refocus (finalized 2026-08-31) landed: the activity bar converges to three main areas (Bookshelf / Corpus Library / Settings) plus current-book tools; the corpus area is rebuilt as Overview / Make / Browse / Corpus Pack; the assembly line (blueprint iteration, fidelity assembly, orchestration runs, insertion audits, license/similarity gates) is retired with data retained.
+- First version of the dialog writing loop: chapter-scoped chat turns auto-inject top-5 corpus materials with a usage card; a chapter coverage signal (<50% = "corpus insufficient", with direct-writing or book-suggestion choices) is shown; AI interviews proceed through choice cards and the author confirms before writing.
+- Landed 2026-09-02/03 user-perspective review fixes (rounds 3/4): migration UI and progress events, chapter-delete safety, toast accessibility, busy locks, approval-stuck escalation, and more.
 
 ### 2026-07-11
 
@@ -268,7 +262,7 @@ src/
   Novelist.App             Photino desktop host and local frontend asset resolution
   Novelist.Contracts       bridge DTOs and cross-layer contracts
   Novelist.Core            app interfaces, bridge dispatch, and core boundaries
-  Novelist.Infrastructure  filesystem, SQLite, RAG, and reference-anchor implementations
+  Novelist.Infrastructure  filesystem, SQLite, RAG, corpus processing, and materialization implementations
   Novelist.Agent           Microsoft Agent Framework tool adapters
 
 frontend/
@@ -361,15 +355,15 @@ Starting only Vite leaves desktop bridge APIs unavailable. To use the bridge aga
     </tr>
     <tr>
       <td><code>npm&nbsp;--prefix&nbsp;frontend&nbsp;run&nbsp;verify</code></td>
-      <td>Run frontend build, lint, corpus/chapter/reference workflows, and the baseline app-wide smoke test.</td>
+      <td>Run frontend build, lint, node unit tests, corpus/chapter browser workflows, and the baseline app-wide smoke test.</td>
     </tr>
     <tr>
       <td><code>npm&nbsp;--prefix&nbsp;frontend&nbsp;run&nbsp;test:phase16</code></td>
-      <td>Run the corpus-library and chapter-reference browser workflows.</td>
+      <td>Run the four-view corpus area and chapter dialog-writing browser workflows (including assembly-line retirement assertions).</td>
     </tr>
     <tr>
       <td><code>npm&nbsp;--prefix&nbsp;frontend&nbsp;run&nbsp;test:reference-workspace</code></td>
-      <td>Run the focused reference-book management and temporary blueprint-preview browser workflow.</td>
+      <td>Run the focused corpus-area (Overview / Make / Browse / Pack) browser workflow.</td>
     </tr>
     <tr>
       <td><code>dotnet&nbsp;test&nbsp;Novelist.slnx&nbsp;--no-restore&nbsp;-v&nbsp;minimal</code></td>
@@ -382,7 +376,7 @@ Starting only Vite leaves desktop bridge APIs unavailable. To use the bridge aga
 
 When developing or reviewing this codebase, preserve these boundaries:
 
-- chapter prose writes must require author confirmation; reference-anchor orchestration must not directly save prose;
+- chapter prose writes must require author confirmation; corpus/chat flows must not directly save prose;
 - filesystem access must keep SafePath and sandbox checks;
 - web and external-resource tools must keep SSRF protection;
 - user-data migration must be copy-first, leave the source untouched, and write a manifest;
@@ -396,6 +390,8 @@ When developing or reviewing this codebase, preserve these boundaries:
 - [Corpus-Driven Writing Development Plan](docs/corpus-driven-writing/development-plan.md)
 - [Corpus-Driven Writing Tasks And Current Status](docs/corpus-driven-writing/tasks.md)
 - [Corpus-Driven Writing Progress Audit (2026-07-10)](docs/corpus-driven-writing/progress-audit-2026-07-10.md)
+- [Lightweight Refocus Proposal (2026-08-31)](docs/corpus-driven-writing/lightweight-refocus-proposal-2026-08-31.md)
+- [User-Perspective Review And Improvement Plan (2026-09-02, round 4)](docs/corpus-driven-writing/user-perspective-review-2026-09-02-round4.md)
 - [Photino Bridge Contract](docs/novelist-photino-bridge-contract.md)
 - [Release Notes](docs/releases/release-notes.md)
 
