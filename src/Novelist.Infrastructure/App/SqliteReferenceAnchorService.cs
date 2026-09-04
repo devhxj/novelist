@@ -5952,12 +5952,6 @@ CancellationToken cancellationToken)
             CREATE INDEX IF NOT EXISTS idx_reference_segments_anchor_type
               ON reference_source_segments(anchor_id, segment_type, segment_index);
 
-            CREATE INDEX IF NOT EXISTS idx_reference_materials_anchor_type
-              ON reference_materials(anchor_id, material_type);
-
-            CREATE INDEX IF NOT EXISTS idx_reference_materials_tags
-              ON reference_materials(function_tag, emotion_tag, pov_tag, technique_tag);
-
             CREATE INDEX IF NOT EXISTS idx_reference_material_slots_material
               ON reference_material_slots(material_id, slot_name);
 
@@ -5995,6 +5989,7 @@ CancellationToken cancellationToken)
               ON reference_library_members(anchor_id, enabled);
             """;
         await command.ExecuteNonQueryAsync(cancellationToken);
+        await EnsureLegacyMaterialSearchIndexesAsync(connection, cancellationToken);
         await ReferenceCorpusSchemaProvisioner.EnsureCoreTablesAsync(connection, cancellationToken);
         var addedCorpusVisibilityColumn = await EnsureColumnAsync(
             connection,
@@ -6077,6 +6072,50 @@ await BackfillReferenceProcessingAttemptsAsync(connection, cancellationToken);
         await indexCommand.ExecuteNonQueryAsync(cancellationToken);
     }
 
+ /// <summary>
+ /// 旧结构（v1 时代）reference_materials 的检索索引。schema v6（reference-materialization）
+ /// 把该表重建为 generation 结构（generation_id/run_id/metadata_json），旧列不复存在——
+ /// 直接 CREATE INDEX 会因 no such column 让整个启动失败（2026-09-04 启动事故）。
+ /// 只在旧列表仍在时创建；全新库由上方批处理的 CREATE TABLE 建出旧结构，列齐备，照常创建。
+ /// </summary>
+ private static async ValueTask EnsureLegacyMaterialSearchIndexesAsync(
+ SqliteConnection connection,
+ CancellationToken cancellationToken)
+ {
+ var columns = await TableColumnNamesAsync(connection, "reference_materials", cancellationToken);
+ if (columns.Count > 0 && !columns.Contains("material_type"))
+ {
+ return;
+ }
+
+ await using var command = connection.CreateCommand();
+ command.CommandText = """
+            CREATE INDEX IF NOT EXISTS idx_reference_materials_anchor_type
+              ON reference_materials(anchor_id, material_type);
+
+            CREATE INDEX IF NOT EXISTS idx_reference_materials_tags
+              ON reference_materials(function_tag, emotion_tag, pov_tag, technique_tag);
+            """;
+ await command.ExecuteNonQueryAsync(cancellationToken);
+ }
+
+ private static async ValueTask<HashSet<string>> TableColumnNamesAsync(
+ SqliteConnection connection,
+ string tableName,
+ CancellationToken cancellationToken)
+ {
+ var columns = new HashSet<string>(StringComparer.Ordinal);
+ await using var command = connection.CreateCommand();
+ command.CommandText = $"PRAGMA table_info({tableName});";
+ await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+ while (await reader.ReadAsync(cancellationToken))
+ {
+ columns.Add(reader.GetString(1));
+ }
+
+ return columns;
+ }
+
  private static async ValueTask BackfillLegacyTextNodesAsync(
  SqliteConnection connection,
  CancellationToken cancellationToken)
@@ -6101,6 +6140,12 @@ await BackfillReferenceProcessingAttemptsAsync(connection, cancellationToken);
  anchorIds.Add(reader.GetInt64(0));
  }
  }
+
+ // schema v6 的 reference_materials 没有 source_segment_id 列，回填循环里的
+ // materials node_id UPDATE 对它不适用（会抛 no such column）；仅旧结构需要这一步。
+ var materialsHaveLegacyShape =
+ (await TableColumnNamesAsync(connection, "reference_materials", cancellationToken))
+ .Contains("source_segment_id");
 
  foreach (var anchorId in anchorIds)
  {
@@ -6131,6 +6176,8 @@ await BackfillReferenceProcessingAttemptsAsync(connection, cancellationToken);
  await update.ExecuteNonQueryAsync(cancellationToken);
  }
 
+ if (materialsHaveLegacyShape)
+ {
  await using (var updateMaterials = connection.CreateCommand())
  {
  updateMaterials.Transaction = transaction;
@@ -6149,6 +6196,7 @@ await BackfillReferenceProcessingAttemptsAsync(connection, cancellationToken);
  """;
  updateMaterials.Parameters.AddWithValue("$anchor_id", anchorId);
  await updateMaterials.ExecuteNonQueryAsync(cancellationToken);
+ }
  }
 
  await transaction.CommitAsync(cancellationToken);

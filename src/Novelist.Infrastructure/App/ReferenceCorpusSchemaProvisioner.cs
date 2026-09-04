@@ -8,6 +8,7 @@ internal static class ReferenceCorpusSchemaProvisioner
         SqliteConnection connection,
         CancellationToken cancellationToken)
     {
+        await RebuildStaleChapterProgressTableAsync(connection, cancellationToken);
         await using var command = connection.CreateCommand();
         command.CommandText = """
             CREATE TABLE IF NOT EXISTS reference_anchors (
@@ -736,6 +737,108 @@ CREATE TABLE IF NOT EXISTS reference_technique_specimens (
 """;
 await command.ExecuteNonQueryAsync(cancellationToken);
  await EnsureAnalysisJobTablesAsync(connection, cancellationToken);
+ }
+
+ private static async ValueTask RebuildStaleChapterProgressTableAsync(
+ SqliteConnection connection,
+ CancellationToken cancellationToken)
+ {
+ var columns = new HashSet<string>(StringComparer.Ordinal);
+ await using (var read = connection.CreateCommand())
+ {
+ read.CommandText = "PRAGMA table_info(reference_materialization_chapter_progress);";
+ await using var reader = await read.ExecuteReaderAsync(cancellationToken);
+ while (await reader.ReadAsync(cancellationToken))
+ {
+ columns.Add(reader.GetString(1));
+ }
+ }
+
+ if (columns.Count == 0 || columns.Contains("chapter_node_id"))
+ {
+ return;
+ }
+
+ var suffix = $"{DateTimeOffset.UtcNow:yyyyMMddHHmmss}_{Guid.NewGuid():N}";
+ var backupTable = $"reference_materialization_chapter_progress_legacy_{suffix}";
+ await using (var rename = connection.CreateCommand())
+ {
+ rename.CommandText = $"ALTER TABLE reference_materialization_chapter_progress RENAME TO {backupTable};";
+ await rename.ExecuteNonQueryAsync(cancellationToken);
+ }
+
+ await using (var create = connection.CreateCommand())
+ {
+ create.CommandText = $"""
+            CREATE TABLE reference_materialization_chapter_progress (
+              run_id TEXT NOT NULL,
+              chapter_node_id TEXT NOT NULL,
+              chapter_index INTEGER NOT NULL CHECK(chapter_index > 0),
+              batch_index INTEGER NOT NULL CHECK(batch_index >= 0),
+              status TEXT NOT NULL,
+              current_stage TEXT NOT NULL,
+              candidate_count INTEGER NOT NULL DEFAULT 0 CHECK(candidate_count >= 0),
+              decided_count INTEGER NOT NULL DEFAULT 0 CHECK(decided_count >= 0),
+              accepted_count INTEGER NOT NULL DEFAULT 0 CHECK(accepted_count >= 0),
+              rejected_count INTEGER NOT NULL DEFAULT 0 CHECK(rejected_count >= 0),
+              review_count INTEGER NOT NULL DEFAULT 0 CHECK(review_count >= 0),
+              vector_count INTEGER NOT NULL DEFAULT 0 CHECK(vector_count >= 0),
+              model_call_count INTEGER NOT NULL DEFAULT 0 CHECK(model_call_count >= 0),
+              started_at TEXT,
+              completed_at TEXT,
+              last_error_code TEXT,
+              last_error_message TEXT,
+              row_version INTEGER NOT NULL DEFAULT 0 CHECK(row_version >= 0),
+              PRIMARY KEY(run_id, chapter_node_id),
+              UNIQUE(run_id, chapter_index),
+              FOREIGN KEY(run_id) REFERENCES reference_materialization_runs(run_id) ON DELETE CASCADE
+            );
+            CREATE INDEX IF NOT EXISTS idx_reference_materialization_chapter_progress_run_batch
+              ON reference_materialization_chapter_progress(run_id, batch_index, chapter_index);
+            """;
+ await create.ExecuteNonQueryAsync(cancellationToken);
+ }
+
+ await WriteRebuildManifestAsync(connection, backupTable, cancellationToken);
+ }
+
+ private static async ValueTask WriteRebuildManifestAsync(
+ SqliteConnection connection,
+ string backupTable,
+ CancellationToken cancellationToken)
+ {
+ try
+ {
+ var databasePath = connection.DataSource;
+ if (string.IsNullOrWhiteSpace(databasePath) || !File.Exists(databasePath))
+ {
+ return;
+ }
+
+ var directory = Path.GetDirectoryName(databasePath);
+ if (string.IsNullOrWhiteSpace(directory))
+ {
+ return;
+ }
+
+ var manifest = new
+ {
+ Status = "completed",
+ SourceDatabase = databasePath,
+ BackupTable = backupTable,
+ Reason = "pre-v6 reference_materialization_chapter_progress shape cannot be additively upgraded (primary key changed); table renamed copy-first and recreated with the v6 shape.",
+ RecordedAt = DateTimeOffset.UtcNow,
+ Error = (string?)null,
+ };
+ var manifestPath = Path.Combine(
+ directory,
+ $"reference-schema-chapter-progress-rebuild-{DateTimeOffset.UtcNow:yyyyMMddHHmmss}-{Guid.NewGuid():N}.json");
+ await File.WriteAllTextAsync(manifestPath, System.Text.Json.JsonSerializer.Serialize(manifest), cancellationToken);
+ }
+ catch
+ {
+ // manifest 写入失败不阻塞启动；备份表本身已保留全部旧数据。
+ }
  }
 
  private static async ValueTask EnsureAnalysisJobTablesAsync(
