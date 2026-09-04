@@ -59,6 +59,7 @@ import {
   replaceEditorText,
   shortcutKey,
   waitForBridgeCall,
+  collectPerfTimings,
   waitForBridgeCallArg,
   waitForBridgeCallCountAfter,
 } from './page-helpers.mjs'
@@ -132,12 +133,37 @@ export async function runSmokeSuite(browser, url) {
   await expectVisible(page.getByText('AI 对话'), 'chat panel')
   await page.screenshot({ path: path.join(outputDir, 'app-smoke-01-shell.png'), fullPage: true })
 
+  // U10：冷启动基线——工作区外壳可见即采集（此时编辑器按需块尚未取回）。
+  const coldOpenTimings = await collectPerfTimings(page, 'cold-open-workspace-visible')
+
   logStep('checking shell navigation')
   await verifyShellNavigation(page)
 
   logStep('checking chapter/editor path')
+  const firstActionStartedAt = Date.now()
   await verifyChapterWorkflow(page)
+  const firstActionWallMs = Date.now() - firstActionStartedAt
   await page.screenshot({ path: path.join(outputDir, 'app-smoke-02-editor.png'), fullPage: true })
+
+  const afterEditorTimings = await collectPerfTimings(page, 'after-first-chapter-editor')
+  const perfReport = {
+    target: runConfig.target,
+    generated_at: new Date().toISOString(),
+    coldOpen: coldOpenTimings,
+    afterFirstChapter: afterEditorTimings,
+    firstChapterWorkflowWallMs: firstActionWallMs,
+  }
+  await fs.writeFile(
+    path.join(outputDir, 'perf-timings.json'),
+    JSON.stringify(perfReport, null, 2),
+    'utf8',
+  )
+  logStep(
+    `perf baseline: FCP=${coldOpenTimings.firstContentfulPaint_ms}ms ` +
+    `DCL=${coldOpenTimings.domContentLoaded_ms}ms ` +
+    `scripts=${coldOpenTimings.scriptCount}/${coldOpenTimings.scriptTransferBytes}B ` +
+    `monacoReady=${afterEditorTimings.monacoChunkReady_ms ?? 'n/a'}ms`,
+  )
 
   logStep('checking smoke guardrails')
   await verifySmokeBridgeCalls(page)
@@ -713,7 +739,11 @@ export async function runUsabilitySuite(browser, url) {
   }))
 
   await clickActivity(page, '搜索')
-  await expectVisible(page.getByPlaceholder('搜索人物、地点、时间线、正文...'), 'usability search input')
+  // A4 后侧栏还有一档紧凑搜索入口：同名 placeholder 会命中两处，限定主区实例。
+  await expectVisible(
+    page.getByTestId('search-main-view').getByPlaceholder('搜索人物、地点、时间线、正文...'),
+    'usability search input',
+  )
   await page.screenshot({ path: path.join(outputDir, 'usability-05-search.png'), fullPage: true })
   observations.push(usabilityObservation({
     surface: 'Search',

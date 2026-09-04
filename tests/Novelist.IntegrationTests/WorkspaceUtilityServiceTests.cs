@@ -170,7 +170,7 @@ public sealed class WorkspaceUtilityServiceTests : IDisposable
             CancellationToken.None);
 
         var search = new FileSystemWorkspaceSearchService(options, novelService, chapterService, world, planning);
-        var results = await search.SearchAllAsync(novel.Id, "旧城门", CancellationToken.None);
+        var results = (await search.SearchAllAsync(novel.Id, "旧城门", CancellationToken.None)).Results;
 
         Assert.Contains(results, item => item.Type == "location" && item.PanelId == "locations");
         Assert.Contains(results, item => item.Type == "timeline" && item.PanelId == "timeline");
@@ -182,7 +182,7 @@ public sealed class WorkspaceUtilityServiceTests : IDisposable
         Assert.Equal(4, contentMatch.MatchPosition);
         Assert.Equal(1, contentMatch.Relevance);
 
-        Assert.Empty(await search.SearchAllAsync(novel.Id, "   ", CancellationToken.None));
+        Assert.Empty((await search.SearchAllAsync(novel.Id, "   ", CancellationToken.None)).Results);
         await search.RebuildNovelIndexAsync(novel.Id, CancellationToken.None);
     }
 
@@ -230,7 +230,7 @@ public sealed class WorkspaceUtilityServiceTests : IDisposable
         Assert.NotEmpty(dedicatedResults.Items);
 
         var search = new FileSystemWorkspaceSearchService(options, novelService, chapterService, world, planning);
-        var results = await search.SearchAllAsync(novel.Id, "雨声", CancellationToken.None);
+        var results = (await search.SearchAllAsync(novel.Id, "雨声", CancellationToken.None)).Results;
 
         Assert.Empty(results);
     }
@@ -260,11 +260,14 @@ public sealed class WorkspaceUtilityServiceTests : IDisposable
             new RecordingRagIndexService(),
             new ThrowingSemanticSearchService());
 
-        var results = await search.SearchAllAsync(novel.Id, "暗号", CancellationToken.None);
+        var result = await search.SearchAllAsync(novel.Id, "暗号", CancellationToken.None);
+        var results = result.Results;
 
         var contentMatch = Assert.Single(results, item => item.Type == "content");
         Assert.Equal("暗号", contentMatch.MatchHit);
         Assert.DoesNotContain(results, item => item.Type == "rag");
+        // U4：语义检索故障必须以降级标记回传，而不是与"没有结果"混同。
+        Assert.True(result.SemanticDegraded);
     }
 
     [Fact]
@@ -340,7 +343,7 @@ public sealed class WorkspaceUtilityServiceTests : IDisposable
             rag,
             rag);
 
-        var results = await search.SearchAllAsync(novel.Id, "星图线索", CancellationToken.None);
+        var results = (await search.SearchAllAsync(novel.Id, "星图线索", CancellationToken.None)).Results;
 
         var semantic = Assert.Single(results, item => item.Type == "rag");
         Assert.Equal("观测记录", semantic.Title);
@@ -471,7 +474,9 @@ public sealed class WorkspaceUtilityServiceTests : IDisposable
               "payload": { "args": [{{novel.Id}}, "暗号"] }
             }
             """));
-        Assert.Equal("content", search.RootElement.GetProperty("result")[0].GetProperty("type").GetString());
+        // U4：SearchAll 返回 { results, semantic_degraded } 信封，不再直接是数组。
+        Assert.Equal("content", search.RootElement.GetProperty("result").GetProperty("results")[0].GetProperty("type").GetString());
+        Assert.True(search.RootElement.GetProperty("result").TryGetProperty("semantic_degraded", out _));
 
         using var stats = ParseOutbound(await dispatcher.DispatchAsync("""
             {

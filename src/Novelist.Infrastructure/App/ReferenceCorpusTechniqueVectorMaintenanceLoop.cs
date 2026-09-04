@@ -1,5 +1,6 @@
 using Novelist.Contracts.App;
 using Novelist.Core.App;
+using Novelist.Core.Diagnostics;
 
 namespace Novelist.Infrastructure.App;
 
@@ -11,6 +12,10 @@ public sealed class ReferenceCorpusTechniqueVectorMaintenanceLoop : IAsyncDispos
  private readonly SemaphoreSlim _gate = new(1, 1);
  private CancellationTokenSource? _cancellation;
  private Task? _loop;
+ // U7：持久性错误（磁盘满/schema 不匹配/sqlite-vec 缺失）曾以裸 catch 变成无声无限重试。
+ // 现在每次错误都留痕，但相同错误按固定间隔采样上报，避免 desktop.log 被无限刷大。
+ private string? _lastErrorKey;
+ private DateTimeOffset _lastErrorLoggedAt;
 
  public ReferenceCorpusTechniqueVectorMaintenanceLoop(
  IReferenceCorpusService service,
@@ -87,11 +92,28 @@ public sealed class ReferenceCorpusTechniqueVectorMaintenanceLoop : IAsyncDispos
  {
  break;
  }
- catch
+ catch (Exception ex)
  {
+ LogMaintenanceFailure(ex);
  await Task.Delay(_idleDelay, cancellationToken);
  }
  }
+ }
+
+ private void LogMaintenanceFailure(Exception exception)
+ {
+ var key = $"{exception.GetType().FullName}:{exception.Message}";
+ var now = DateTimeOffset.UtcNow;
+ var keyChanged = !string.Equals(_lastErrorKey, key, StringComparison.Ordinal);
+ // 首次出现、错误内容变化、或距上次上报超过 10 分钟（作为"仍在失败"的心跳）时记录。
+ if (!keyChanged && now - _lastErrorLoggedAt < TimeSpan.FromMinutes(10))
+ {
+ return;
+ }
+
+ _lastErrorKey = key;
+ _lastErrorLoggedAt = now;
+ AppLog.Error($"Technique vector maintenance pump failed (worker '{_workerId}'); vector index may be stale.", exception);
  }
 
  public async ValueTask DisposeAsync()

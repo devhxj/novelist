@@ -14,6 +14,9 @@ public sealed partial class ChapterCorpusCoverageService : IChapterCorpusCoverag
     private const string PlanScope = "next";
     private const int MaxBeats = 40;
     private const int QueryMaxLength = 48;
+    // U9（未标定常量）：0.5 是 v1 未校准取值，单 beat 也按"任意命中即覆盖"（见 BuildQuery 注释）。
+    // 标定流程与数据要求见 docs/corpus-driven-writing/evaluations/coverage-threshold-calibration.md；
+    // 行为边界（恰好 0.5 判足）由 ComputeCoverageTreatsExactHalfAsSufficientUntilCalibrated 钉死。
     private const double SufficientRatio = 0.5;
     private const int BeatTextMaxLength = 200;
     private const int PreviewMaxLength = 200;

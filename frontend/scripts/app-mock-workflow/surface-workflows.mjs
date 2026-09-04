@@ -600,8 +600,9 @@ export async function verifyImportExportFilePickerWorkflow(browser, url, console
   await waitForBridgeCallCountAfter(page, 'StartNovelImport', skippedEpubBefore)
   await expectVisible(page.getByRole('dialog', { name: '小说导入完成' }), 'skipped EPUB import dialog')
   await expectVisible(page.getByText('跳过 2 章'), 'skipped EPUB chapter count')
-  await expectVisible(page.getByText(/#2 空白章节 · empty_content/), 'skipped EPUB empty chapter detail')
-  await expectVisible(page.getByText(/#3 缺失章节 · missing_spine_item/), 'skipped EPUB missing chapter detail')
+  // E3：跳章原因已中文化（empty_content → 内容为空），断言跟随作者可见文案。
+  await expectVisible(page.getByText(/#2 空白章节 · 内容为空/), 'skipped EPUB empty chapter detail')
+  await expectVisible(page.getByText(/#3 缺失章节 · 无法导入（missing_spine_item）/), 'skipped EPUB missing chapter detail')
   await page.getByRole('button', { name: '完成', exact: true }).click()
   await clickActivity(page, '书架')
   await expectVisible(novelCard(page, 'skipped-chapters'), 'skipped EPUB import keeps imported novel card')
@@ -1284,7 +1285,8 @@ export async function verifyReferenceWorkspaceWorkflow(page) {
   await expectVisible(browse.getByRole('tab', { name: '特征观察' }), 'corpus browse observations kind')
   await expectVisible(browse.getByRole('tab', { name: '技法标本' }), 'corpus browse specimens kind')
   await waitForBridgeCallCountAfter(page, 'ListReferenceCorpusFeatureObservations', 0)
-  await expectVisible(browse.getByRole('button', { name: /emotion_state/ }), 'corpus browse observation family entry')
+  // E1：feature_key 词表已中文化（emotion_state → 情绪状态），断言跟随中文标签。
+  await expectVisible(browse.getByRole('button', { name: /情绪状态/ }), 'corpus browse observation family entry')
   await browse.getByRole('button', { name: /mock-101/ }).first().click()
   await expectVisible(browse.getByText('证据').first(), 'corpus browse observation evidence')
   const specimenCount = await bridgeCallCount(page, 'ListReferenceCorpusTechniqueSpecimens')

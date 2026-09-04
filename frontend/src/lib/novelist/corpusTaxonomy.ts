@@ -36,22 +36,41 @@ export const COVERAGE_FACET_LABELS: Record<string, string> = {
 }
 
 export const FAMILY_LABELS: Record<string, string> = {
-  emotion: '情绪',
-  sensory: '感官',
-  rhythm: '节奏',
+  // 句子级
   syntax: '句法',
-  action: '动作',
-  interaction: '交互',
-  pov: '视角',
+  rhythm: '节奏',
+  sensory: '感官',
+  emotion: '情绪',
   rhetoric: '修辞',
-  hook: '钩子',
+  // 段落级
   narrative: '叙事',
+  pov: '视角',
+  action: '动作',
+  character: '人物',
+  commercial: '商业性',
+  // 场景级
   scene: '场景',
   trope: '桥段',
-  structure: '结构',
 }
 
 export const FEATURE_VALUE_LABELS: Record<string, string> = {
+  // observation feature_key（ReferenceCorpusFeatureSchemas 各 family 的 feature_key 枚举，E1 补齐）
+  action_chain: '动作链',
+  dynamics: '关系动态',
+  mechanics: '钩子机制',
+  emotion_state: '情绪状态',
+  narrative_function: '叙事功能',
+  perspective: '视角',
+  rhetorical_device: '修辞装置',
+  length_band: '句长档位',
+  cadence: '节奏型',
+  pause_density: '停顿密度',
+  ending_weight: '句尾权重',
+  scene_structure: '场景结构',
+  sentence_pattern: '句式',
+  structure_complexity: '结构复杂度',
+  pos_profile: '词性画像',
+  trope_pattern: '桥段模式',
   // narrative functions（叙事功能）
   characterization: '人物塑造',
   conflict: '冲突',
@@ -127,5 +146,13 @@ export const FEATURE_VALUE_LABELS: Record<string, string> = {
 /** 取映射标签；未命中回退原始键（契约键不丢失）。 */
 export function taxonomyLabel(map: Record<string, string>, key: string | null | undefined): string {
   if (!key) return ''
-  return map[key] ?? key
+  if (!(key in map)) {
+    // E1：未知键即词表漂移的信号。开发构建下告警让漂移可见；
+    // 运行时仍回退原始键——桥段等开放词表会随积累生长，不能当错误渲染。
+    if (import.meta.env.DEV) {
+      console.warn(`[taxonomyLabel] 词表未覆盖键 "${key}"——若属封闭词表，请同步 corpusTaxonomy/corpusFamilies 与后端真值。`)
+    }
+    return key
+  }
+  return map[key]
 }

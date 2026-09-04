@@ -876,15 +876,15 @@ public sealed class MafToolRegistryTests
                 input.Author ?? string.Empty,
                 string.Empty,
                 "markdown",
-                input.LicenseStatus,
+                input.LicenseStatus ?? string.Empty,
                 "hash",
                 "test",
                 ReferenceAnchorBuildStates.Ready,
                 DateTimeOffset.UtcNow,
                 DateTimeOffset.UtcNow,
-                input.Visibility,
-                input.SourceTrust,
-                input.UserTags));
+                input.Visibility ?? ReferenceCorpusVisibilities.Workspace,
+                input.SourceTrust ?? ReferenceSourceTrustLevels.UserVerified,
+                input.UserTags ?? []));
         }
 
         public ValueTask<ReferenceAnchorBuildStatusPayload> RebuildAnchorAsync(

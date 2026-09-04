@@ -2290,17 +2290,17 @@ case 'ListReferenceCorpusTechniqueSpecimens': return listReferenceCorpusTechniqu
   }
 
   function searchAll(query) {
-    if (!query?.trim()) return []
-    if (query.includes('没有结果')) return []
+    if (!query?.trim()) return { results: [], semantic_degraded: false }
+    if (query.includes('没有结果')) return { results: [], semantic_degraded: false }
     if (query.includes('搜索失败')) {
       if (!state.searchFailureRecovered) {
         state.searchFailureRecovered = true
         throw new Error('Mock search failure')
       }
-      if (query.includes('恢复')) return searchResults()
-      return []
+      if (query.includes('恢复')) return { results: searchResults(), semantic_degraded: false }
+      return { results: [], semantic_degraded: false }
     }
-    return searchResults()
+    return { results: searchResults(), semantic_degraded: false }
   }
 
   function searchResults() {

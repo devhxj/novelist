@@ -21,7 +21,7 @@ public interface ISkillCatalogService
 
 public interface IWorkspaceSearchService
 {
-    ValueTask<IReadOnlyList<SearchResultPayload>> SearchAllAsync(
+    ValueTask<SearchAllResultPayload> SearchAllAsync(
         long novelId,
         string query,
         CancellationToken cancellationToken);

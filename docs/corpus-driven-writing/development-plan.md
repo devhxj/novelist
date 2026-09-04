@@ -120,7 +120,8 @@ CorpusSource
 
 **扩展：** `reference_anchors` 关联 license 表；现有 `reference_source_segments`/`reference_materials` 加 `node_id` FK 指向 text_nodes。
 
-**重建（逻辑层）：** `GenerateChapterBlueprintAsync`（LLM 生成→检索拼装）；`GenerateDraftFromBlueprintAsync`（改写→最大化原句复用）；`ReviewChapterBlueprintAsync`（检查表评分）；前端 `OrchestrationPanel`/`BlueprintDetail`。
+**重建（逻辑层）：** `GenerateChapterBlueprintAsync`（LLM 生成→检索拼装）；`GenerateDraftFromBlueprintAsync`（改写→最大化原句复用）；`ReviewChapterBlueprintAsync`（检查表评分）；前端写作循环面板。
+> **前端目标勘误（2026-09-03，I3）：** 本节原文以 `OrchestrationPanel`/`BlueprintDetail` 为重建目标，两者已随 `ccb6d2c` 的专家控制面收缩删除。当前前端表面收敛为章节写作主循环（`CorpusAreaView`、章节参考面板等），不要再以已删除面板为重建目标。
 
 **新增：** text_nodes + 分析表 + junction 表 + license/library 表；`ICorpusAnalysisService`、`IQueryContextParser`、`ICorpusBlueprintRetriever`、`ICorpusBlueprintAssembler`、`ICorpusTextAssembler`、`ICorpusWritingSessionService`；写作会话 UI。
 
@@ -721,6 +722,8 @@ QueryContext 确认、来源选择、gap 处理、槽位表、过渡清单、锁
 | `L` | **规模化完成** | 在目标数据量和持续运行条件下，质量、性能、成本、恢复均达到预设预算 | 规模 fixture、真实语料评测集、质量指标、性能与恢复报告 | 不能只凭单元/集成测试总数或小 golden 宣称完成 |
 
 **当前治理快照以 [tasks.md](./tasks.md) 的数量和证据表为准。** M0-M9 当前均为 `S`，没有任何里程碑达到 `P` 或 `L`。M1 明确为“产品薄切片完成”；M2 的后台标准轨已关闭但仍不是产品闭环，M3-M5 正在加深；M6-M8 冻结功能扩张；M9 的章节自动路径已有自动化证据，素材库工作台仍需完成专用 workflow，之后再补真实用户走查。M0 的 schema/契约覆盖不代表基础债务已清零，M2 的 runner/入口和 50K fake-LLM 证据不代表生产后台，M3 的 route provenance 不代表真实长篇检索质量，M4 的策略 profile 不代表多蓝图存在稳定且显著的结构差异，M5 的审计深度不代表拼装正文自然，自动/专家界面的浏览器 workflow 也不代表用户能无指导完成任务。
+
+> **成熟度口径补充（2026-09-03，I3）：** `ccb6d2c` 主动删除了专家控制面（13 个面板，约 -18K 行），产品收敛到章节写作主循环。上表的 `S` 评级覆盖的是**当时实现的薄切片**；其中部分能力（分析任务面板、风格画像库、叙事模式抽取等）的前端出口已被移出产品，只剩后端能力。对这些能力，`S` 描述的是后端薄切片，不代表当前产品仍提供该用户界面——详见 `docs/full-feature-implementation-review-2026-09-03.md` §2.2-§2.4。
 
 **统一对外状态：** “M1 产品薄切片完成，M2-M5 加深中，M6-M8 冻结扩张，M9 聚焦默认体验收口；整体尚未达到生产完成或规模化完成。”不得再使用“语料驱动写作系统已完成”“M2 生产能力完成”“已易用好用”等超出证据的表述。
 

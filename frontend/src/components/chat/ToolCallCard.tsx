@@ -10,7 +10,6 @@ const APPROVAL_SLOW_MS = 6000
 const APPROVAL_STUCK_MS = 60_000
 
 interface Props {
-  toolName: string
   displayText: string
   status: 'executing' | 'awaiting_approval' | 'completed' | 'failed'
   activityKind?: string
@@ -62,7 +61,8 @@ const typeLabels: Record<string, string> = {
 function ApprovalBody({ type, payload }: { type?: string; payload?: Record<string, unknown> }) {
   if (type === 'delete' && payload?.deleted) {
     const d = payload.deleted as Record<string, unknown>
-    const label = typeLabels[String(d.type)] ?? String(d.type ?? '记录')
+    // I7：未知类型不再透出英文枚举原文，统一兜底"记录"。
+    const label = typeLabels[String(d.type)] ?? '记录'
     const nameOrTitle = (d.name ?? d.title) as string | undefined
     const title = nameOrTitle ?? `#${d.id}`
 
@@ -94,7 +94,8 @@ function ApprovalBody({ type, payload }: { type?: string; payload?: Record<strin
       line_range_replace: '行范围替换',
     }
     const rawType = (payload.change_type as string) || ''
-    const changeType = changeTypeMap[rawType] || rawType || '修改'
+    // I7：未知 change_type 兜底中文，不透出内部枚举原文。
+    const changeType = changeTypeMap[rawType] || '修改'
     const reason = (payload.reason as string) || ''
     return (
       <div>

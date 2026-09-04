@@ -5,7 +5,6 @@ interface Activity {
   id: string
   icon: LucideIcon
   label: string
-  disabled?: boolean
 }
 
 // 三主区：书籍 / 语料。设置统一走顶栏齿轮（A6：消除双入口），不占活动栏面板位。
@@ -37,20 +36,17 @@ interface Props {
 function ActivityButton({ activity, isActive, onSelect }: { activity: Activity; isActive: boolean; onSelect: (id: string) => void }) {
   return (
     <button
-      disabled={activity.disabled}
       onClick={() => onSelect(activity.id)}
-      title={`${activity.label}${activity.disabled ? '（即将推出）' : ''}`}
+      title={activity.label}
       className={`relative w-10 h-10 flex items-center justify-center rounded-lg transition-all duration-200
         focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring
-        ${activity.disabled
-          ? 'text-muted-foreground/40 cursor-not-allowed'
-          : isActive
-            ? 'text-primary bg-primary/15 font-medium'
-            : 'text-muted-foreground hover:text-foreground hover:bg-muted/60'
+        ${isActive
+          ? 'text-primary bg-primary/15 font-medium'
+          : 'text-muted-foreground hover:text-foreground hover:bg-muted/60'
         }`}
     >
       {/* 视觉项：选中态增强——指示条加粗 + 图标着主色，不再只是细线 */}
-      {isActive && !activity.disabled && (
+      {isActive && (
         <span className="absolute left-0 top-1/2 -translate-y-1/2 w-1 h-6 bg-primary rounded-r-full" />
       )}
       <activity.icon className="w-5 h-5" />

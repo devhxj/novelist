@@ -20,7 +20,10 @@ public sealed record CreateChapterPayload(
 public sealed record SaveContentPayload(
     [property: JsonPropertyName("novel_id")] long NovelId,
     [property: JsonPropertyName("path")] string Path,
-    [property: JsonPropertyName("content")] string Content);
+    [property: JsonPropertyName("content")] string Content,
+    // U1：调用方读盘时见到的那份内容的基线令牌。携带时不匹配即拒绝保存（CONTENT_CONFLICT），
+    // 由前端既有冲突条接管；缺省保持旧的最后写入者胜语义（Agent 直写、导入等路径）。
+    [property: JsonPropertyName("baseline_hash")] string? BaselineHash = null);
 
 public sealed record DeleteChapterPayload(
     [property: JsonPropertyName("novel_id")] long NovelId,

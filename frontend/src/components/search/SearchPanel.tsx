@@ -37,6 +37,8 @@ export default function SearchPanel({ novelId, query, results, onResultsChange, 
   const app = useApp()
   const [loading, setLoading] = useState(false)
   const [searchError, setSearchError] = useState<string | null>(null)
+  // U4：语义检索降级提示（关键词结果仍可用，故不占用 searchError 的错误槽位）。
+  const [semanticDegraded, setSemanticDegraded] = useState(false)
   const [selectedIdx, setSelectedIdx] = useState(-1)
   const inputRef = useRef<HTMLInputElement>(null)
   const listRef = useRef<HTMLDivElement>(null)
@@ -51,20 +53,23 @@ export default function SearchPanel({ novelId, query, results, onResultsChange, 
   const doSearch = useCallback(async (q: string, reqId: number) => {
     if (!q.trim() || !novelId) {
       setSearchError(null)
+      setSemanticDegraded(false)
       onResultsChangeRef.current(q, [])
       setLoading(false)
       return
     }
     setLoading(true)
     try {
-      const data = await app.SearchAll(novelId, q.trim()) as unknown as SearchResult[]
+      const envelope = await app.SearchAll(novelId, q.trim())
       if (reqIdRef.current !== reqId) return
       setSearchError(null)
+      setSemanticDegraded(envelope?.semantic_degraded === true)
       setSelectedIdx(-1)
-      onResultsChangeRef.current(q, data ?? [])
+      onResultsChangeRef.current(q, envelope?.results ?? [])
     } catch {
       if (reqIdRef.current !== reqId) return
       setSelectedIdx(-1)
+      setSemanticDegraded(false)
       setSearchError('搜索失败，请稍后重试')
       onResultsChangeRef.current(q, [])
     } finally {
@@ -208,10 +213,24 @@ export default function SearchPanel({ novelId, query, results, onResultsChange, 
           </div>
         ) : grouped.length === 0 ? (
           <div className="flex items-center justify-center h-full">
-            <p className="text-xs text-muted-foreground">无搜索结果</p>
+            <div className="text-center px-4">
+              <p className="text-xs text-muted-foreground">
+                {semanticDegraded ? '没有关键词匹配结果' : '无搜索结果'}
+              </p>
+              {semanticDegraded && (
+                <p className="mt-1 text-[11px] text-amber-600 dark:text-amber-400" role="status">
+                  语义检索暂时不可用，当前仅包含关键词结果；可稍后重试或在设置中检查索引。
+                </p>
+              )}
+            </div>
           </div>
         ) : (
           <div className="py-2">
+            {semanticDegraded && (
+              <p className="px-3 py-1.5 text-[11px] text-amber-600 dark:text-amber-400" role="status">
+                语义检索暂时不可用，以下仅为关键词结果。
+              </p>
+            )}
             {grouped.map(group => {
               const Icon = group.icon
               return (

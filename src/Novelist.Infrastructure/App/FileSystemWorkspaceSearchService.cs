@@ -2,6 +2,7 @@ using System.Globalization;
 using System.Text;
 using Novelist.Contracts.App;
 using Novelist.Core.App;
+using Novelist.Core.Diagnostics;
 
 namespace Novelist.Infrastructure.App;
 
@@ -38,7 +39,7 @@ public sealed class FileSystemWorkspaceSearchService : IWorkspaceSearchService
         _semanticSearch = semanticSearch ?? _ragIndex as IRagSemanticSearchService;
     }
 
-    public async ValueTask<IReadOnlyList<SearchResultPayload>> SearchAllAsync(
+    public async ValueTask<SearchAllResultPayload> SearchAllAsync(
         long novelId,
         string query,
         CancellationToken cancellationToken)
@@ -47,7 +48,7 @@ public sealed class FileSystemWorkspaceSearchService : IWorkspaceSearchService
         var normalizedQuery = (query ?? string.Empty).Trim();
         if (normalizedQuery.Length == 0)
         {
-            return [];
+            return new SearchAllResultPayload([], SemanticDegraded: false);
         }
 
         await EnsureNovelExistsAsync(novelId, cancellationToken);
@@ -55,8 +56,9 @@ public sealed class FileSystemWorkspaceSearchService : IWorkspaceSearchService
         var results = new List<SearchResultPayload>();
         results.AddRange(await SearchEntitiesAsync(novelId, normalizedQuery, cancellationToken));
         results.AddRange(await SearchContentAsync(novelId, normalizedQuery, cancellationToken));
-        results.AddRange(await SearchSemanticAsync(novelId, normalizedQuery, cancellationToken));
-        return results;
+        var (semanticResults, semanticDegraded) = await SearchSemanticAsync(novelId, normalizedQuery, cancellationToken);
+        results.AddRange(semanticResults);
+        return new SearchAllResultPayload(results, semanticDegraded);
     }
 
     public async ValueTask RebuildNovelIndexAsync(long novelId, CancellationToken cancellationToken)
@@ -150,14 +152,14 @@ public sealed class FileSystemWorkspaceSearchService : IWorkspaceSearchService
         return results;
     }
 
-    private async ValueTask<IReadOnlyList<SearchResultPayload>> SearchSemanticAsync(
+    private async ValueTask<(IReadOnlyList<SearchResultPayload> Results, bool Degraded)> SearchSemanticAsync(
         long novelId,
         string query,
         CancellationToken cancellationToken)
     {
         if (_semanticSearch is null)
         {
-            return [];
+            return ([], false);
         }
 
         IReadOnlyList<RagSearchHitPayload> hits;
@@ -169,32 +171,39 @@ public sealed class FileSystemWorkspaceSearchService : IWorkspaceSearchService
         {
             throw;
         }
-        catch
+        catch (Exception ex)
         {
-            return [];
+            // U4：语义检索故障必须与"没有结果"可区分——记录原因并把降级状态回传前端，
+            // 让作者知道是检索服务挂了，而不是语料里没有相关内容。
+            AppLog.Warning($"Semantic search degraded for novel {novelId}; falling back to keyword-only results.", ex);
+            return ([], true);
         }
 
-        return hits
-            .Where(hit => hit.Relevance >= 0.3)
-            .OrderByDescending(hit => hit.Relevance)
-            .ThenBy(hit => hit.ChapterNumber)
-            .ThenBy(hit => hit.ChunkIndex)
-            .Take(RagTopK)
-            .Select(hit => new SearchResultPayload(
-                "rag",
-                0,
-                hit.Title,
-                "语义匹配",
-                hit.ChapterNumber,
-                hit.FilePath,
-                SemanticPreview(hit.Content),
-                string.Empty,
-                string.Empty,
-                hit.StartPosition,
-                hit.Content.EnumerateRunes().Count(),
-                Math.Round(hit.Relevance, 4),
-                "chapters"))
-            .ToArray();
+        return
+        (
+            hits
+                .Where(hit => hit.Relevance >= 0.3)
+                .OrderByDescending(hit => hit.Relevance)
+                .ThenBy(hit => hit.ChapterNumber)
+                .ThenBy(hit => hit.ChunkIndex)
+                .Take(RagTopK)
+                .Select(hit => new SearchResultPayload(
+                    "rag",
+                    0,
+                    hit.Title,
+                    "语义匹配",
+                    hit.ChapterNumber,
+                    hit.FilePath,
+                    SemanticPreview(hit.Content),
+                    string.Empty,
+                    string.Empty,
+                    hit.StartPosition,
+                    hit.Content.EnumerateRunes().Count(),
+                    Math.Round(hit.Relevance, 4),
+                    "chapters"))
+                .ToArray(),
+            false
+        );
     }
 
     private async ValueTask EnsureNovelExistsAsync(long novelId, CancellationToken cancellationToken)

@@ -221,24 +221,34 @@ Assert.Equal(("pending", 0), await ReadFirstWorkItemReservationAsync(queued.JobI
  var path = new FixedPathResolver(DatabasePath);
  var scheduler = new SqliteReferenceCorpusAnalysisScheduler(path, new FixedSettingsService());
  var staleAnalyzer = new BlockingFeatureAnalyzer(10);
- var timing = new ReferenceCorpusAnalysisWorkerOptions(
+ // 过期租约只给 stale worker：lease 250ms + 心跳 10s 保证它必然被栅栏。
+ var staleTiming = new ReferenceCorpusAnalysisWorkerOptions(
  TimeSpan.FromMilliseconds(250), TimeSpan.FromSeconds(10), TimeSpan.Zero);
  await using var staleWorker = new ReferenceCorpusAnalysisWorker(
  path, staleAnalyzer, new UnexpectedTechniqueAnalyzer(), "worker-stale-primary",
- TimeSpan.FromMilliseconds(10), timing);
+ TimeSpan.FromMilliseconds(10), staleTiming);
  var recoveryAnalyzer = new FrozenFeatureAnalyzer(10, TimeSpan.FromMilliseconds(80));
+ // U5：recovery worker 用长租约（30s）但保留 ReclaimRetryDelay=0。
+ // 它同样用 250ms 租约时，满载下 80ms×5 项的推进会让自己的租约先过期、
+ // 提交被栅栏成 retry_wait，Completed 永远等不到；而 ReclaimRetryDelay 走默认 1s
+ // 又会让"过期后立即回收"变成 PumpOnce 返回 false。本测试考察"过期租约被回收"，
+ // 不考察恢复者自身被栅栏。
+ var recoveryTiming = new ReferenceCorpusAnalysisWorkerOptions(
+ TimeSpan.FromSeconds(30), TimeSpan.FromSeconds(5), TimeSpan.Zero);
  await using var recoveryWorker = new ReferenceCorpusAnalysisWorker(
  path, recoveryAnalyzer, new UnexpectedTechniqueAnalyzer(), "worker-stale-recovery",
- TimeSpan.FromMilliseconds(10), timing);
+ TimeSpan.FromMilliseconds(10), recoveryTiming);
  var queued = await scheduler.EnqueueAsync(new(
  "worker-run-stale-lease", 1, 101, ReferenceCorpusAnalysisJobKinds.FeatureAnalysis,
  ReferenceCorpusNodeTypes.Sentence, ReferenceCorpusAnalysisPriorityClasses.Normal, 100, 20_000),
  CancellationToken.None);
 
+ // U5：这些 WaitAsync/WaitForJobAsync 是时序上界而不是性能门禁，
+ // 全量并行执行时的调度噪声曾让 10s 上界偶发超时；放宽到 30s 仍能抓住真正的死锁/丢失回收。
  await staleWorker.StartAsync();
- await staleAnalyzer.Started.Task.WaitAsync(TimeSpan.FromSeconds(10));
+ await staleAnalyzer.Started.Task.WaitAsync(TimeSpan.FromSeconds(30));
  var running = await WaitForJobAsync(scheduler, queued.JobId,
- job => job.LeaseExpiresAt is not null, TimeSpan.FromSeconds(10));
+ job => job.LeaseExpiresAt is not null, TimeSpan.FromSeconds(30));
  var leaseExpiresAt = running.LeaseExpiresAt!.Value;
  var remaining = leaseExpiresAt - DateTimeOffset.UtcNow + TimeSpan.FromMilliseconds(20);
  if (remaining > TimeSpan.Zero) await Task.Delay(remaining);
@@ -246,11 +256,11 @@ Assert.Equal(("pending", 0), await ReadFirstWorkItemReservationAsync(queued.JobI
  Assert.True(await recoveryWorker.PumpOnceAsync(CancellationToken.None));
  var recoveredAt = DateTimeOffset.UtcNow;
  var completed = await WaitForJobAsync(scheduler, queued.JobId,
- job => job.Status == ReferenceCorpusAnalysisJobStatuses.Completed, TimeSpan.FromSeconds(10));
+ job => job.Status == ReferenceCorpusAnalysisJobStatuses.Completed, TimeSpan.FromSeconds(30));
  staleAnalyzer.Release.TrySetResult();
- await staleAnalyzer.Returned.Task.WaitAsync(TimeSpan.FromSeconds(10));
+ await staleAnalyzer.Returned.Task.WaitAsync(TimeSpan.FromSeconds(30));
  await Task.Delay(50);
- await staleWorker.StopAsync().AsTask().WaitAsync(TimeSpan.FromSeconds(10));
+ await staleWorker.StopAsync().AsTask().WaitAsync(TimeSpan.FromSeconds(30));
 
  Assert.True(recoveredAt - leaseExpiresAt <= TimeSpan.FromSeconds(30));
  Assert.Equal(2, completed.AttemptCount);
@@ -452,10 +462,27 @@ await command.ExecuteNonQueryAsync();
  }
 
  public Task InitializeAsync() => Task.CompletedTask;
- public Task DisposeAsync()
+ public async Task DisposeAsync()
+ {
+ // U5：连接都是 Pooling=false，句柄理论上随 Dispose 释放；但 Windows 下刚关闭的
+ // sqlite 文件偶发短暂处于"被占用"状态（索引器/文件系统延迟），直接删除会随机炸掉
+ // 任意用例。重试删除把这类瞬态从测试结果里隔离掉。
+ for (var attempt = 0; attempt < 5; attempt++)
+ {
+ try
  {
  if (Directory.Exists(_root)) Directory.Delete(_root, true);
- return Task.CompletedTask;
+ return;
+ }
+ catch (IOException)
+ {
+ await Task.Delay(100);
+ }
+ catch (UnauthorizedAccessException)
+ {
+ await Task.Delay(100);
+ }
+ }
  }
 
 private sealed class FrozenFeatureAnalyzer(int tokensPerCall, TimeSpan? delay = null) : IReferenceCorpusFeatureFamilyAnalyzer

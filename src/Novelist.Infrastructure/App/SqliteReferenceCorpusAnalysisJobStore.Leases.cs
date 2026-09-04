@@ -35,7 +35,9 @@ internal sealed partial class SqliteReferenceCorpusAnalysisJobStore
  WHERE dependency.job_id = job.dependency_job_id
  AND dependency.status = 'completed'))
  ORDER BY
- job.priority_value + (100 * CAST(MAX(0, (julianday($now) - julianday(job.queued_at)) * 288) AS INTEGER)) DESC,
+ -- I8：老化加权封顶 1,000,000（约 35 天饱和）。不封顶时长期排队任务的加权无界增长，
+ -- 饱和后旧任务之间回到 queued_at FIFO——防饿死语义保留，数值不再发散。
+ job.priority_value + MIN(1000000, 100 * CAST(MAX(0, (julianday($now) - julianday(job.queued_at)) * 288) AS INTEGER)) DESC,
  job.queued_at ASC,
  job.job_id ASC
  LIMIT 1;

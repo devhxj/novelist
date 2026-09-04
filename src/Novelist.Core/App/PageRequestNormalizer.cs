@@ -200,4 +200,6 @@ public static class PageRequestErrorCodes
     public const string InvalidSortField = "invalid_sort_field";
     public const string InvalidSortDirection = "invalid_sort_direction";
     public const string InvalidFilterKey = "invalid_filter_key";
+    // E1：封闭词表取值不合法（如观察维度 family 漂移），显式报错而不是静默空结果。
+    public const string InvalidFilterValue = "invalid_filter_value";
 }

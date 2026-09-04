@@ -1,0 +1,56 @@
+{
+  "schema_version": "corpus-m2-full-scale-metrics-v1",
+  "generated_at": "2026-07-10T14:25:13.7627395+00:00",
+  "result": {
+    "pipeline": "scheduler_snapshot_builder_worker_fake_analyzer",
+    "fixture": "D:\\repository\\own\\goink\\build\\tmp\\corpus-driven-writing\\scale-50k.jsonl",
+    "characters": 50015,
+    "anchors": 16,
+    "libraries": 4,
+    "session_id": "scale-full-session",
+    "session_library_bindings": 4,
+    "jobs": 32,
+    "work_items": 13385,
+    "processed_work_items": 13385,
+    "succeeded_work_items": 13385,
+    "completed_jobs": 32,
+    "completion_rows": 13385,
+    "observation_rows": 1909,
+    "duplicate_outputs": 0,
+    "fake_analyzer_calls": 13385,
+    "elapsed_ms": 459064.3764,
+    "throughput_work_items_per_second": 29.15713065118594,
+    "claim_ms": {
+      "count": 32,
+      "p50": 8.5119,
+      "p95": 10.1213,
+      "max": 17.0186
+    },
+    "task_list_ms": {
+      "count": 32,
+      "p50": 21.9359,
+      "p95": 27.0401,
+      "max": 27.8715
+    },
+    "job_progress_ms": {
+      "count": 32,
+      "p50": 2.7616,
+      "p95": 3.5105,
+      "max": 3.6362
+    },
+    "tokens": {
+      "spent": 133850,
+      "reserved": 0,
+      "persisted_budget_penetration": 0
+    },
+    "storage": {
+      "database_bytes_before_worker": 29433856,
+      "database_bytes_after": 47398912,
+      "managed_bytes_before_worker": 9955384,
+      "managed_bytes_after": 6709296,
+      "analysis_work_item_rows": 13385,
+      "active_leases": 0
+    },
+    "passed": true
+  }
+}

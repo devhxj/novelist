@@ -91,3 +91,18 @@ The final command should show no unreleased commits.
 - PR title and description: English.
 - GitHub Release notes: Chinese.
 - Release notes are handwritten and should not depend on GitHub auto-generation.
+
+## Update Checks (optional, per release)
+
+Update checks are **off by default** (no phoning home). The build-level endpoint is injected via the
+`NovelistUpdateCheckEndpointUrl` MSBuild property (`src/Novelist.App/Novelist.App.csproj`); when it is
+empty (the default), the app reports `update.endpoint_missing` and users never see update prompts
+unless they configure an endpoint in 设置 → 通用 (U8, 2026-09-03 review).
+
+If a release should ship with built-in update checks, pass the property at publish time:
+
+```bash
+bash scripts/novelist-publish.sh win-x64   # add: -p:NovelistUpdateCheckEndpointUrl=https://api.github.com/repos/<org>/<repo>/releases/latest
+```
+
+Deliberately do NOT hardcode a GitHub URL in frontend code — `BridgeFrontendContractTests` guards this.

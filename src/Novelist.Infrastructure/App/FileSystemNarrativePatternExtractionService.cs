@@ -9,6 +9,11 @@ using Novelist.Core.Bridge;
 
 namespace Novelist.Infrastructure.App;
 
+// I2（2026-09-03 工程评审）：本服务当前不在任何 DI 组合根注册，也没有桥接处理器——
+// 它不存在于运行时对象图里。这是 ccb6d2c 前端收缩后的既成状态而非事故：
+// 其前端出口 NarrativePatternView 已随专家控制面删除（见 docs/full-feature-implementation-review-2026-09-03.md §2.3）。
+// 保留实现与测试是为了契约与算法留档。恢复接线前先读 AGENTS.md 的
+// "Do not expand the expert control surface" 约束并更新上述评审文档。
 public sealed class FileSystemNarrativePatternExtractionService : INarrativePatternExtractionService
 {
     private const string ProgressEventName = "narrative_pattern_extraction:progress";

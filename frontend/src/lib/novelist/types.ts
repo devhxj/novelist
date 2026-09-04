@@ -149,6 +149,8 @@ export namespace app {
     novel_id: number
     path: string
     content: string
+    /** U1：读盘时那份内容的基线令牌；不匹配时后端拒绝并返回 CONTENT_CONFLICT。 */
+    baseline_hash?: string | null
   }
 
   export interface SessionDetail {
@@ -1229,6 +1231,71 @@ has_more: boolean
     diagnostics: string[]
   }
 
+  // I6：技法向量维护三件套（调度/泵送/检视），与后端 ReferenceCorpusPayloads 对齐。
+  export type CorpusTechniqueVectorMaintenanceMode = 'incremental' | 'full'
+
+  export interface ScheduleCorpusTechniqueVectorMaintenanceInput {
+    query_context: CorpusQueryContext
+    node_type?: CorpusNodeType | string | null
+    mode?: CorpusTechniqueVectorMaintenanceMode | string
+    max_attempts?: number
+  }
+
+  export interface PumpCorpusTechniqueVectorMaintenanceInput {
+    worker_id: string
+    lease_seconds?: number
+  }
+
+  export interface InspectCorpusTechniqueVectorIndexesInput {
+    include_completed_jobs?: boolean
+  }
+
+  export interface CorpusTechniqueVectorMaintenanceJob {
+    job_id: string
+    scope_key: string
+    mode: string
+    status: string
+    provider_key: string
+    model_id: string
+    dimensions: number
+    attempt_count: number
+    max_attempts: number
+    next_attempt_at?: string | null
+    last_error?: string | null
+    created_at: string
+    updated_at: string
+  }
+
+  export interface CorpusTechniqueVectorMaintenancePumpResult {
+    processed: boolean
+    job?: CorpusTechniqueVectorMaintenanceJob | null
+    backfill?: CorpusTechniqueVectorIndexBackfill | null
+  }
+
+  export interface CorpusTechniqueVectorIndexInspectionItem {
+    index_scope_key: string
+    table_name: string
+    provider_key: string
+    model_id: string
+    dimensions: number
+    source_count: number
+    row_count: number
+    health: string
+    diagnostics: string[]
+    updated_at: string
+  }
+
+  export interface CorpusTechniqueVectorIndexInspection {
+    active_provider_key?: string | null
+    active_model_id?: string | null
+    active_dimensions: number
+    indexes: CorpusTechniqueVectorIndexInspectionItem[]
+    jobs: CorpusTechniqueVectorMaintenanceJob[]
+    healthy_count: number
+    stale_count: number
+    failed_job_count: number
+  }
+
   export type CorpusFeatureAnalysisScope = 'sentence' | 'passage'
 
   export type CorpusFeatureAnalysisStatus =
@@ -2195,6 +2262,12 @@ export namespace search {
     match_len: number
     relevance: number
     panel_id: string
+  }
+
+  /** U4：语义检索故障时降级标记必须与"无结果"可区分。 */
+  export interface SearchAllResult {
+    results: Result[]
+    semantic_degraded: boolean
   }
 }
 

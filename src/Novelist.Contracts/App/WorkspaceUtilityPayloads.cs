@@ -55,6 +55,11 @@ public sealed record SearchResultPayload(
     [property: JsonPropertyName("relevance")] double Relevance,
     [property: JsonPropertyName("panel_id")] string PanelId);
 
+// U4：语义检索故障降级必须与"没有结果"可区分，否则作者会误以为语料里没有相关内容。
+public sealed record SearchAllResultPayload(
+    [property: JsonPropertyName("results")] IReadOnlyList<SearchResultPayload> Results,
+    [property: JsonPropertyName("semantic_degraded")] bool SemanticDegraded);
+
 public sealed record SearchStoryMemoryPayload(
     [property: JsonPropertyName("novel_id")] long NovelId,
     [property: JsonPropertyName("query")] string Query,

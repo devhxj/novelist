@@ -485,6 +485,16 @@ public sealed partial class SqliteReferenceCorpusAnalysisService : IReferenceCor
             "min_confidence"
         };
         ValidateFilterNames(filters, allowed);
+        // E1：feature_family 是封闭词表（ReferenceCorpusFeatureFamilies）。
+        // 取值漂移时显式拒绝，避免前端词表漂移表现为"筛选永远没结果"。
+        if (filters.TryGetValue("feature_family", out var family) &&
+            !string.IsNullOrWhiteSpace(family) &&
+            !ReferenceCorpusFeatureFamilies.All.Contains(family, StringComparer.Ordinal))
+        {
+            throw new PageRequestValidationException(
+                PageRequestErrorCodes.InvalidFilterValue,
+                $"feature_family '{family}' is not a known observation family.");
+        }
     }
 
     private static void ValidateTechniqueSpecimenFilters(IReadOnlyDictionary<string, string> filters)

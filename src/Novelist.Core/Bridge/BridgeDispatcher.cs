@@ -1,6 +1,7 @@
 using System.Text.Json;
 using Novelist.Contracts.Bridge;
 using Novelist.Core.App;
+using Novelist.Core.Diagnostics;
 
 namespace Novelist.Core.Bridge;
 
@@ -136,8 +137,10 @@ public sealed class BridgeDispatcher
         {
             return Error(id, BridgeErrorCodes.Cancelled, "Bridge request was cancelled.");
         }
-        catch
+        catch (Exception ex)
         {
+            // U2：兜底异常必须留痕（方法名 + 请求 id + 完整异常），否则线上问题无法排查。
+            AppLog.Error($"Unhandled exception in bridge method '{method}' (request '{id}').", ex);
             return Error(id, BridgeErrorCodes.InternalError, "Internal bridge error.");
         }
     }

@@ -267,7 +267,8 @@ public sealed class ChapterContentServiceTests : IDisposable
         var third = await service.CreateChapterAsync(new CreateChapterPayload(novel.Id, "三"), CancellationToken.None);
         Assert.Equal(3, third.ChapterNumber);
         Assert.Equal(3, await service.GetMaxChapterNumberAsync(novel.Id, CancellationToken.None));
-        Assert.Equal(first.ChapterNumber, 1);
+        // xUnit2000：期望值在前，失败信息里的 expected/actual 不再反向。
+        Assert.Equal(1, first.ChapterNumber);
     }
 
     [Fact]
@@ -290,6 +291,91 @@ public sealed class ChapterContentServiceTests : IDisposable
         Assert.Equal(
             "保存后仍应成功",
             await service.GetContentAsync(novel.Id, chapter.FilePath, CancellationToken.None));
+    }
+
+    [Fact]
+    public async Task SaveContentWithStaleBaselineHashRejectsAndKeepsDiskContent()
+    {
+        var options = CreateOptions();
+        await InitializeAsync(options);
+        var novelService = new FileSystemNovelService(options, new FileSystemAppSettingsService(options));
+        var novel = await novelService.CreateNovelAsync(new CreateNovelPayload("并发保存", "", ""), CancellationToken.None);
+        var service = new FileSystemChapterContentService(options, novelService);
+        var chapter = await service.CreateChapterAsync(new CreateChapterPayload(novel.Id, "雾中来信"), CancellationToken.None);
+
+        await service.SaveContentAsync(
+            new SaveContentPayload(novel.Id, chapter.FilePath, "作者读到的版本"),
+            CancellationToken.None);
+        var baseline = ChapterContentBaselineHash.Compute(
+            await service.GetContentAsync(novel.Id, chapter.FilePath, CancellationToken.None));
+
+        // 绕过事件流的外部写入（第二窗口/外部编辑器/Agent 直写）：直接改盘上文件。
+        var fullPath = Path.Combine(options.DefaultDataDirectory, "novels", novel.Id.ToString(), "chapters", "001.md");
+        await File.WriteAllTextAsync(fullPath, "外部编辑器的新版本", CancellationToken.None);
+
+        var error = await Assert.ThrowsAsync<BridgeRequestException>(async () =>
+            await service.SaveContentAsync(
+                new SaveContentPayload(novel.Id, chapter.FilePath, "作者刚写的版本", baseline),
+                CancellationToken.None));
+
+        // U1：基线不匹配 → CONTENT_CONFLICT，且磁盘上的外部版本不被覆盖。
+        Assert.Equal(BridgeErrorCodes.ContentConflict, error.Code);
+        Assert.Equal(
+            "外部编辑器的新版本",
+            await service.GetContentAsync(novel.Id, chapter.FilePath, CancellationToken.None));
+    }
+
+    [Fact]
+    public async Task SaveContentWithFreshBaselineHashSucceeds()
+    {
+        var options = CreateOptions();
+        await InitializeAsync(options);
+        var novelService = new FileSystemNovelService(options, new FileSystemAppSettingsService(options));
+        var novel = await novelService.CreateNovelAsync(new CreateNovelPayload("并发保存", "", ""), CancellationToken.None);
+        var service = new FileSystemChapterContentService(options, novelService);
+        var chapter = await service.CreateChapterAsync(new CreateChapterPayload(novel.Id, "雾中来信"), CancellationToken.None);
+
+        await service.SaveContentAsync(
+            new SaveContentPayload(novel.Id, chapter.FilePath, "v1"),
+            CancellationToken.None);
+        var baseline = ChapterContentBaselineHash.Compute(
+            await service.GetContentAsync(novel.Id, chapter.FilePath, CancellationToken.None));
+
+        await service.SaveContentAsync(
+            new SaveContentPayload(novel.Id, chapter.FilePath, "v2", baseline),
+            CancellationToken.None);
+
+        Assert.Equal("v2", await service.GetContentAsync(novel.Id, chapter.FilePath, CancellationToken.None));
+    }
+
+    [Fact]
+    public async Task BridgeSaveContentSurfacesBaselineConflictErrorCode()
+    {
+        var options = CreateOptions();
+        await InitializeAsync(options);
+        var novelService = new FileSystemNovelService(options, new FileSystemAppSettingsService(options));
+        var novel = await novelService.CreateNovelAsync(new CreateNovelPayload("桥接冲突", "", ""), CancellationToken.None);
+        var service = new FileSystemChapterContentService(options, novelService);
+        var dispatcher = new BridgeDispatcher()
+            .RegisterChapterContentHandlers(service);
+        var chapter = await service.CreateChapterAsync(new CreateChapterPayload(novel.Id, "第一章"), CancellationToken.None);
+        await service.SaveContentAsync(
+            new SaveContentPayload(novel.Id, chapter.FilePath, "v1"),
+            CancellationToken.None);
+
+        using var conflictJson = ParseOutbound(await dispatcher.DispatchAsync($$"""
+            {
+              "kind": "request",
+              "id": "req_conflict_save",
+              "method": "SaveContent",
+              "payload": { "args": [{ "novel_id": {{novel.Id}}, "path": "chapters/001.md", "content": "v2", "baseline_hash": "fnv1a:00000000:2" }] }
+            }
+            """));
+
+        Assert.False(conflictJson.RootElement.GetProperty("ok").GetBoolean());
+        Assert.Equal(
+            BridgeErrorCodes.ContentConflict,
+            conflictJson.RootElement.GetProperty("error").GetProperty("code").GetString());
     }
 
     [Fact]

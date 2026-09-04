@@ -135,7 +135,8 @@ public sealed class BridgeHandlerRegistrationTests
     [Fact]
     public void CompatibilityAppMethodListHasExpectedCoverage()
     {
-        Assert.Equal(188, BridgeCompatibilityAppMethods.MethodNames.Count);
+        // I6 补入 Inspect/Pump/ScheduleReferenceCorpusTechniqueVectorMaintenance 三件套后为 191。
+        Assert.Equal(191, BridgeCompatibilityAppMethods.MethodNames.Count);
         Assert.Contains("GetChapterCorpusCoverage", BridgeCompatibilityAppMethods.MethodNames);
         Assert.Contains("GetReferenceCorpusAssetTotals", BridgeCompatibilityAppMethods.MethodNames);
         Assert.Contains("AdvanceChapterPlan", BridgeCompatibilityAppMethods.MethodNames);

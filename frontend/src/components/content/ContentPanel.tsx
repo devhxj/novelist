@@ -1,17 +1,16 @@
-import { useState, useEffect, useCallback, useRef, forwardRef, useImperativeHandle } from 'react'
-import { type OnMount, DiffEditor } from '@monaco-editor/react'
-import '@/monacoSetup'
+import { useState, useEffect, useCallback, useRef, forwardRef, useImperativeHandle, lazy, Suspense } from 'react'
+import { type OnMount } from '@monaco-editor/react'
 import { FileText, Loader2 } from 'lucide-react'
 import { useApp } from '@/hooks/useApp'
 import { useEditorTabs } from '@/hooks/useEditorTabs'
 import { useTheme, type Theme } from '@/hooks/useTheme'
 import { EventsOn } from '@/lib/novelist/events'
 import { buildCopyableDiagnostic, diagnosticMessage } from '@/lib/diagnostics'
+import { contentBaselineHash, fnv1a32Hex } from '@/lib/contentBaseline'
 import { pushToast } from '@/lib/toast'
 import type { diagnostics } from '@/lib/novelist/types'
 import ErrorCallout from '@/components/shared/ErrorCallout'
 import TabBar from './TabBar'
-import ContentEditor from './ContentEditor'
 import OutlineViewer from './OutlineViewer'
 import SkillPreview from './SkillPreview'
 import FileChangeConflictBar from './FileChangeConflictBar'
@@ -23,6 +22,19 @@ import {
   resolveFileChange, fileChangePatch, acceptIncomingPatch, conflictDiffToolId,
 } from './fileChangeConflict'
 import './ContentPanel.css'
+
+// U10：monaco（约 3-4MB）不再进首屏主块——正文/差异编辑器按需加载，
+// 冷启动只解析外壳；monacoSetup 的 loader.config 副作用随异步块执行。
+const ContentEditor = lazy(() => import('./ContentEditor'))
+const ContentDiffEditor = lazy(() => import('./ContentDiffEditor'))
+
+function EditorLoadingFallback() {
+  return (
+    <div className="flex h-full items-center justify-center" role="status" aria-label="编辑器加载中">
+      <Loader2 className="w-5 h-5 animate-spin text-muted-foreground" />
+    </div>
+  )
+}
 
 const MONACO_THEME: Record<Theme, string> = { light: 'novelist-light', dark: 'vs-dark' }
 
@@ -45,15 +57,9 @@ function saveErrorText(message: string): string {
 }
 
 function contentDiagnosticSummary(content: string): { content_length: number; content_hash: string } {
-  let hash = 2166136261
-  for (let index = 0; index < content.length; index += 1) {
-    hash ^= content.charCodeAt(index)
-    hash = Math.imul(hash, 16777619)
-  }
-
   return {
     content_length: content.length,
-    content_hash: `fnv1a:${(hash >>> 0).toString(16).padStart(8, '0')}`,
+    content_hash: `fnv1a:${fnv1a32Hex(content)}`,
   }
 }
 
@@ -154,7 +160,8 @@ const ContentPanel = forwardRef<ContentPanelHandle, Props>(function ContentPanel
     for (const t of needsLoad) {
       loadedRef.current.add(t.id)
       app.GetContent(novelId, t.path).then(content => {
-        updateTab(t.id, { content: content ?? '' })
+        const loaded = content ?? ''
+        updateTab(t.id, { content: loaded, savedHash: contentBaselineHash(loaded) })
       }).catch(() => {
         updateTab(t.id, { content: '加载失败，请关闭标签页后重试' })
       })
@@ -226,11 +233,19 @@ const ContentPanel = forwardRef<ContentPanelHandle, Props>(function ContentPanel
 
   const doSave = useCallback(async (tabId: string, path: string, content: string) => {
     if (!novelIdRef.current) return
+    // U1：带上"我读到的那份"的基线令牌做比较-交换保存；savedHash 为空（新建/强制覆盖）时不带。
+    const savedTab = tabsRef.current.find(t => t.id === tabId && t.type === 'file')
+    const baselineHash = savedTab?.path === path ? savedTab.savedHash : undefined
     try {
-      await app.SaveContent({ novel_id: novelIdRef.current, path, content })
+      await app.SaveContent({
+        novel_id: novelIdRef.current,
+        path,
+        content,
+        ...(baselineHash ? { baseline_hash: baselineHash } : {}),
+      })
       setSaveError(current => current?.tabId === tabId ? null : current)
       // 存盘成功后磁盘就是作者这一份，之前挂起的外部版本已经过期，冲突条一并撤掉。
-      updateTab(tabId, { isDirty: false, conflict: undefined })
+      updateTab(tabId, { isDirty: false, conflict: undefined, savedHash: contentBaselineHash(content) })
       if (savingRef.current?.id === tabId && savingRef.current.path === path && savingRef.current.content === content) {
         savingRef.current = null
       }
@@ -239,12 +254,28 @@ const ContentPanel = forwardRef<ContentPanelHandle, Props>(function ContentPanel
         saveTimerRef.current = null
       }
     } catch (error) {
+      // U1：基线不匹配（磁盘已被绕过事件流的写入改掉）→ 拉取磁盘最新版本，
+      // 交给与 file:changed 同一套冲突条，由作者三选一，而不是静默覆盖丢正文。
+      const errorCode = (error as { code?: string } | null | undefined)?.code
+      if (errorCode === 'CONTENT_CONFLICT') {
+        cancelPendingAutosave()
+        try {
+          const fresh = await app.GetContent(novelIdRef.current, path)
+          updateTab(tabId, fileChangePatch({ kind: 'conflict', target: 'content' }, fresh ?? '', path))
+          return
+        } catch {
+          // 拉不到磁盘版本时退回普通保存错误提示。
+        }
+      }
       // R8：后端章节守卫（O15/R3）的英文消息直达作者可读文案。
       const rawMessage = error instanceof Error ? error.message : String(error ?? '')
       const deletedChapter = rawMessage.includes('does not exist (it may have been deleted)')
+      const conflictFallback = '文件已在编辑期间被其他程序修改，且读取最新版本失败。请关闭标签页后重新打开。'
       const fallbackMessage = deletedChapter
         ? '该章节已被删除，无法保存。请关闭此标签页，或从章节列表新建章节继续写作。'
-        : '保存失败，请重试'
+        : errorCode === 'CONTENT_CONFLICT'
+          ? conflictFallback
+          : '保存失败，请重试'
       setSaveError({
         tabId,
         message: deletedChapter ? fallbackMessage : diagnosticMessage(error, fallbackMessage),
@@ -262,7 +293,7 @@ const ContentPanel = forwardRef<ContentPanelHandle, Props>(function ContentPanel
       })
       throw error
     }
-  }, [app, updateTab])
+  }, [app, updateTab, cancelPendingAutosave])
 
   // Ctrl+S 的实际动作（N3）：监听器上收到 WorkspaceView 层，这里只保留保存语义。
   const saveActiveTab = useCallback(() => {
@@ -431,7 +462,7 @@ const ContentPanel = forwardRef<ContentPanelHandle, Props>(function ContentPanel
     setIsLoading(true)
     app.GetContent(novelId, path).then(content => {
       const c = content ?? ''
-      openTab({ type: 'file', path, title: display, content: c, isDirty: false, viewMode: initialMode, readOnly: skReadOnly })
+      openTab({ type: 'file', path, title: display, content: c, isDirty: false, savedHash: contentBaselineHash(c), viewMode: initialMode, readOnly: skReadOnly })
       onContentChange?.(c)
     }).catch(() => {
       openTab({ type: 'file', path, title: display, content: '', isDirty: false, viewMode: initialMode, readOnly: skReadOnly })
@@ -651,7 +682,8 @@ const ContentPanel = forwardRef<ContentPanelHandle, Props>(function ContentPanel
               <Markdown content={activeTab.modified ?? ''} />
             </div>
           ) : (
-            <DiffEditor
+            <Suspense fallback={<EditorLoadingFallback />}>
+            <ContentDiffEditor
               height="100%"
               language="markdown"
               theme={MONACO_THEME[theme]}
@@ -685,6 +717,7 @@ const ContentPanel = forwardRef<ContentPanelHandle, Props>(function ContentPanel
                 renderIndicators: true,
               }}
             />
+            </Suspense>
           )}
         </div>
       </main>
@@ -780,12 +813,14 @@ const ContentPanel = forwardRef<ContentPanelHandle, Props>(function ContentPanel
               onCancel={() => updateTab(activeTab.id, { viewMode: 'preview' })}
             />
           ) : viewMode === 'content' ? (
-            <ContentEditor
-              value={activeTab.content ?? ''}
-              onChange={v => handleEditorChange(activeTab.id, v)}
-              onMount={handleEditorMount}
-              editorTheme={MONACO_THEME[theme]}
-            />
+            <Suspense fallback={<EditorLoadingFallback />}>
+              <ContentEditor
+                value={activeTab.content ?? ''}
+                onChange={v => handleEditorChange(activeTab.id, v)}
+                onMount={handleEditorMount}
+                editorTheme={MONACO_THEME[theme]}
+              />
+            </Suspense>
           ) : (
             <OutlineViewer content={activeTab.outlineContent ?? ''} />
           )}

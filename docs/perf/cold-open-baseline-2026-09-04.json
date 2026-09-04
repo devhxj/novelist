@@ -1,0 +1,25 @@
+{
+  "target": "dist",
+  "generated_at": "2026-09-04T02:09:49.937Z",
+  "coldOpen": {
+    "phase": "cold-open-workspace-visible",
+    "collected_at": "2026-09-04T02:09:47.105Z",
+    "domContentLoaded_ms": 37,
+    "load_ms": 37,
+    "firstContentfulPaint_ms": 72,
+    "scriptCount": 4,
+    "scriptTransferBytes": 733620,
+    "monacoChunkReady_ms": null
+  },
+  "afterFirstChapter": {
+    "phase": "after-first-chapter-editor",
+    "collected_at": "2026-09-04T02:09:49.937Z",
+    "domContentLoaded_ms": 37,
+    "load_ms": 37,
+    "firstContentfulPaint_ms": 72,
+    "scriptCount": 6,
+    "scriptTransferBytes": 1376387,
+    "monacoChunkReady_ms": 916
+  },
+  "firstChapterWorkflowWallMs": 496
+}

@@ -107,6 +107,12 @@ public static PhotinoWebMessageBridge CreateBridge(
             options,
             new ReferenceChapterSplitChatCompletionAnalyzer(settingsService, chatCompletionClient),
             materializationDatabasePathResolver,
+            // I7：显式接线模型预检，复用组合根的同一套配置客户端（缺省时会另建一套实例）。
+            modelPreflight: new ReferenceMaterializationModelPreflight(
+                settingsService,
+                chatCompletionClient,
+                embeddingService,
+                embeddingClient),
             semanticSearch: referenceMaterializationSemanticSearch);
         var referenceMaterializationWorker = new ReferenceMaterializationWorker(
             materializationDatabasePathResolver,

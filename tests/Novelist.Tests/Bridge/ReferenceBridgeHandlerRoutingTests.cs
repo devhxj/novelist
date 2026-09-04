@@ -1082,7 +1082,7 @@ public sealed class ReferenceBridgeHandlerRoutingTests
             CancellationToken cancellationToken)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            Calls.Add($"UpdateAnchorMetadata:{input.NovelId}:{input.AnchorId}:{input.Title}:{input.Author}:{input.LicenseStatus}:{input.Visibility}:{input.SourceTrust}:{string.Join(",", input.UserTags)}");
+            Calls.Add($"UpdateAnchorMetadata:{input.NovelId}:{input.AnchorId}:{input.Title}:{input.Author}:{input.LicenseStatus}:{input.Visibility}:{input.SourceTrust}:{string.Join(",", input.UserTags ?? [])}");
             return ValueTask.FromResult(CreateAnchorPayload(
                 input.AnchorId,
                 input.NovelId,
@@ -1090,9 +1090,9 @@ public sealed class ReferenceBridgeHandlerRoutingTests
                 input.Author ?? string.Empty,
                 @"D:\private\updated.md",
                 "markdown",
-                input.LicenseStatus,
-                input.Visibility,
-                input.SourceTrust,
+                input.LicenseStatus ?? string.Empty,
+                input.Visibility ?? ReferenceCorpusVisibilities.Workspace,
+                input.SourceTrust ?? ReferenceSourceTrustLevels.UserVerified,
                 input.UserTags));
         }
 

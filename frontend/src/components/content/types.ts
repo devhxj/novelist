@@ -16,6 +16,9 @@ export type EditorTab = {
   content?: string
   outlineContent?: string
   isDirty?: boolean
+  // U1：最近一次已知磁盘正文的基线令牌（加载/保存/外部刷新时更新）。
+  // 保存时随 SaveContent 上送做比较-交换；挂起冲突期间清空，让“保留我的”强制落盘。
+  savedHash?: string
   viewMode?: 'content' | 'outline' | 'preview' | 'edit'
   readOnly?: boolean
   conflict?: EditorTabConflict
@@ -29,23 +32,15 @@ export type EditorTab = {
 }
 
 // 文件名格式 chapters/001.md，outlines/001.md 同理
-export function chapterPath(num: number): string {
-  return `chapters/${String(num).padStart(3, '0')}.md`
-}
-
 export function outlinePath(num: number): string {
   return `outlines/${String(num).padStart(3, '0')}.md`
-}
-
-export function novelistPath(): string {
-  return 'novelist.md'
 }
 
 export function isContentPath(p: string): boolean {
   return isChapterPath(p) || p === 'novelist.md'
 }
 
-export function isChapterPath(p: string): boolean {
+function isChapterPath(p: string): boolean {
   return /^chapters\/\d+\.md$/.test(p)
 }
 
@@ -80,10 +75,4 @@ export function splitFrontmatter(content: string): { meta: Record<string, string
     }
   }
   return { meta, body }
-}
-
-export function chapterNumFromPath(p: string): number {
-  const match = /^(?:chapters|outlines)\/(\d+)\.md$/.exec(p)
-  if (!match) return 0
-  return parseInt(match[1], 10) || 0
 }

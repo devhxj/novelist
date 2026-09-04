@@ -8,10 +8,21 @@ import test from 'node:test'
 
 const tempDir = await mkdtemp(path.join(os.tmpdir(), 'novelist-conflict-'))
 const outputFile = path.join(tempDir, 'fileChangeConflict.mjs')
+const baselineFile = path.join(tempDir, 'contentBaseline.mjs')
 
 await build({
   entryPoints: ['src/components/content/fileChangeConflict.ts'],
   outfile: outputFile,
+  bundle: true,
+  platform: 'node',
+  format: 'esm',
+  target: 'es2023',
+  logLevel: 'silent',
+})
+
+await build({
+  entryPoints: ['src/lib/contentBaseline.ts'],
+  outfile: baselineFile,
   bundle: true,
   platform: 'node',
   format: 'esm',
@@ -26,6 +37,8 @@ const {
   derivedOutlinePath,
   conflictDiffToolId,
 } = await import(pathToFileURL(outputFile))
+
+const { contentBaselineHash } = await import(pathToFileURL(baselineFile))
 
 // 模拟 ContentPanel 里 file:changed 的实际处理：决策 → 取盘上内容 → 打补丁。
 const applyFileChange = (tab, eventPath, incoming) => {
@@ -65,7 +78,9 @@ test('the conflict patch never carries content or isDirty at all', () => {
   assert.equal('content' in patch, false)
   assert.equal('outlineContent' in patch, false)
   assert.equal('isDirty' in patch, false)
-  assert.deepEqual(Object.keys(patch), ['conflict'])
+  // U1：冲突挂起时基线令牌必须被显式清空——「保留我的」随后的保存走强制覆盖。
+  assert.deepEqual(Object.keys(patch), ['conflict', 'savedHash'])
+  assert.equal(patch.savedHash, undefined)
 })
 
 test('a clean content tab still refreshes in place', () => {
@@ -154,11 +169,33 @@ test('choosing the incoming version lands it and returns the tab to a clean stat
   assert.equal(patch.isDirty, false)
   assert.equal(patch.conflict, undefined)
   assert.equal('conflict' in patch, true, 'the conflict key must be present so the spread clears it')
+  // U1：采用传入版本后，磁盘基线即传入版本，后续保存以它做比较-交换。
+  assert.equal(patch.savedHash, contentBaselineHash('AI 版本'))
 
   // 大纲侧不该顺手清正文的脏标记。
   const outlinePatch = acceptIncomingPatch({ target: 'outlineContent', path: 'outlines/007.md', incoming: '新大纲' })
   assert.equal(outlinePatch.outlineContent, '新大纲')
   assert.equal('isDirty' in outlinePatch, false)
+  assert.equal('savedHash' in outlinePatch, false, 'the outline patch must not touch the content baseline')
+})
+
+test('refreshing a clean content tab updates the baseline token to the disk version', () => {
+  const { next } = applyFileChange(
+    { id: 'file_7', type: 'file', path: 'chapters/007.md', title: '第7章', content: '旧内容', isDirty: false, savedHash: 'fnv1a:deadbeef:6' },
+    'chapters/007.md',
+    '新内容',
+  )
+
+  assert.equal(next.savedHash, contentBaselineHash('新内容'))
+})
+
+test('the baseline token algorithm matches the shared FNV-1a contract (U1 known vectors)', () => {
+  // 与后端 ChapterContentBaselineHash 守卫测试（BridgeFrontendContractTests）共用同一组向量。
+  // a/foobar 是 FNV-1a 32 的公开标准向量，用于钉死算法本身。
+  assert.equal(contentBaselineHash(''), 'fnv1a:811c9dc5:0')
+  assert.equal(contentBaselineHash('a'), 'fnv1a:e40c292c:1')
+  assert.equal(contentBaselineHash('foobar'), 'fnv1a:bf9cf968:6')
+  assert.equal(contentBaselineHash('第一章 初雪'), 'fnv1a:acfae772:6')
 })
 
 test('the conflict diff tab id is derived from the path so repeat clicks reuse one tab', () => {

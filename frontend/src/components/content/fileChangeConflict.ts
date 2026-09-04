@@ -1,5 +1,6 @@
 import { isContentPath, outlinePath } from './types'
 import type { EditorTab, EditorTabConflict, FileChangeTarget } from './types'
+import { contentBaselineHash } from '../../lib/contentBaseline'
 
 export type FileChangeDecision =
   | { kind: 'ignore' }
@@ -47,13 +48,18 @@ export function fileChangePatch(
 ): Partial<EditorTab> {
   if (decision.kind === 'conflict') {
     const conflict: EditorTabConflict = { target: decision.target, path: eventPath, incoming }
-    return { conflict }
+    // U1：冲突挂起时基线令牌已失真（磁盘上是对方的版本），清空它，
+    // 作者选「保留我的」后的下一次保存即强制覆盖，不再被基线校验拒绝。
+    return { conflict, savedHash: undefined }
   }
   if (decision.kind === 'refresh') {
     const patch: Partial<EditorTab> = { [decision.target]: incoming }
     // 已经采用磁盘版本，先前挂起的冲突随之失效。
     patch.conflict = undefined
-    if (decision.target === 'content') patch.isDirty = false
+    if (decision.target === 'content') {
+      patch.isDirty = false
+      patch.savedHash = contentBaselineHash(incoming)
+    }
     return patch
   }
   return {}
@@ -62,7 +68,10 @@ export function fileChangePatch(
 // 作者选「用 AI 版本」：接受挂起的外部内容，正文回到与磁盘一致的干净状态。
 export function acceptIncomingPatch(conflict: EditorTabConflict): Partial<EditorTab> {
   const patch: Partial<EditorTab> = { [conflict.target]: conflict.incoming, conflict: undefined }
-  if (conflict.target === 'content') patch.isDirty = false
+  if (conflict.target === 'content') {
+    patch.isDirty = false
+    patch.savedHash = contentBaselineHash(conflict.incoming)
+  }
   return patch
 }
 

@@ -158,7 +158,12 @@ export async function assertSearchResultContainsRestrictedSourcePath(page) {
   const hasRestrictedPath = await page.evaluate(() =>
     window.__appMockState.calls
       .filter((call) => call.method === 'SearchAll')
-      .some((call) => call.result?.some?.((item) => item.source_path === 'D:\\restricted\\reference-source.md')))
+      .some((call) => {
+        // U4：SearchAll 结果已改为 { results, semantic_degraded } 信封；兼容旧数组形态。
+        const result = call.result
+        const items = Array.isArray(result) ? result : result?.results
+        return items?.some?.((item) => item.source_path === 'D:\\restricted\\reference-source.md')
+      }))
   assert.equal(hasRestrictedPath, true, 'Expected mocked search payload to include a restricted source path for leakage guardrail coverage.')
 }
 
@@ -430,4 +435,35 @@ export async function dispatchNovelImportDrop(page, payload) {
 
     target.dispatchEvent(event)
   }, payload)
+}
+
+// U10：冷启动/首个主操作性能基线采集。在页面上读取 navigation/paint/resource 计时，
+// editor_ready 以 monaco 块（monacoSetup-*.js）的取回完成时刻为准——正文编辑器是
+// 拆分后最大的按需块，它的就绪时刻即"首个主操作可用"的合理代理。
+export async function collectPerfTimings(page, phase) {
+  const timings = await page.evaluate(() => {
+    const navigation = performance.getEntriesByType('navigation')[0]
+    const paintEntries = performance.getEntriesByType('paint')
+    const firstPaint = paintEntries.find((entry) => entry.name === 'first-contentful-paint')
+    const resources = performance.getEntriesByType('resource')
+    const scripts = resources.filter((entry) => entry.name.endsWith('.js') || entry.initiatorType === 'script')
+    let scriptBytes = 0
+    for (const entry of scripts) {
+      scriptBytes += entry.transferSize || 0
+    }
+    const monacoEntry = resources.find((entry) => /monacoSetup-[^/]*\.js$/.test(entry.name))
+    return {
+      domContentLoaded_ms: navigation ? Math.round(navigation.domContentLoadedEventEnd) : null,
+      load_ms: navigation ? Math.round(navigation.loadEventEnd) : null,
+      firstContentfulPaint_ms: firstPaint ? Math.round(firstPaint.startTime) : null,
+      scriptCount: scripts.length,
+      scriptTransferBytes: scriptBytes,
+      monacoChunkReady_ms: monacoEntry ? Math.round(monacoEntry.startTime + monacoEntry.duration) : null,
+    }
+  })
+  return {
+    phase,
+    collected_at: new Date().toISOString(),
+    ...timings,
+  }
 }

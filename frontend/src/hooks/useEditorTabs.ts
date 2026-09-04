@@ -19,6 +19,33 @@ function tabMetasForStorage(tabs: EditorTab[], activeTabId: string | null): TabM
   ]
 }
 
+// E2：localStorage 里的历史形状可能与当前 TabMeta 不兼容（字段更名/类型变化）。
+// 逐条校验必需字段，丢弃不合法项而不是让坏结构进入渲染导致白屏。
+function isRestorableTabMeta(value: unknown): value is TabMeta {
+  if (value == null || typeof value !== 'object') return false
+  const candidate = value as Record<string, unknown>
+  if (candidate.type !== 'file' && candidate.type !== 'diff') return false
+  if (typeof candidate.path !== 'string' || candidate.path === '') return false
+  if (typeof candidate.title !== 'string' || candidate.title === '') return false
+  const viewMode = candidate.viewMode
+  if (viewMode !== undefined &&
+    viewMode !== 'content' && viewMode !== 'outline' && viewMode !== 'preview' && viewMode !== 'edit') {
+    return false
+  }
+  if (candidate.readOnly !== undefined && typeof candidate.readOnly !== 'boolean') return false
+  return true
+}
+
+function sanitizeRestoredMetas(saved: unknown): TabMeta[] {
+  if (!Array.isArray(saved)) return []
+  const valid = saved.filter(isRestorableTabMeta)
+  if (valid.length === saved.length) return valid
+  console.warn(
+    `[useEditorTabs] 已忽略 ${saved.length - valid.length} 个形状不兼容的恢复标签（历史版本遗留数据）。`,
+  )
+  return valid
+}
+
 export function useEditorTabs(novelId: number) {
   const [tabs, setTabs] = useState<EditorTab[]>([])
   const [activeTabId, setActiveTabId] = useState<string | null>(null)
@@ -39,8 +66,10 @@ export function useEditorTabs(novelId: number) {
       allMetasRef.current = {}
     }
     const key = String(novelId)
-    const saved = allMetasRef.current[key]
-    if (saved?.length) {
+    const saved = sanitizeRestoredMetas(allMetasRef.current[key])
+    if (saved.length) {
+      // 丢弃后回写，避免坏数据每次启动都重新触发告警。
+      allMetasRef.current[key] = saved
       skipInitialEmptyPersistRef.current = true
       const restored: EditorTab[] = saved.map(t => ({
         ...t,
@@ -73,8 +102,9 @@ export function useEditorTabs(novelId: number) {
     if (oldKey === newKey) return
 
     prevNovelIdRef.current = novelId
-    const saved = allMetasRef.current[newKey]
-    if (saved?.length) {
+    const saved = sanitizeRestoredMetas(allMetasRef.current[newKey])
+    if (saved.length) {
+      allMetasRef.current[newKey] = saved
       const restored: EditorTab[] = saved.map(t => ({
         ...t,
         id: nextId(t.type === 'diff' ? 'diff' : 'file'),

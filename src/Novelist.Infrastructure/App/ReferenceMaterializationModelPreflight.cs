@@ -3,7 +3,8 @@ using Novelist.Core.App;
 
 namespace Novelist.Infrastructure.App;
 
-internal sealed class ReferenceMaterializationModelPreflight : IReferenceMaterializationModelPreflight
+// I7：public——桌面组合根显式接线时需要构造（复用组合根的同一套配置客户端）。
+public sealed class ReferenceMaterializationModelPreflight : IReferenceMaterializationModelPreflight
 {
     private const int LlmHealthCheckMaxOutputTokens = 256;
 

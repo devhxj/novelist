@@ -1,8 +1,8 @@
 using System.Collections.Concurrent;
-using System.Diagnostics;
 using System.Text.Json;
 using Novelist.Contracts.Bridge;
 using Novelist.Core.Bridge;
+using Novelist.Core.Diagnostics;
 
 namespace Novelist.App.Desktop;
 
@@ -26,7 +26,9 @@ public sealed class PhotinoWebMessageBridge
         _ = ReceiveAsync(message)
             .AsTask()
             .ContinueWith(
-                task => Debug.WriteLine(task.Exception),
+                // U2：消息泵唯一的错误出口。Debug.WriteLine 会被 Release 编译掉，
+                // 换成 AppLog 保证发布版本里同样留痕。
+                task => AppLog.Error("Unhandled bridge message pump fault.", task.Exception),
                 CancellationToken.None,
                 TaskContinuationOptions.OnlyOnFaulted,
                 TaskScheduler.Default);

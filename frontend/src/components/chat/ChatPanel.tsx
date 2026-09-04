@@ -294,7 +294,7 @@ export default function ChatPanel({
         setActiveSessionId(sid)
       }
     }).catch(() => {
-      app.SetLastSession('').catch(() => {})
+      app.SetLastSession('').catch(err => console.warn('SetLastSession clear failed', err))
     })
   }, [app, novelId, pendingLastSessionId])
 
@@ -428,7 +428,7 @@ export default function ChatPanel({
       liveTurnsSnapshotsRef.current.set(liveSessionId, turnsRef.current)
     }
     setActiveSessionId(sid)
-    app.SetLastSession(sid).catch(() => {})
+    app.SetLastSession(sid).catch(err => console.warn('SetLastSession failed', err))
     app.GetSession(sid).then(detail => {
       if (detail?.usage) {
         setLastUsage(detail.usage as unknown as UsageInfo)
@@ -886,10 +886,13 @@ export default function ChatPanel({
   const refreshModels = useCallback(() => {
     app.GetModels().then(list => {
       if (list && list.length > 0) setModels(list)
-    }).catch(() => {})
+    }).catch(err => {
+      notifyChatFailure('刷新模型列表失败', err)
+    })
   }, [app])
 
   const handleSelectModel = useCallback((key: string) => {
+    const previous = selectedKey
     setSelectedKey(key)
     const m = models.find(x => x.Key === key)
     let effort = ''
@@ -897,18 +900,32 @@ export default function ChatPanel({
       effort = m.ReasoningLevels[0]
       setReasoningEffort(effort)
     }
-    app.SetSelectedModel(key, effort).catch(() => {})
-  }, [models, app])
+    app.SetSelectedModel(key, effort).catch(err => {
+      // 选中态必须与后端实际使用的模型一致，失败即回滚（U3 同类）。
+      setSelectedKey(previous)
+      notifyChatFailure('切换模型失败，仍使用原模型', err)
+    })
+  }, [models, app, selectedKey])
 
   const handleSelectEffort = useCallback((effort: string) => {
+    const previous = reasoningEffort
     setReasoningEffort(effort)
-    app.SetReasoningEffort(effort).catch(() => {})
-  }, [app])
+    app.SetReasoningEffort(effort).catch(err => {
+      setReasoningEffort(previous)
+      notifyChatFailure('切换推理力度失败', err)
+    })
+  }, [app, reasoningEffort])
 
   const handleToggleApproval = useCallback(() => {
-    const next = approvalMode === 'manual' ? 'auto' : 'manual'
+    const previous = approvalMode
+    const next = previous === 'manual' ? 'auto' : 'manual'
     setApprovalMode(next)
-    app.SetApprovalMode(next).catch(() => {})
+    app.SetApprovalMode(next).catch(err => {
+      // U3：审批模式是安全设置——后端没切换成功就必须回滚显示，
+      // 否则作者以为收紧了权限而后端仍在旧模式执行工具。
+      setApprovalMode(previous)
+      notifyChatFailure(`切换审批模式失败，仍保持${previous === 'manual' ? '手动' : '自动'}审批`, err)
+    })
   }, [approvalMode, app])
 
   const handleCompress = useCallback(async () => {
@@ -1010,11 +1027,13 @@ export default function ChatPanel({
         activeTurnSessionIdRef.current = data.session_id
         // O21：标记 turns 属于本场流式，历史加载 effect 不得在中途重放。
         liveTurnsSessionIdRef.current = data.session_id
-        app.SetLastSession(data.session_id).catch(() => {})
+        app.SetLastSession(data.session_id).catch(err => console.warn('SetLastSession failed', err))
         // 作者在会话 id 到手之前就按了停止：此刻补发，否则取消请求会被后端空 id 分支丢弃
         if (pendingCancelRef.current) {
           pendingCancelRef.current = false
-          app.CancelChat(data.session_id).catch(() => {})
+          app.CancelChat(data.session_id).catch(err => {
+            notifyChatFailure('停止会话的请求未送达', err)
+          })
         }
       }
 
@@ -1273,8 +1292,7 @@ export default function ChatPanel({
                         return (
                           <ToolCallCard
                             key={seg.id}
-                            toolName={seg.toolName}
-                            displayText={seg.displayText}
+                                                    displayText={seg.displayText}
                             status={seg.toolStatus}
                             activityKind={seg.activityKind}
                             error={seg.error}
@@ -1633,7 +1651,9 @@ export default function ChatPanel({
                 }
               }
             }
-          }).catch(() => {})
+          }).catch(err => {
+            notifyChatFailure('保存后刷新模型列表失败', err)
+          })
         }}
         initialTab="model"
       />

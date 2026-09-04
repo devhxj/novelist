@@ -47,6 +47,34 @@ public class ChapterCorpusCoverageServiceTests
     }
 
     [Fact]
+    public async Task ComputeCoverageTreatsExactHalfAsSufficientUntilCalibrated()
+    {
+        // U9：SufficientRatio=0.5 的边界（恰好一半）判足。该常量当前未经标注语料标定，
+        // 标定流程见 docs/corpus-driven-writing/evaluations/coverage-threshold-calibration.md；
+        // 标定后阈值若变化，本测试与实现须同步更新。
+        var planning = new StubPlanningService(
+        [
+            new ChapterPlanPayload(42, "next", "- 雨夜门口对峙\n- 无关的日常过渡"),
+        ]);
+        var anchors = new StubAnchorService(
+        [
+            new ReferenceAnchorPayload(
+                101, 42, "全局雨夜参考", "作者", "D:\\books\\a.md", "markdown", "user_provided",
+                "hash", "v1", ReferenceAnchorBuildStates.Ready,
+                DateTimeOffset.UtcNow, DateTimeOffset.UtcNow, "private", "user_verified", []),
+        ],
+        query => query.Contains("雨夜"));
+
+        var coverage = await new ChapterCorpusCoverageService(anchors, planning)
+            .ComputeCoverageAsync(new GetChapterCorpusCoveragePayload(42, 1), CancellationToken.None);
+
+        Assert.Equal(2, coverage.TotalCount);
+        Assert.Equal(1, coverage.CoveredCount);
+        Assert.Equal(0.5, coverage.CoverageRatio, 4);
+        Assert.True(coverage.Sufficient);
+    }
+
+    [Fact]
     public async Task ComputeCoverageReportsInsufficientBelowHalfAndEmptyWithoutPlan()
     {
         var service = new ChapterCorpusCoverageService(

@@ -51,19 +51,22 @@ export default function GeneralConfigTab({ onBusyChange }: { onBusyChange?: (bus
   const [updateResult, setUpdateResult] = useState<update.UpdateCheckResult | null>(null)
   const [showUpdateDialog, setShowUpdateDialog] = useState(false)
 
+  const [loadFailed, setLoadFailed] = useState(false)
+
   useEffect(() => {
+    // 初始加载失败不再静默：设置页显示空白会误导作者以为配置丢了。
     app.GetAppConfig().then(cfg => {
       setDataDir(cfg?.data_dir || '')
       if (cfg?.update_check?.endpoint_url) {
         setUpdateEndpoint(prev => prev || cfg.update_check.endpoint_url)
       }
-    }).catch(() => {})
+    }).catch(() => setLoadFailed(true))
     app.GetNovels().then(list => {
       setNovels(list || [])
-    }).catch(() => {})
+    }).catch(() => setLoadFailed(true))
     app.GetSettings().then(s => {
       if (s?.last_novel_id) setSelectedID(s.last_novel_id)
-    }).catch(() => {})
+    }).catch(() => setLoadFailed(true))
     app.GetGitAuthorSettings().then(settings => {
       setGitAuthorName(settings?.name || '')
       setGitAuthorEmail(settings?.email || '')
@@ -371,6 +374,12 @@ export default function GeneralConfigTab({ onBusyChange }: { onBusyChange?: (bus
   return (
     <div className="flex-1 flex flex-col">
       <h3 className="text-sm font-medium mb-5">基础配置</h3>
+
+      {loadFailed && (
+        <div className="mb-4 rounded-md border border-destructive/30 bg-destructive/5 px-3 py-2 text-xs text-destructive" role="alert">
+          部分配置加载失败，下方显示的可能是默认值。请关闭后重新打开设置，或重启应用后重试。
+        </div>
+      )}
 
       <div className="space-y-2">
         <label className="text-xs font-medium text-muted-foreground flex items-center gap-1.5">

@@ -186,6 +186,7 @@ export interface NovelistAppApi {
   GetWritingActivity: AppMethod<[number], writing.DailyActivity[]>
   GetWritingStats: AppMethod<[], writing.WritingStats>
   Initialize: AppMethod<[string], void>
+  InspectReferenceCorpusTechniqueVectorIndexes: AppMethod<[reference.InspectCorpusTechniqueVectorIndexesInput], reference.CorpusTechniqueVectorIndexInspection>
   IsInitialized: AppMethod<[], boolean>
   ListSkills: AppMethod<[app.ListSkillsInput], skill.SkillMeta[]>
   ListSlashCommands: AppMethod<[app.ListSlashCommandsInput], app.SlashCommand[]>
@@ -194,6 +195,7 @@ export interface NovelistAppApi {
   PreviewReferenceChapterSplit: AppMethod<[reference.PreviewChapterSplitInput], reference.ChapterSplitProfile>
   PromoteReferenceAnchorsToWorkspaceCorpus: AppMethod<[reference.PromoteAnchorsToWorkspaceCorpusInput], reference.Anchor[]>
   PromoteReferenceAnchorToWorkspaceCorpus: AppMethod<[reference.PromoteAnchorToWorkspaceCorpusInput], reference.Anchor>
+  PumpReferenceCorpusTechniqueVectorMaintenance: AppMethod<[reference.PumpCorpusTechniqueVectorMaintenanceInput], reference.CorpusTechniqueVectorMaintenancePumpResult>
   RebuildReferenceAnchor: AppMethod<[number, number], reference.BuildStatus>
   RebuildNovelIndex: AppMethod<[number], void>
   ReconcileNovelImportRuns: AppMethod<[], novelImport.ImportReconciliationResult>
@@ -202,6 +204,7 @@ export interface NovelistAppApi {
   RestoreReferenceStyleProfile: AppMethod<[reference.RestoreStyleProfileInput], reference.StyleProfile>
   SaveAvatar: AppMethod<[number[]], void>
   SaveContent: AppMethod<[app.SaveContentInput], void>
+  ScheduleReferenceCorpusTechniqueVectorMaintenance: AppMethod<[reference.ScheduleCorpusTechniqueVectorMaintenanceInput], reference.CorpusTechniqueVectorMaintenanceJob>
   SaveCover: AppMethod<[number, number[]], void>
   SaveEmbeddingConfig: AppMethod<[EmbeddingConfigView], void>
   SaveGitAuthorSettings: AppMethod<[git.SaveGitAuthorSettingsInput], git.GitAuthorSettings>
@@ -210,7 +213,7 @@ export interface NovelistAppApi {
   SaveUpdateCheckSettings: AppMethod<[update.SaveUpdateCheckSettingsInput], update.UpdateCheckSettings>
   SaveUserName: AppMethod<[string], void>
   SaveWindowSettings: AppMethod<[layout.SaveWindowSettingsInput], layout.WindowSettings>
-  SearchAll: AppMethod<[number, string], search.Result[]>
+  SearchAll: AppMethod<[number, string], search.SearchAllResult>
   SearchReferenceCorpusCandidates: AppMethod<[reference.SearchCorpusCandidatesInput], storage.PageResult_reference_CorpusCandidate_>
   SearchReferenceMaterials: AppMethod<[reference.SearchMaterialsInput], storage.PageResult_reference_MaterialSummary_>
   SearchStyleSamples: AppMethod<[styleSample.SearchStyleSamplesInput], storage.PageResult_styleSample_StyleSample_>
@@ -403,6 +406,7 @@ GetReferenceCorpusFeatureAnalysisRun: appMethod<NovelistAppApi['GetReferenceCorp
   GetWritingActivity: appMethod<NovelistAppApi['GetWritingActivity']>('GetWritingActivity'),
   GetWritingStats: appMethod<NovelistAppApi['GetWritingStats']>('GetWritingStats'),
   Initialize: appMethod<NovelistAppApi['Initialize']>('Initialize'),
+  InspectReferenceCorpusTechniqueVectorIndexes: appMethod<NovelistAppApi['InspectReferenceCorpusTechniqueVectorIndexes']>('InspectReferenceCorpusTechniqueVectorIndexes'),
   IsInitialized: appMethod<NovelistAppApi['IsInitialized']>('IsInitialized'),
   ListSkills: appMethod<NovelistAppApi['ListSkills']>('ListSkills'),
   ListSlashCommands: appMethod<NovelistAppApi['ListSlashCommands']>('ListSlashCommands'),
@@ -411,6 +415,8 @@ GetReferenceCorpusFeatureAnalysisRun: appMethod<NovelistAppApi['GetReferenceCorp
   PreviewReferenceChapterSplit: appMethod<NovelistAppApi['PreviewReferenceChapterSplit']>('PreviewReferenceChapterSplit'),
   PromoteReferenceAnchorsToWorkspaceCorpus: appMethod<NovelistAppApi['PromoteReferenceAnchorsToWorkspaceCorpus']>('PromoteReferenceAnchorsToWorkspaceCorpus'),
   PromoteReferenceAnchorToWorkspaceCorpus: appMethod<NovelistAppApi['PromoteReferenceAnchorToWorkspaceCorpus']>('PromoteReferenceAnchorToWorkspaceCorpus'),
+  // I6：泵送一次的耗时上限由 lease_seconds 决定（默认 120s），关闭前端超时。
+  PumpReferenceCorpusTechniqueVectorMaintenance: ((...args) => invokeAppArgs('PumpReferenceCorpusTechniqueVectorMaintenance', args, { timeoutMs: null })) as NovelistAppApi['PumpReferenceCorpusTechniqueVectorMaintenance'],
   RebuildReferenceAnchor: appMethod<NovelistAppApi['RebuildReferenceAnchor']>('RebuildReferenceAnchor'),
   RebuildNovelIndex: appMethod<NovelistAppApi['RebuildNovelIndex']>('RebuildNovelIndex'),
   ReconcileNovelImportRuns: appMethod<NovelistAppApi['ReconcileNovelImportRuns']>('ReconcileNovelImportRuns'),
@@ -419,6 +425,7 @@ GetReferenceCorpusFeatureAnalysisRun: appMethod<NovelistAppApi['GetReferenceCorp
   RestoreReferenceStyleProfile: appMethod<NovelistAppApi['RestoreReferenceStyleProfile']>('RestoreReferenceStyleProfile'),
   SaveAvatar: appMethod<NovelistAppApi['SaveAvatar']>('SaveAvatar'),
   SaveContent: appMethod<NovelistAppApi['SaveContent']>('SaveContent'),
+  ScheduleReferenceCorpusTechniqueVectorMaintenance: appMethod<NovelistAppApi['ScheduleReferenceCorpusTechniqueVectorMaintenance']>('ScheduleReferenceCorpusTechniqueVectorMaintenance'),
   SaveCover: appMethod<NovelistAppApi['SaveCover']>('SaveCover'),
   SaveEmbeddingConfig: appMethod<NovelistAppApi['SaveEmbeddingConfig']>('SaveEmbeddingConfig'),
   SaveGitAuthorSettings: appMethod<NovelistAppApi['SaveGitAuthorSettings']>('SaveGitAuthorSettings'),

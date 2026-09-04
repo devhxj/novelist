@@ -3,7 +3,9 @@ using System.Text.Json;
 using System.Text.Json.Serialization;
 using System.Text.RegularExpressions;
 using Novelist.Contracts.App;
+using Novelist.Contracts.Bridge;
 using Novelist.Core.App;
+using Novelist.Core.Bridge;
 
 namespace Novelist.Infrastructure.App;
 
@@ -361,6 +363,29 @@ public sealed class FileSystemChapterContentService : IChapterContentService
             }
 
             Directory.CreateDirectory(Path.GetDirectoryName(fullPath)!);
+
+            // U1：携带基线令牌的保存走比较-交换语义。磁盘内容已不是调用方读到的那份
+            // （第二窗口、外部编辑器、Agent 直写等绕过 file:changed 事件流的写入）时拒绝覆盖，
+            // 返回 CONTENT_CONFLICT 让前端既有冲突条接管，避免静默丢正文。
+            if (!string.IsNullOrWhiteSpace(input.BaselineHash))
+            {
+                var diskContent = File.Exists(fullPath)
+                    ? await File.ReadAllTextAsync(fullPath, cancellationToken)
+                    : string.Empty;
+                var diskHash = ChapterContentBaselineHash.Compute(diskContent);
+                if (!string.Equals(diskHash, input.BaselineHash.Trim(), StringComparison.Ordinal))
+                {
+                    throw new BridgeRequestException(
+                        BridgeErrorCodes.ContentConflict,
+                        $"Content for '{relativePath}' changed on disk after it was loaded.",
+                        new Dictionary<string, string>
+                        {
+                            ["path"] = relativePath,
+                            ["disk_hash"] = diskHash,
+                        });
+                }
+            }
+
             await File.WriteAllTextAsync(fullPath, input.Content, cancellationToken);
 
             if (store is not null && chapterNumber is not null)

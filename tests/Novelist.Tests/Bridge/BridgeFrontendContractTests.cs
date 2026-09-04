@@ -2,6 +2,7 @@ using System.Text.Json;
 using System.Text.RegularExpressions;
 using Novelist.Contracts.App;
 using Novelist.Contracts.Bridge;
+using Novelist.Core.App;
 using Novelist.Core.Bridge;
 
 namespace Novelist.Tests.Bridge;
@@ -105,6 +106,40 @@ public sealed class BridgeFrontendContractTests
         using var json = ParseOutbound(result);
         Assert.True(json.RootElement.GetProperty("ok").GetBoolean());
         Assert.Equal(new Uri("https://example.com/path"), runtime.LastOpenedUrl);
+    }
+
+    [Fact]
+    public void ChapterContentBaselineHashMatchesFrontendKnownVectors()
+    {
+        // U1：与 frontend/tests/file-change-conflict.test.mjs 共用同一组向量，
+        // a/foobar 为 FNV-1a 32 公开标准向量，钉死前后端算法逐字节一致。
+        Assert.Equal("fnv1a:811c9dc5:0", ChapterContentBaselineHash.Compute(""));
+        Assert.Equal("fnv1a:e40c292c:1", ChapterContentBaselineHash.Compute("a"));
+        Assert.Equal("fnv1a:bf9cf968:6", ChapterContentBaselineHash.Compute("foobar"));
+        Assert.Equal("fnv1a:acfae772:6", ChapterContentBaselineHash.Compute("第一章 初雪"));
+    }
+
+    [Fact]
+    public void FrontendObservationFamiliesMatchBackendFeatureFamilyRegistry()
+    {
+        // E1：观察维度词表以后端 ReferenceCorpusFeatureFamilies 为唯一真值，
+        // 前端 corpusFamilies.ts 漂移（幻影值/缺失值）时在此失败。
+        var root = FindRepositoryRoot();
+        var source = File.ReadAllText(Path.Combine(root, "frontend", "src", "lib", "novelist", "corpusFamilies.ts"));
+
+        var observationMatch = Regex.Match(
+            source,
+            @"OBSERVATION_FAMILIES\s*=\s*\[(.*?)\]",
+            RegexOptions.Singleline);
+        Assert.True(observationMatch.Success, "corpusFamilies.ts must declare OBSERVATION_FAMILIES as an array literal.");
+        var frontendFamilies = Regex
+            .Matches(observationMatch.Groups[1].Value, @"'([a-z_]+)'")
+            .Select(match => match.Groups[1].Value)
+            .ToArray();
+
+        Assert.Equal(
+            ReferenceCorpusFeatureFamilies.All.Order(StringComparer.Ordinal),
+            frontendFamilies.Order(StringComparer.Ordinal));
     }
 
     private static SortedSet<string> ExtractFrontendAppMethods()

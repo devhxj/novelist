@@ -1,25 +1,28 @@
 // 语料浏览维度枚举（单一来源）。
-// 须与后端 ReferenceCorpusFeatureFamilies / 技法标本 family 词表保持一致；
-// scene/trope 为场景级 family（方案 §4），分析产出随真实语料积累。
+// OBSERVATION_FAMILIES 与后端 ReferenceCorpusFeatureFamilies.All 逐项一致：
+// 句子级 syntax/rhythm/sensory/emotion/rhetoric，段落级 narrative/pov/action/character/commercial，
+// 场景级 scene/trope。词表漂移由 BridgeFrontendContractTests 守卫（E1）。
 export const OBSERVATION_FAMILIES = [
-  'emotion',
-  'sensory',
-  'rhythm',
   'syntax',
-  'action',
-  'interaction',
-  'pov',
+  'rhythm',
+  'sensory',
+  'emotion',
   'rhetoric',
-  'hook',
   'narrative',
+  'pov',
+  'action',
+  'character',
+  'commercial',
   'scene',
   'trope',
 ] as const
 
+// 技法标本的 technique_family 由分析模型自由命名（后端不设白名单），
+// 这里只是筛选下拉的常用预设，不是封闭词表。
 export const SPECIMEN_FAMILIES = [
   'emotion',
   'rhetoric',
   'rhythm',
   'action',
-  'structure',
+  'narrative',
 ] as const

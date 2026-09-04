@@ -106,8 +106,9 @@ function CorpusOverview({ novelId, anchors, refreshKey, onOpenBrowse }: {
       ])
       setStats({ observations: totals.observation_total, specimens: totals.specimen_total })
       setCoverage(coverageResult)
-    } catch {
-      setError('语料总览加载失败。请刷新后重试。')
+    } catch (error) {
+      // E4：透出后端诊断而不是固定文案，让失败可排查。
+      setError(describeBridgeError(error, '语料总览加载失败。请刷新后重试。').message)
     } finally {
       setLoading(false)
     }
@@ -260,8 +261,9 @@ function CorpusBrowse({ novelId, anchors, refreshKey }: {
         const result = await app.ListReferenceCorpusTechniqueSpecimens({ novel_id: novelId, anchor_id: anchorId, page_request: page })
         if (requestSeqRef.current === requestId) setSpecimens(result)
       }
-    } catch {
-      if (requestSeqRef.current === requestId) setError('语料浏览加载失败。请刷新后重试。')
+    } catch (error) {
+      // E4：透出后端诊断（如词表漂移的 invalid_filter_value）而不是笼统的"加载失败"。
+      if (requestSeqRef.current === requestId) setError(describeBridgeError(error, '语料浏览加载失败。请刷新后重试。').message)
     } finally {
       if (requestSeqRef.current === requestId) setLoading(false)
     }
@@ -338,7 +340,7 @@ function CorpusBrowse({ novelId, anchors, refreshKey }: {
             <option value="unverified">未复核</option>
             <option value="low_confidence">低置信</option>
             <option value="confirmed">已确认</option>
-            <option value="rejected">已拒绝</option>
+            <option value="rejected">已驳回</option>
           </select>
         </label>
         <label className="flex items-center gap-1.5 text-xs text-muted-foreground">

@@ -12,6 +12,19 @@ interface Props {
   onClose: () => void
 }
 
+// E3：跳章原因的后端枚举 → 作者可读文案（NovelImportTextParser/NovelImportEpubParser 的 Reason 词表）。
+const SKIP_REASON_LABELS: Record<string, string> = {
+  empty_content: '内容为空',
+  invalid_html: 'HTML 无法解析',
+  missing_file: '文件缺失',
+  missing_manifest_item: 'EPUB 清单缺少条目',
+  unreadable_file: '文件无法读取',
+}
+
+function skipReasonLabel(reason: string): string {
+  return SKIP_REASON_LABELS[reason] ?? `无法导入（${reason}）`
+}
+
 export default function NovelImportDialog({ state, onCancel, onClose }: Props) {
   if (state.status === 'idle') return null
 
@@ -133,7 +146,7 @@ export default function NovelImportDialog({ state, onCancel, onClose }: Props) {
                 <div className="mt-2 max-h-28 space-y-1 overflow-y-auto text-xs text-muted-foreground">
                   {skippedChapters.slice(0, 20).map(chapter => (
                     <div key={`${chapter.index}-${chapter.reason}`} className="break-words">
-                      #{chapter.index} {chapter.title || '未命名章节'} · {chapter.reason}
+                      #{chapter.index} {chapter.title || '未命名章节'} · {skipReasonLabel(chapter.reason)}
                     </div>
                   ))}
                   {skippedChapters.length > 20 && (
@@ -168,8 +181,10 @@ export default function NovelImportDialog({ state, onCancel, onClose }: Props) {
                 {diagnostics.length > 0 && (
                   <div className="max-h-28 space-y-1 overflow-y-auto rounded-md border border-danger-border bg-danger-bg px-3 py-2 text-xs text-muted-foreground">
                     {diagnostics.slice(0, 12).map(diagnostic => (
+                      // E3：作者先看可读消息；内部错误码降为次要标注，便于反馈时引用。
                       <div key={`${diagnostic.code}-${diagnostic.message}`} className="break-words">
-                        {diagnostic.code} · {diagnostic.message}
+                        {diagnostic.message}
+                        <span className="ml-1.5 text-[10px] opacity-60">[{diagnostic.code}]</span>
                       </div>
                     ))}
                   </div>

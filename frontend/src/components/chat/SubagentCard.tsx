@@ -115,8 +115,7 @@ export default memo(function SubagentCard({ agentType, segments, status }: Props
                 return (
                   <ToolCallCard
                     key={seg.id}
-                    toolName={seg.toolName}
-                    displayText={seg.displayText}
+                                    displayText={seg.displayText}
                     status={seg.toolStatus}
                     activityKind={seg.activityKind}
                     error={seg.error}

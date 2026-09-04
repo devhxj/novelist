@@ -261,8 +261,10 @@
 
 ### M2.4 分析前端
 
-- [x] 后台任务面板：稳定分页展示 10 个 job 状态、node/work-item 双进度、token、当前章节、重试倒计时和安全诊断；代码证据：`CorpusAnalysisJobsPanel` 与 `ListReferenceCorpusAnalysisJobs` adapter；workflow 证据：`verifyCorpusAnalysisJobsWorkflow` 逐一断言 queued/running/pause_requested/paused/cancel_requested/retry_wait/budget_exhausted/completed/failed/cancelled 中文状态。边界：面板契约覆盖 Stage 3，但不代表真实时限或 50K 规模验收
-- [x] 后台控制交互：仅按后端 `allowed_actions[]` 提供暂停/取消/恢复/重试，携带 expected_version，CAS conflict 后刷新，不在前端复制状态机；代码证据：`CorpusAnalysisJobsPanel.runAction`；测试证据：`ControlOperationsUsePersistentCasVersions`，workflow `verifyCorpusAnalysisJobsWorkflow` 证明陈旧 version 首次冲突后刷新、第二次使用新 version 成功暂停；真实 worker-loop 30 样本 P95 为 pause 82.28 ms、cancel 87.68 ms。边界：这证明后台控制的时限，不替代章节默认路径和长任务 UX 验收
+> **已移出产品范围（`ccb6d2c`，2026-08 重建前端时）。** 下面前两条原以 `CorpusAnalysisJobsPanel` 为"代码证据"并勾选完成；该面板已随专家控制面收缩一并删除，对应浏览器 workflow 证据同时退役。后端 job 调度/控制能力（`Enqueue/Pause/Resume/Cancel/ReprioritizeReferenceCorpusAnalysisJob`、`ListReferenceCorpusAnalysisJobs`）完整保留并有测试，但**当前没有 UI 出口**，属 `docs/full-feature-implementation-review-2026-09-03.md` §2.2 的死表面——不要据此恢复已删除的面板。
+
+- 后台任务面板：（原 `[x]`，代码已删）稳定分页展示 10 个 job 状态、node/work-item 双进度、token、当前章节、重试倒计时和安全诊断；原代码证据 `CorpusAnalysisJobsPanel` 与 `ListReferenceCorpusAnalysisJobs` adapter 均已随 `ccb6d2c` 删除
+- 后台控制交互：（原 `[x]`，代码已删）仅按后端 `allowed_actions[]` 提供暂停/取消/恢复/重试，携带 expected_version，CAS conflict 后刷新；原代码证据 `CorpusAnalysisJobsPanel.runAction` 已删除；后端 CAS 语义仍由 `ControlOperationsUsePersistentCasVersions` 守护
 - [x] 后端列表 API：`ListReferenceCorpusFeatureObservations` / `ListReferenceCorpusTechniqueSpecimens`，分页 `PageResult<T>`、稳定 sort、filter 白名单、默认 active、非法 cursor/filter/pageSize 走 validation error
 - [x] 安全展示契约：Observation 不暴露 `value_json`；TechniqueSpecimen 不暴露 `why_it_works_json` 或原始 JSON 字符串，改为 typed `transfer_slots` / 条件列表 / `why_it_works.contributing_factors`
 - [x] evidence trace：TechniqueSpecimen 通过 `reference_specimen_evidence` junction 二次读取，不用 join 放大分页；trace 返回 observation id/family/key/confidence/text_hash/bounded evidence preview/value preview/explanation
@@ -446,3 +448,4 @@
 5. **跨库闭环不可降级** — 写作 session 的有效语料范围来自所有启用 library 成员；M1/M3/M4/M5 的测试必须覆盖跨库检索、多蓝图迭代、正文候选复用，不接受单 anchor 作为唯一验收
 6. **回归资产（修复 #12）** — 固定 golden fixture + golden JSON + fake LLM + 规模 fixture + 性能预算 + 中断恢复脚本 + UI 交互验收；杜绝"符合语义/合理"式主观验收
 7. **验证命令** — 后端 `dotnet test Novelist.slnx --no-restore -v minimal`；前端 `npm --prefix frontend run verify`
+8. **收缩后的接线账本（2026-09-03 评审确立）** — 后端注册但无 UI 出口的方法是 `ccb6d2c` 有意收缩的既成状态，不构成待建 backlog；任何"补齐界面"的提议须先对照 AGENTS.md 的专家控制面禁令。`FileSystemNarrativePatternExtractionService`（1954 行）更进一步：无 DI 注册、无桥接处理器，运行时不存在于对象图，仅作契约/算法留档（文件头有同名标注）。恢复任何一项接线前，先更新 `docs/full-feature-implementation-review-2026-09-03.md` 对应条目。

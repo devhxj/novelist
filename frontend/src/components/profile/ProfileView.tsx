@@ -1,6 +1,7 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useApp } from '@/hooks/useApp'
 import type { config } from '@/hooks/useApp'
+import { pushToast } from '@/lib/toast'
 import ContributionGrid from './ContributionGrid'
 import type { LucideIcon } from 'lucide-react'
 import { PenLine, CalendarDays, Flame, User, Camera } from 'lucide-react'
@@ -69,25 +70,52 @@ export default function ProfileView() {
     const file = e.target.files?.[0]
     if (!file) return
     e.target.value = ''
-    const buf = await file.arrayBuffer()
-    await app.SaveAvatar(Array.from(new Uint8Array(buf)))
-    setAvatarErrored(false)
-    setAvatarKey(prev => prev + 1)
+    try {
+      const buf = await file.arrayBuffer()
+      await app.SaveAvatar(Array.from(new Uint8Array(buf)))
+      setAvatarErrored(false)
+      setAvatarKey(prev => prev + 1)
+    } catch (err) {
+      // E5：保存失败必须反馈，否则作者以为头像已换而实际没有。
+      pushToast({
+        kind: 'error',
+        message: '头像保存失败，请重试',
+        description: err instanceof Error ? err.message : undefined,
+      })
+    }
   }
 
   async function handleNameSave() {
     const name = nameDraft.trim()
-    if (name && name !== settings?.user_name) {
-      await app.SaveUserName(name)
-      setSettings(prev => prev ? { ...prev, user_name: name } : null)
+    try {
+      if (name && name !== settings?.user_name) {
+        await app.SaveUserName(name)
+        setSettings(prev => prev ? { ...prev, user_name: name } : null)
+      }
+      setEditingName(false)
+    } catch (err) {
+      // E5：保存失败保留编辑态，作者刚输入的昵称不丢。
+      pushToast({
+        kind: 'error',
+        message: '昵称保存失败，请重试',
+        description: err instanceof Error ? err.message : undefined,
+      })
     }
-    setEditingName(false)
   }
 
   function startEditName() {
     setNameDraft(settings?.user_name ?? '')
     setEditingName(true)
   }
+
+  // E5：日历横跨最近 12 个月，通常跨两个自然年——只标当前年份是错的。
+  const calendarRangeLabel = useMemo(() => {
+    const now = new Date()
+    const start = new Date(now)
+    start.setMonth(now.getMonth() - 12)
+    const format = (d: Date) => `${d.getFullYear()}年${d.getMonth() + 1}月`
+    return `${format(start)} – ${format(now)} `
+  }, [])
 
   if (loading) {
     return (
@@ -195,7 +223,7 @@ export default function ProfileView() {
         {/* 绿格子 */}
         <section>
           <h2 className="text-sm font-medium text-foreground mb-4">
-            {new Date().getFullYear()} 年写作日历
+            {calendarRangeLabel}写作日历
           </h2>
           <div className="overflow-x-auto">
             <ContributionGrid data={activity} />

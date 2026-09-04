@@ -3,12 +3,36 @@ import ReactMarkdown from 'react-markdown'
 import type { Components } from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import remarkMath from 'remark-math'
-import rehypeKatex from 'rehype-katex'
 import rehypeRaw from 'rehype-raw'
 import rehypeSanitize from 'rehype-sanitize'
-import hljs from 'highlight.js/lib/common'
-import 'katex/dist/katex.min.css'
 import './Markdown.css'
+
+// U10：katex（约 260KB + 字体 CSS）与 highlight.js/common（约 250KB）从首屏主块
+// 改为首次需要时加载——多数正文/消息既无公式也无带语言标注的代码块。
+type RehypeKatexPlugin = typeof import('rehype-katex').default
+type Hljs = typeof import('highlight.js/lib/common').default
+let katexLoad: Promise<RehypeKatexPlugin> | null = null
+function loadKatex(): Promise<RehypeKatexPlugin> {
+  if (!katexLoad) {
+    katexLoad = Promise.all([
+      import('rehype-katex'),
+      import('katex/dist/katex.min.css'),
+    ]).then(([module]) => module.default)
+  }
+  return katexLoad
+}
+
+let hljsLoad: Promise<Hljs> | null = null
+function loadHljs(): Promise<Hljs> {
+  if (!hljsLoad) {
+    hljsLoad = import('highlight.js/lib/common').then(module => module.default)
+  }
+  return hljsLoad
+}
+
+function contentHintsMath(content: string): boolean {
+  return content.includes('$') || content.includes('\\(') || content.includes('\\[')
+}
 
 interface MarkdownProps {
   content: string
@@ -40,13 +64,24 @@ function CodeBlock({ className, children }: CodeBlockProps) {
   const [copied, setCopied] = useState(false)
   const lang = className?.replace(/^language-/, '') || ''
   const code = getNodeText(children).replace(/\n$/, '')
+  const [hljs, setHljs] = useState<Hljs | null>(null)
+
+  useEffect(() => {
+    if (!lang || hljs) return
+    let cancelled = false
+    loadHljs().then(instance => {
+      if (!cancelled) setHljs(() => instance)
+    })
+    return () => { cancelled = true }
+  }, [lang, hljs])
+
   const highlightedCode = useMemo(() => {
-    if (!lang || !hljs.getLanguage(lang)) {
+    if (!hljs || !lang || !hljs.getLanguage(lang)) {
       return null
     }
 
     return hljs.highlight(code, { language: lang, ignoreIllegals: true }).value
-  }, [code, lang])
+  }, [code, lang, hljs])
 
   const handleCopy = useCallback(() => {
     navigator.clipboard.writeText(code).then(() => {
@@ -255,13 +290,30 @@ const components: Components = {
 }
 
 export default function Markdown({ content, className }: MarkdownProps) {
+  const hintsMath = useMemo(() => contentHintsMath(content), [content])
+  const [katexPlugin, setKatexPlugin] = useState<RehypeKatexPlugin | null>(null)
+
+  // 流式内容中途出现公式时同样触发加载并重渲染；插件就位前公式以原文呈现。
+  useEffect(() => {
+    if (!hintsMath || katexPlugin) return
+    let cancelled = false
+    loadKatex().then(plugin => {
+      if (!cancelled) setKatexPlugin(() => plugin)
+    })
+    return () => { cancelled = true }
+  }, [hintsMath, katexPlugin])
+
+  const rehypePlugins = useMemo(() => (
+    katexPlugin && hintsMath ? [katexPlugin, rehypeRaw, rehypeSanitize] : [rehypeRaw, rehypeSanitize]
+  ), [katexPlugin, hintsMath])
+
   const normalizedContent = content.replace(/\r\n?/g, '\n').replace(/^\n+/, '')
 
   return (
     <div className={`prose prose-sm max-w-none ${className || ''}`}>
       <ReactMarkdown
         remarkPlugins={[remarkGfm, remarkMath]}
-        rehypePlugins={[rehypeKatex, rehypeRaw, rehypeSanitize]}
+        rehypePlugins={rehypePlugins}
         components={components}
       >
         {normalizedContent}
