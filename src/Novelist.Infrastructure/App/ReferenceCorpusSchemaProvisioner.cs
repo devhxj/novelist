@@ -9,6 +9,7 @@ internal static class ReferenceCorpusSchemaProvisioner
         CancellationToken cancellationToken)
     {
         await RebuildStaleChapterProgressTableAsync(connection, cancellationToken);
+        await RebuildLegacyMaterializationRunsTableAsync(connection, cancellationToken);
         await using var command = connection.CreateCommand();
         command.CommandText = """
             CREATE TABLE IF NOT EXISTS reference_anchors (
@@ -737,6 +738,204 @@ CREATE TABLE IF NOT EXISTS reference_technique_specimens (
 """;
 await command.ExecuteNonQueryAsync(cancellationToken);
  await EnsureAnalysisJobTablesAsync(connection, cancellationToken);
+ await EnsureMaterializationV6ColumnsAsync(connection, cancellationToken);
+ }
+
+ // v6 批处理拆分给三张运行期表追加了列，CREATE TABLE IF NOT EXISTS 不会升级已存在的
+ // 旧形状表，租期/锚点状态/向量索引写入会在运行期抛 no such column。这里逐列探测补齐
+ // （同 analysis job 列的模式），旧行用默认值填充；全部为追加列，原数据不动。
+ private static async ValueTask EnsureMaterializationV6ColumnsAsync(
+ SqliteConnection connection,
+ CancellationToken cancellationToken)
+ {
+ await EnsureColumnAsync(connection, "reference_anchor_materialization_state", "previous_generation_id", "TEXT", cancellationToken);
+ await EnsureColumnAsync(connection, "reference_anchor_materialization_state", "row_version", "INTEGER NOT NULL DEFAULT 0", cancellationToken);
+ await EnsureColumnAsync(connection, "reference_anchor_materialization_state", "updated_at", "TEXT", cancellationToken);
+
+ await EnsureColumnAsync(connection, "reference_materialization_run_leases", "worker_id", "TEXT NOT NULL DEFAULT ''", cancellationToken);
+ await EnsureColumnAsync(connection, "reference_materialization_run_leases", "updated_at", "TEXT", cancellationToken);
+
+ await EnsureColumnAsync(connection, "reference_materialization_vector_indexes", "created_at", "TEXT", cancellationToken);
+ await EnsureColumnAsync(connection, "reference_materialization_vector_indexes", "updated_at", "TEXT", cancellationToken);
+ }
+
+ // v6 批处理拆分前的 runs 表无法追加升级：既缺 batch 列，又带着 INSERT 不再提供、且无默认值的
+ // 旧 NOT NULL 列（extractor_schema_version/material_count 等）。copy-first：旧表改名备份、旧行按
+ // 共有列回填新表（新增必填列取默认值），再以 v6 形状重建，并写 manifest。重建期间关闭外键并
+ // 启用 legacy_alter_table，避免 SQLite 把子表外键改指向备份表。
+ private static async ValueTask RebuildLegacyMaterializationRunsTableAsync(
+ SqliteConnection connection,
+ CancellationToken cancellationToken)
+ {
+ var legacyColumns = await ReadColumnNamesAsync(connection, "reference_materialization_runs", cancellationToken);
+ if (legacyColumns.Count == 0 || legacyColumns.Contains("chapter_batch_size"))
+ {
+ return;
+ }
+
+ var suffix = $"{DateTimeOffset.UtcNow:yyyyMMddHHmmss}_{Guid.NewGuid():N}";
+ var backupTable = $"reference_materialization_runs_legacy_{suffix}";
+ var foreignKeysEnabled = await ScalarPragmaAsync(connection, "PRAGMA foreign_keys;", cancellationToken);
+ await using (var rename = connection.CreateCommand())
+ {
+ rename.CommandText = $"""
+            PRAGMA foreign_keys=OFF;
+            PRAGMA legacy_alter_table=ON;
+            ALTER TABLE reference_materialization_runs RENAME TO {backupTable};
+            PRAGMA legacy_alter_table=OFF;
+            """;
+ await rename.ExecuteNonQueryAsync(cancellationToken);
+ }
+
+ // 旧表的索引随改名挂在备份表上并占用原名，先卸载，稍后由主建表脚本在新表上重建。
+ await using (var dropIndexes = connection.CreateCommand())
+ {
+ dropIndexes.CommandText = """
+            DROP INDEX IF EXISTS ux_reference_materialization_runs_generation;
+            DROP INDEX IF EXISTS idx_reference_materialization_runs_anchor_status;
+            """;
+ await dropIndexes.ExecuteNonQueryAsync(cancellationToken);
+ }
+
+ await using (var create = connection.CreateCommand())
+ {
+ create.CommandText = """
+            CREATE TABLE reference_materialization_runs (
+              run_id TEXT PRIMARY KEY,
+              anchor_id INTEGER NOT NULL,
+              split_profile_id TEXT NOT NULL,
+              generation_id TEXT NOT NULL,
+              policy_version TEXT NOT NULL,
+              candidate_version TEXT NOT NULL,
+              qualifier_version TEXT NOT NULL,
+              model_provider TEXT NOT NULL,
+              model_id TEXT NOT NULL,
+              embedding_provider TEXT NOT NULL,
+              embedding_model_id TEXT NOT NULL,
+              embedding_dimensions INTEGER NOT NULL CHECK(embedding_dimensions > 0),
+              status TEXT NOT NULL,
+              chapter_batch_size INTEGER NOT NULL CHECK(chapter_batch_size IN (5, 10)),
+              total_chapters INTEGER NOT NULL DEFAULT 0 CHECK(total_chapters >= 0),
+              processed_chapters INTEGER NOT NULL DEFAULT 0 CHECK(processed_chapters >= 0),
+              total_chapter_batches INTEGER NOT NULL DEFAULT 0 CHECK(total_chapter_batches >= 0),
+              completed_chapter_batches INTEGER NOT NULL DEFAULT 0 CHECK(completed_chapter_batches >= 0),
+              current_batch_index INTEGER,
+              current_batch_start_chapter INTEGER,
+              current_batch_end_chapter INTEGER,
+              candidate_count INTEGER NOT NULL DEFAULT 0 CHECK(candidate_count >= 0),
+              accepted_count INTEGER NOT NULL DEFAULT 0 CHECK(accepted_count >= 0),
+              rejected_count INTEGER NOT NULL DEFAULT 0 CHECK(rejected_count >= 0),
+              review_count INTEGER NOT NULL DEFAULT 0 CHECK(review_count >= 0),
+              vector_count INTEGER NOT NULL DEFAULT 0 CHECK(vector_count >= 0),
+              tokens_spent INTEGER NOT NULL DEFAULT 0 CHECK(tokens_spent >= 0),
+              last_error_code TEXT,
+              last_error_message TEXT,
+              started_at TEXT NOT NULL,
+              completed_at TEXT,
+              activated_at TEXT,
+              FOREIGN KEY(anchor_id) REFERENCES reference_anchors(anchor_id) ON DELETE CASCADE,
+              FOREIGN KEY(split_profile_id) REFERENCES reference_chapter_split_profiles(split_profile_id) ON DELETE RESTRICT
+            );
+            """;
+ await create.ExecuteNonQueryAsync(cancellationToken);
+ }
+
+ // 回填必须在外键恢复之前执行：FK 开启时 SQLite 在 prepare 阶段就解析新表的外键父表，
+ // 而主建表脚本稍后才会创建 anchors/split_profiles，父表缺失会误报 no such table。
+ await CopyLegacyMaterializationRunsAsync(connection, backupTable, legacyColumns, cancellationToken);
+
+ // 重建期间外键保持关闭；结束前恢复连接原本的外键设置。
+ await using (var restore = connection.CreateCommand())
+ {
+ restore.CommandText = $"PRAGMA foreign_keys={(foreignKeysEnabled != 0 ? "ON" : "OFF")};";
+ await restore.ExecuteNonQueryAsync(cancellationToken);
+ }
+
+ await WriteRebuildManifestAsync(
+ connection,
+ backupTable,
+ "runs-rebuild",
+ "pre-v6 reference_materialization_runs shape cannot be additively upgraded (legacy NOT NULL columns without defaults block v6 inserts); table renamed copy-first, legacy rows carried over with v6 defaults, and the table recreated with the v6 shape.",
+ cancellationToken);
+ }
+
+ // v6 插入不再提供的旧 NOT NULL 列（extractor_schema_version 等）不回填，留在备份表里；
+ // 新表回填行只带共有列 + v6 必填列默认值，保证子表（materials/candidates）外键仍然可解析。
+ private static readonly (string Name, string Fallback)[] LegacyRunCopyColumns =
+ [
+ ("run_id", "''"),
+ ("anchor_id", "0"),
+ ("split_profile_id", "''"),
+ ("generation_id", "''"),
+ ("policy_version", "''"),
+ ("model_provider", "''"),
+ ("model_id", "''"),
+ ("embedding_provider", "''"),
+ ("embedding_model_id", "''"),
+ ("embedding_dimensions", "1024"),
+ ("status", "'completed'"),
+ ("total_chapters", "0"),
+ ("processed_chapters", "0"),
+ ("vector_count", "0"),
+ ("last_error_code", "NULL"),
+ ("last_error_message", "NULL"),
+ ("started_at", "''"),
+ ("completed_at", "NULL"),
+ ];
+
+ private static async ValueTask CopyLegacyMaterializationRunsAsync(
+ SqliteConnection connection,
+ string backupTable,
+ IReadOnlySet<string> legacyColumns,
+ CancellationToken cancellationToken)
+ {
+ var targetColumns = new List<string>();
+ var sourceColumns = new List<string>();
+ foreach (var (name, fallback) in LegacyRunCopyColumns)
+ {
+ targetColumns.Add(name);
+ sourceColumns.Add(legacyColumns.Contains(name) ? name : fallback);
+ }
+
+ targetColumns.AddRange(["candidate_version", "qualifier_version", "chapter_batch_size"]);
+ sourceColumns.AddRange(["''", "''", "10"]);
+
+ await using var command = connection.CreateCommand();
+ command.CommandText = $"""
+            INSERT INTO reference_materialization_runs ({string.Join(", ", targetColumns)})
+            SELECT {string.Join(", ", sourceColumns)} FROM {backupTable};
+            """;
+ await command.ExecuteNonQueryAsync(cancellationToken);
+ }
+
+ private static async ValueTask<HashSet<string>> ReadColumnNamesAsync(
+ SqliteConnection connection,
+ string tableName,
+ CancellationToken cancellationToken)
+ {
+ var columns = new HashSet<string>(StringComparer.Ordinal);
+ await using (var read = connection.CreateCommand())
+ {
+ read.CommandText = $"PRAGMA table_info({tableName});";
+ await using var reader = await read.ExecuteReaderAsync(cancellationToken);
+ while (await reader.ReadAsync(cancellationToken))
+ {
+ columns.Add(reader.GetString(1));
+ }
+ }
+
+ return columns;
+ }
+
+ private static async ValueTask<long> ScalarPragmaAsync(
+ SqliteConnection connection,
+ string pragma,
+ CancellationToken cancellationToken)
+ {
+ await using var command = connection.CreateCommand();
+ command.CommandText = pragma;
+ var result = await command.ExecuteScalarAsync(cancellationToken);
+ return Convert.ToInt64(result, System.Globalization.CultureInfo.InvariantCulture);
  }
 
  private static async ValueTask RebuildStaleChapterProgressTableAsync(
@@ -799,12 +998,19 @@ await command.ExecuteNonQueryAsync(cancellationToken);
  await create.ExecuteNonQueryAsync(cancellationToken);
  }
 
- await WriteRebuildManifestAsync(connection, backupTable, cancellationToken);
+ await WriteRebuildManifestAsync(
+ connection,
+ backupTable,
+ "chapter-progress-rebuild",
+ "pre-v6 reference_materialization_chapter_progress shape cannot be additively upgraded (primary key changed); table renamed copy-first and recreated with the v6 shape.",
+ cancellationToken);
  }
 
  private static async ValueTask WriteRebuildManifestAsync(
  SqliteConnection connection,
  string backupTable,
+ string manifestKind,
+ string reason,
  CancellationToken cancellationToken)
  {
  try
@@ -826,13 +1032,13 @@ await command.ExecuteNonQueryAsync(cancellationToken);
  Status = "completed",
  SourceDatabase = databasePath,
  BackupTable = backupTable,
- Reason = "pre-v6 reference_materialization_chapter_progress shape cannot be additively upgraded (primary key changed); table renamed copy-first and recreated with the v6 shape.",
+ Reason = reason,
  RecordedAt = DateTimeOffset.UtcNow,
  Error = (string?)null,
  };
  var manifestPath = Path.Combine(
  directory,
- $"reference-schema-chapter-progress-rebuild-{DateTimeOffset.UtcNow:yyyyMMddHHmmss}-{Guid.NewGuid():N}.json");
+ $"reference-schema-{manifestKind}-{DateTimeOffset.UtcNow:yyyyMMddHHmmss}-{Guid.NewGuid():N}.json");
  await File.WriteAllTextAsync(manifestPath, System.Text.Json.JsonSerializer.Serialize(manifest), cancellationToken);
  }
  catch
@@ -993,20 +1199,20 @@ await command.ExecuteNonQueryAsync(cancellationToken);
  ON reference_analysis_work_item_completions(input_snapshot_id, finalized_at, ordinal);
  """;
  await command.ExecuteNonQueryAsync(cancellationToken);
- await EnsureAnalysisJobColumnAsync(connection, "reference_analysis_work_items", "execution_worker_id", "TEXT", cancellationToken);
- await EnsureAnalysisJobColumnAsync(connection, "reference_analysis_work_items", "execution_lease_token", "TEXT", cancellationToken);
- await EnsureAnalysisJobColumnAsync(connection, "reference_analysis_work_items", "execution_attempt_no", "INTEGER", cancellationToken);
- await EnsureAnalysisJobColumnAsync(connection, "reference_analysis_work_items", "invocation_no", "INTEGER NOT NULL DEFAULT 0", cancellationToken);
- await EnsureAnalysisJobColumnAsync(connection, "reference_analysis_work_items", "reserved_tokens", "INTEGER NOT NULL DEFAULT 0", cancellationToken);
- await EnsureAnalysisJobColumnAsync(connection, "reference_analysis_work_items", "input_payload_json", "TEXT", cancellationToken);
- await EnsureAnalysisJobColumnAsync(connection, "reference_analysis_work_items", "input_payload_hash", "TEXT", cancellationToken);
- await EnsureAnalysisJobColumnAsync(connection, "reference_analysis_jobs", "tokens_reserved", "INTEGER NOT NULL DEFAULT 0", cancellationToken);
- await EnsureAnalysisJobColumnAsync(
+ await EnsureColumnAsync(connection, "reference_analysis_work_items", "execution_worker_id", "TEXT", cancellationToken);
+ await EnsureColumnAsync(connection, "reference_analysis_work_items", "execution_lease_token", "TEXT", cancellationToken);
+ await EnsureColumnAsync(connection, "reference_analysis_work_items", "execution_attempt_no", "INTEGER", cancellationToken);
+ await EnsureColumnAsync(connection, "reference_analysis_work_items", "invocation_no", "INTEGER NOT NULL DEFAULT 0", cancellationToken);
+ await EnsureColumnAsync(connection, "reference_analysis_work_items", "reserved_tokens", "INTEGER NOT NULL DEFAULT 0", cancellationToken);
+ await EnsureColumnAsync(connection, "reference_analysis_work_items", "input_payload_json", "TEXT", cancellationToken);
+ await EnsureColumnAsync(connection, "reference_analysis_work_items", "input_payload_hash", "TEXT", cancellationToken);
+ await EnsureColumnAsync(connection, "reference_analysis_jobs", "tokens_reserved", "INTEGER NOT NULL DEFAULT 0", cancellationToken);
+ await EnsureColumnAsync(
  connection, "reference_analysis_jobs", "failure_attempt_count",
  "INTEGER NOT NULL DEFAULT 0", cancellationToken);
  }
 
- private static async ValueTask EnsureAnalysisJobColumnAsync(
+ private static async ValueTask EnsureColumnAsync(
  SqliteConnection connection,
  string tableName,
  string columnName,
