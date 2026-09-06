@@ -5,6 +5,7 @@ using System.Text.RegularExpressions;
 using Microsoft.Data.Sqlite;
 using Novelist.Contracts.App;
 using Novelist.Core.App;
+using Novelist.Core.Bridge;
 
 namespace Novelist.Infrastructure.App;
 
@@ -63,9 +64,28 @@ public sealed partial class SqliteReferenceMaterializationService : IReferenceMa
         ValidateReferenceInput(input.NovelId, input.AnchorId);
         var source = await ReadCurrentSourceAsync(input.NovelId, input.AnchorId, cancellationToken);
         var sample = source.NormalizedText[..Math.Min(ChapterSplitSampleMaxChars, source.NormalizedText.Length)];
-        var modelResult = await _analyzer.AnalyzeAsync(
-            new ReferenceChapterSplitModelRequest(input.AnchorId, source.Hash, sample),
-            cancellationToken);
+        ReferenceChapterSplitModelResult modelResult;
+        try
+        {
+            modelResult = await _analyzer.AnalyzeAsync(
+                new ReferenceChapterSplitModelRequest(input.AnchorId, source.Hash, sample),
+                cancellationToken);
+        }
+        catch (BridgeRequestException exception)
+        {
+            // 服务商侧失败（含流式终止原因），透传原始消息作为诊断详情，走 llm_request_failed 引导。
+            throw new ReferenceMaterializationException(
+                ReferenceMaterializationErrorCodes.LlmRequestFailed,
+                exception.Message);
+        }
+        catch (InvalidOperationException exception)
+        {
+            // 模型应答无法解析/未按工具调用返回，走 llm_output_invalid 引导（原始消息进诊断详情）。
+            throw new ReferenceMaterializationException(
+                ReferenceMaterializationErrorCodes.LlmOutputInvalid,
+                exception.Message);
+        }
+
         ValidateModelResult(modelResult, sample.Length);
         var validatedEvidenceOffsets = ValidateModelEvidence(sample, modelResult);
         IReadOnlyList<ChapterBoundary> boundaries;

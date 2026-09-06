@@ -236,7 +236,7 @@ public sealed class StandardChatCompletionClient : IChatCompletionClient
         if (request.Tools is { Count: > 0 })
         {
             payload["tools"] = request.Tools.Select(ToOpenAiToolDefinition).ToArray();
-            payload["tool_choice"] = "auto";
+            payload["tool_choice"] = request.RequireToolCall ? "required" : "auto";
         }
 
         if (provider.Model.SupportsThinking)
@@ -278,7 +278,7 @@ public sealed class StandardChatCompletionClient : IChatCompletionClient
         if (request.Tools is { Count: > 0 })
         {
             payload["tools"] = request.Tools.Select(ToResponsesToolDefinition).ToArray();
-            payload["tool_choice"] = "auto";
+            payload["tool_choice"] = request.RequireToolCall ? "required" : "auto";
         }
 
         if (provider.Model.SupportsThinking)
@@ -683,17 +683,50 @@ public sealed class StandardChatCompletionClient : IChatCompletionClient
 
                     break;
                 case "response.completed":
-                    if (TryReadProperty(root, "response", out var response) &&
-                        TryReadProperty(response, "usage", out var usage) &&
-                        usage.ValueKind is JsonValueKind.Object or JsonValueKind.Array)
+                    if (TryReadProperty(root, "response", out var completed) &&
+                        TryReadProperty(completed, "usage", out var completedUsage) &&
+                        completedUsage.ValueKind is JsonValueKind.Object or JsonValueKind.Array)
                     {
                         yield return new ChatCompletionStreamEvent(
                             ChatCompletionStreamEventKind.Usage,
                             string.Empty,
-                            usage.Clone());
+                            completedUsage.Clone());
                     }
 
                     break;
+                case "response.incomplete":
+                    // 不抛异常就只剩"无声结束"，分析端只能报笼统的 invalid structured output；
+                    // 这里把服务商给出的终止原因转成可行动的错误。
+                    var incompleteReason = "unknown";
+                    if (TryReadProperty(root, "response", out var incomplete) &&
+                        TryReadProperty(incomplete, "incomplete_details", out var details) &&
+                        TryReadProperty(details, "reason", out var reason) &&
+                        reason.ValueKind == JsonValueKind.String)
+                    {
+                        incompleteReason = reason.GetString() ?? incompleteReason;
+                    }
+
+                    throw ProviderError(
+                        incompleteReason == "max_output_tokens"
+                            ? $"模型输出预算耗尽（推理过长，已用 {incompleteReason}）；请降低推理力度或减小输入后重试。"
+                            : $"模型响应不完整（{incompleteReason}），请重试。",
+                        retryable: false);
+                case "response.failed":
+                    var failedMessage = "模型服务返回失败。";
+                    if (TryReadProperty(root, "response", out var failedResponse) &&
+                        TryReadProperty(failedResponse, "error", out var failedError))
+                    {
+                        var errorText = ReadString(failedError, "message");
+                        if (!string.IsNullOrWhiteSpace(errorText))
+                        {
+                            failedMessage = $"模型服务返回失败: {errorText}";
+                        }
+                    }
+
+                    throw ProviderError(failedMessage, retryable: false);
+                case "error":
+                    var streamErrorMessage = ReadString(root, "message") ?? "模型服务返回流式错误。";
+                    throw ProviderError(streamErrorMessage, retryable: true);
             }
         }
     }

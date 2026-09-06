@@ -47,8 +47,36 @@ public sealed class ReferenceChapterSplitChatCompletionAnalyzerTests
         var tool = Assert.Single(chat.LastRequest.Tools!);
         Assert.Equal("submit_chapter_split_profile", tool.Name);
         Assert.True(tool.Strict);
-        Assert.Equal(8_192, chat.LastRequest.MaxOutputTokens);
+        Assert.Equal(32_768, chat.LastRequest.MaxOutputTokens);
+        Assert.True(chat.LastRequest.RequireToolCall);
         Assert.Equal(0, chat.LastRequest.TemperatureOverride);
+    }
+
+    [Fact]
+    public async Task AnalyzeAsyncIgnoresThinkingAndTextDeltasBeforeTheToolCall()
+    {
+        var chat = new RecordingChatCompletionClient(
+        [
+            new ChatCompletionStreamEvent(ChatCompletionStreamEventKind.Thinking, "推理增量"),
+            new ChatCompletionStreamEvent(ChatCompletionStreamEventKind.Content, "先输出一段说明文本。"),
+            new ChatCompletionStreamEvent(
+                ChatCompletionStreamEventKind.ToolCall,
+                ToolCall: new ChatToolCall(
+                    "call_split",
+                    "submit_chapter_split_profile",
+                    """
+                    {"pattern_kind":"chapter_template","delimiter_template":"第{number}章","confidence":0.8,"evidence_offsets":[0]}
+                    """))
+        ]);
+        var analyzer = new ReferenceChapterSplitChatCompletionAnalyzer(
+            new FixedAppSettingsService("qwen/qwen-plus", "high"),
+            chat);
+
+        var result = await analyzer.AnalyzeAsync(
+            new ReferenceChapterSplitModelRequest(99, "source-hash", "第一章\n\n正文。"),
+            CancellationToken.None);
+
+        Assert.Equal("chapter_template", result.PatternKind);
     }
 
     [Fact]
@@ -74,11 +102,12 @@ public sealed class ReferenceChapterSplitChatCompletionAnalyzerTests
                     "第一章\n\n雨声压住窗沿。\n\n第二章\n\n门外响起第三次敲门。"),
                 CancellationToken.None));
 
-        Assert.Contains("invalid structured output", exception.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("submit_chapter_split_profile", exception.Message, StringComparison.Ordinal);
         Assert.NotNull(chat.LastRequest);
         var tool = Assert.Single(chat.LastRequest.Tools!);
         Assert.Equal("submit_chapter_split_profile", tool.Name);
         Assert.True(tool.Strict);
+        Assert.True(chat.LastRequest.RequireToolCall);
         Assert.Equal(0, chat.LastRequest.TemperatureOverride);
     }
 

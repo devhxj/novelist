@@ -6,7 +6,8 @@ namespace Novelist.Infrastructure.App;
 public sealed class ReferenceChapterSplitChatCompletionAnalyzer : IReferenceChapterSplitAnalyzer
 {
     private const int MaxOutputChars = 16 * 1024;
-    private const int MaxOutputTokens = 8_192;
+    // 思考模型在 high 推理力度下的推理 token 也计入输出预算，8192 会被纯推理耗尽导致无声结束。
+    private const int MaxOutputTokens = 32_768;
     private const string ChapterSplitToolName = "submit_chapter_split_profile";
     private static readonly JsonElement ChapterSplitToolSchema = CreateChapterSplitToolSchema();
     private readonly IAppSettingsService _settings;
@@ -61,16 +62,13 @@ public sealed class ReferenceChapterSplitChatCompletionAnalyzer : IReferenceChap
                 ChapterSplitToolSchema,
                 Strict: true)],
             MaxOutputTokens: MaxOutputTokens,
-            TemperatureOverride: 0);
+            TemperatureOverride: 0,
+            RequireToolCall: true);
 
         ChatToolCall? toolCall = null;
         await foreach (var item in _completion.StreamChatAsync(request, cancellationToken))
         {
-            if (item.Kind == ChatCompletionStreamEventKind.Content && !string.IsNullOrWhiteSpace(item.Data))
-            {
-                throw InvalidOutput();
-            }
-
+            // 正文/思考增量一律忽略：结果只认工具调用实参，模型偶尔先输出一段文字不算失败。
             if (item.Kind != ChatCompletionStreamEventKind.ToolCall)
             {
                 continue;
@@ -88,7 +86,8 @@ public sealed class ReferenceChapterSplitChatCompletionAnalyzer : IReferenceChap
         }
 
         return toolCall is null
-            ? throw InvalidOutput()
+            ? throw new InvalidOperationException(
+                "模型没有调用 submit_chapter_split_profile；请确认所选模型支持结构化工具调用后重试。")
             : ParseResponse(toolCall.ArgumentsJson, input.NormalizedSample.Length, model);
     }
 

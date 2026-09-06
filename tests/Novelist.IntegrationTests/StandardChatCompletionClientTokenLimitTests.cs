@@ -1,7 +1,9 @@
 using System.Net;
+using System.Text;
 using System.Text.Json;
 using Novelist.Contracts.App;
 using Novelist.Core.App;
+using Novelist.Core.Bridge;
 using Novelist.Infrastructure.App;
 
 namespace Novelist.IntegrationTests;
@@ -101,6 +103,89 @@ public sealed class StandardChatCompletionClientTokenLimitTests
         Assert.Empty(handler.Bodies);
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task StreamChatAsyncDefaultsToolChoiceToAuto(bool responsesEndpoint)
+    {
+        var handler = new RecordingHandler();
+        var client = CreateClient(responsesEndpoint, 2048, handler);
+        using var schema = JsonDocument.Parse("""{"type":"object","properties":{}}""");
+        var request = CreateRequest(640) with
+        {
+            Tools = [new ChatToolDefinition("submit_result", "Submit a result.", schema.RootElement.Clone())]
+        };
+
+        await DrainAsync(client.StreamChatAsync(request, CancellationToken.None));
+
+        using var payload = JsonDocument.Parse(Assert.Single(handler.Bodies));
+        Assert.Equal("auto", payload.RootElement.GetProperty("tool_choice").GetString());
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task StreamChatAsyncPropagatesRequiredToolChoice(bool responsesEndpoint)
+    {
+        var handler = new RecordingHandler();
+        var client = CreateClient(responsesEndpoint, 2048, handler);
+        using var schema = JsonDocument.Parse("""{"type":"object","properties":{}}""");
+        var request = CreateRequest(640) with
+        {
+            Tools = [new ChatToolDefinition("submit_result", "Submit a result.", schema.RootElement.Clone())],
+            RequireToolCall = true
+        };
+
+        await DrainAsync(client.StreamChatAsync(request, CancellationToken.None));
+
+        using var payload = JsonDocument.Parse(Assert.Single(handler.Bodies));
+        Assert.Equal("required", payload.RootElement.GetProperty("tool_choice").GetString());
+    }
+
+    [Fact]
+    public async Task StreamChatAsyncSurfacesIncompleteReasonForResponsesEndpoint()
+    {
+        var handler = new RecordingHandler(responsesStream: """
+            {"type":"response.created","response":{}}
+            {"type":"response.incomplete","response":{"status":"incomplete","incomplete_details":{"reason":"max_output_tokens"}}}
+            """);
+        var client = CreateClient(responsesEndpoint: true, 2048, handler);
+
+        var exception = await Assert.ThrowsAsync<BridgeRequestException>(async () =>
+            await DrainAsync(client.StreamChatAsync(CreateRequest(640), CancellationToken.None)));
+
+        Assert.Contains("输出预算", exception.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task StreamChatAsyncSurfacesFailureEventForResponsesEndpoint()
+    {
+        var handler = new RecordingHandler(responsesStream: """
+            {"type":"response.created","response":{}}
+            {"type":"response.failed","response":{"error":{"code":"server_error","message":"upstream overloaded"}}}
+            """);
+        var client = CreateClient(responsesEndpoint: true, 2048, handler);
+
+        var exception = await Assert.ThrowsAsync<BridgeRequestException>(async () =>
+            await DrainAsync(client.StreamChatAsync(CreateRequest(640), CancellationToken.None)));
+
+        Assert.Contains("upstream overloaded", exception.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task StreamChatAsyncSurfacesStreamErrorEventForResponsesEndpoint()
+    {
+        var handler = new RecordingHandler(responsesStream: """
+            {"type":"error","code":"overloaded","message":"service overloaded, try again"}
+            """);
+        var client = CreateClient(responsesEndpoint: true, 2048, handler);
+
+        var exception = await Assert.ThrowsAsync<BridgeRequestException>(async () =>
+            await DrainAsync(client.StreamChatAsync(CreateRequest(640), CancellationToken.None)));
+
+        Assert.Contains("service overloaded", exception.Message, StringComparison.Ordinal);
+    }
+
     private static StandardChatCompletionClient CreateClient(
  bool responsesEndpoint,
  int modelLimit,
@@ -175,7 +260,7 @@ public sealed class StandardChatCompletionClientTokenLimitTests
  throw new NotSupportedException();
     }
 
-    private sealed class RecordingHandler : HttpMessageHandler
+    private sealed class RecordingHandler(string? responsesStream = null) : HttpMessageHandler
     {
         public List<string> Bodies { get; } = [];
 
@@ -184,9 +269,27 @@ public sealed class StandardChatCompletionClientTokenLimitTests
         CancellationToken cancellationToken)
         {
             Bodies.Add(request.Content!.ReadAsStringAsync(cancellationToken).GetAwaiter().GetResult());
+            if (responsesStream is null)
+            {
+                return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
+                {
+                    Content = new StringContent(string.Empty)
+                });
+            }
+
+            var sse = new StringBuilder();
+            foreach (var line in responsesStream.Split('\n'))
+            {
+                if (!string.IsNullOrWhiteSpace(line))
+                {
+                    sse.Append("data: ").Append(line.Trim()).Append("\n\n");
+                }
+            }
+
+            sse.Append("data: [DONE]\n\n");
             return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
             {
-                Content = new StringContent(string.Empty)
+                Content = new StringContent(sse.ToString(), Encoding.UTF8, "text/event-stream")
             });
         }
     }
