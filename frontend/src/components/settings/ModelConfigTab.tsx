@@ -5,6 +5,7 @@ import { useApp } from '@/hooks/useApp'
 import type { llm } from '@/hooks/useApp'
 import type { EmbeddingConfigView, SqliteVecStatusView } from '@/lib/novelist/api'
 import { buildCopyableDiagnostic, diagnosticMessage } from '@/lib/diagnostics'
+import { normalizeEmbeddingDimensionsForModel } from '@/lib/novelist/embeddingModels'
 import type { diagnostics } from '@/lib/novelist/types'
 import BuiltinProviderPane from './BuiltinProviderPane'
 import CustomProviderPane from './CustomProviderPane'
@@ -108,7 +109,12 @@ export default function ModelConfigTab({ onSaved }: Props) {
       }
 
       if (embeddingResult.status === 'fulfilled') {
-        setEmbeddingConfig(embeddingResult.value ?? emptyEmbeddingConfig())
+        const loaded = embeddingResult.value ?? emptyEmbeddingConfig()
+        // 固定维度模型（如 BAAI/bge-m3）不接受 dimensions 参数，加载旧配置时一并归一。
+        setEmbeddingConfig({
+          ...loaded,
+          dimensions: normalizeEmbeddingDimensionsForModel(loaded.model_id, loaded.dimensions),
+        })
       } else {
         failed.push({ method: 'GetEmbeddingConfig', reason: embeddingResult.reason })
       }

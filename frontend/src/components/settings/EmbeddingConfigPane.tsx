@@ -1,6 +1,7 @@
 import { AlertTriangle, CheckCircle2, Loader2 } from 'lucide-react'
 import ErrorCallout from '@/components/shared/ErrorCallout'
 import type { EmbeddingConfigView, SqliteVecStatusView } from '@/lib/novelist/api'
+import { normalizeEmbeddingDimensionsForModel, resolveFixedEmbeddingDimensions } from '@/lib/novelist/embeddingModels'
 import type { diagnostics } from '@/lib/novelist/types'
 
 const BUILTIN_ONNX_MODEL_ID = 'bge-small-zh-v1.5'
@@ -29,6 +30,9 @@ export default function EmbeddingConfigPane({
     ? true
     : !!config.provider_key && !!config.endpoint_url && !!config.api_key && !!config.model_id
   const dimensions = config.dimensions ?? ''
+  const fixedDimensions = providerType === 'api'
+    ? resolveFixedEmbeddingDimensions(config.model_id)
+    : null
 
   return (
     <div className="flex flex-col gap-4">
@@ -208,14 +212,28 @@ export default function EmbeddingConfigPane({
           <input
             id="embedding-model"
             value={config.model_id}
-            onChange={e => onUpdate({ model_id: e.target.value })}
+            onChange={e => {
+              const modelId = e.target.value
+              onUpdate({
+                model_id: modelId,
+                dimensions: normalizeEmbeddingDimensionsForModel(modelId, config.dimensions),
+              })
+            }}
             placeholder="text-embedding-3-small"
             className="flex-1 h-8 rounded-md border bg-background px-2.5 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
           />
         </div>
       )}
 
-      {providerType === 'api' && (
+      {providerType === 'api' && (fixedDimensions !== null ? (
+        <div className="flex items-center gap-3">
+          <label className="text-xs text-muted-foreground w-24 shrink-0">向量维度</label>
+          <div className="w-36 h-8 rounded-md border bg-muted/30 px-2.5 text-sm flex items-center">
+            {fixedDimensions} 维
+          </div>
+          <span className="text-xs text-muted-foreground">该模型维度由服务商固定，请求不携带 dimensions 参数</span>
+        </div>
+      ) : (
         <div className="flex items-center gap-3">
           <label htmlFor="embedding-dimensions" className="text-xs text-muted-foreground w-24 shrink-0">向量维度</label>
           <input
@@ -233,7 +251,7 @@ export default function EmbeddingConfigPane({
           />
           <span className="text-xs text-muted-foreground">留空使用服务商默认维度</span>
         </div>
-      )}
+      ))}
 
       {providerType === 'api' && (
         <div className="flex items-center gap-3">
