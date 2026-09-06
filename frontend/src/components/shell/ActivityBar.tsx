@@ -38,7 +38,7 @@ function ActivityButton({ activity, isActive, onSelect }: { activity: Activity; 
     <button
       onClick={() => onSelect(activity.id)}
       title={activity.label}
-      className={`relative w-10 h-10 flex items-center justify-center rounded-lg transition-all duration-200
+      className={`relative w-14 h-10 flex flex-col items-center justify-center gap-0.5 rounded-lg transition-all duration-200
         focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring
         ${isActive
           ? 'text-primary bg-primary/15 font-medium'
@@ -49,14 +49,15 @@ function ActivityButton({ activity, isActive, onSelect }: { activity: Activity; 
       {isActive && (
         <span className="absolute left-0 top-1/2 -translate-y-1/2 w-1 h-6 bg-primary rounded-r-full" />
       )}
-      <activity.icon className="w-5 h-5" />
+      <activity.icon className="w-[18px] h-[18px]" />
+      <span className="text-[10px] leading-none whitespace-nowrap">{activity.label}</span>
     </button>
   )
 }
 
 export default function ActivityBar({ activeId, bookToolsVisible, onSelect }: Props) {
   return (
-    <nav className="w-12 flex flex-col items-center py-3 gap-1.5 border-r bg-sidebar select-none cursor-default">
+    <nav className="w-16 flex flex-col items-center py-3 gap-1.5 border-r bg-sidebar select-none cursor-default overflow-y-auto min-h-0">
       {primaryActivities.map((activity) => (
         <ActivityButton key={activity.id} activity={activity} isActive={activity.id === activeId} onSelect={onSelect} />
       ))}
