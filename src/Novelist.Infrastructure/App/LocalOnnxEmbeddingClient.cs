@@ -353,7 +353,7 @@ public sealed class LocalOnnxEmbeddingClient : IEmbeddingClient, IDisposable
         }
 
         throw ProviderError(
-            $"内置 ONNX embedding 模型文件缺失：{fileName}。请确认发布目录包含 runtime/models/{fileName}，或通过 {environmentVariableName} / NOVELIST_ONNX_MODELS_DIR 指向固定 BGE 模型文件。",
+            $"内置 ONNX embedding 模型文件缺失：{fileName}。请确认发布目录包含 runtime/models/{fileName}（或 runtime/models/{BuiltinOnnxEmbeddingModel.ModelId}/{fileName}），或通过 {environmentVariableName} / NOVELIST_ONNX_MODELS_DIR 指向模型文件。",
             retryable: false);
     }
 
@@ -365,15 +365,64 @@ public sealed class LocalOnnxEmbeddingClient : IEmbeddingClient, IDisposable
             yield return Path.GetFullPath(ExpandLocalPath(configuredFile));
         }
 
+        var roots = new List<string>();
         var configuredDirectory = Environment.GetEnvironmentVariable("NOVELIST_ONNX_MODELS_DIR");
         if (!string.IsNullOrWhiteSpace(configuredDirectory))
         {
-            yield return Path.Combine(Path.GetFullPath(ExpandLocalPath(configuredDirectory)), fileName);
+            roots.Add(Path.GetFullPath(ExpandLocalPath(configuredDirectory)));
         }
 
-        foreach (var root in CandidateBuiltinModelDirectories())
+        roots.AddRange(CandidateBuiltinModelDirectories());
+        foreach (var root in roots.Distinct(StringComparer.OrdinalIgnoreCase))
         {
             yield return Path.Combine(root, fileName);
+            foreach (var subdirectory in BuiltinModelSubdirectories(root))
+            {
+                yield return Path.Combine(subdirectory, fileName);
+            }
+        }
+    }
+
+    // 开发运行与发布包常把模型放进 models/ 下的模型子目录（如 bge-small-zh-v1.5-int8/），
+    // 这里按"模型 ID 同名目录 + 以模型 ID 为前缀的目录"两层探测。
+    private static IEnumerable<string> BuiltinModelSubdirectories(string root)
+    {
+        var modelDirectory = Path.Combine(root, BuiltinOnnxEmbeddingModel.ModelId);
+        if (Directory.Exists(modelDirectory))
+        {
+            yield return modelDirectory;
+        }
+
+        if (!Directory.Exists(root))
+        {
+            yield break;
+        }
+
+        var prefixed = new List<string>();
+        try
+        {
+            foreach (var directory in Directory.EnumerateDirectories(root))
+            {
+                var name = Path.GetFileName(directory);
+                if (!string.Equals(name, BuiltinOnnxEmbeddingModel.ModelId, StringComparison.OrdinalIgnoreCase) &&
+                    name.StartsWith(BuiltinOnnxEmbeddingModel.ModelId, StringComparison.OrdinalIgnoreCase))
+                {
+                    prefixed.Add(directory);
+                }
+            }
+        }
+        catch (IOException)
+        {
+            // 目录枚举失败不阻断解析，剩余候选继续尝试。
+        }
+        catch (UnauthorizedAccessException)
+        {
+        }
+
+        prefixed.Sort(StringComparer.OrdinalIgnoreCase);
+        foreach (var directory in prefixed)
+        {
+            yield return directory;
         }
     }
 
