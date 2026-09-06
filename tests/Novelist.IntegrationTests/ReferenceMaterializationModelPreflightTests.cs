@@ -67,7 +67,7 @@ public sealed class ReferenceMaterializationModelPreflightTests
     [Fact]
     public async Task VerifyAsyncReservesOutputCapacityForThinkingModelHealthChecks()
     {
-        var chat = new MinimumOutputChatCompletionClient(minimumOutputTokens: 256);
+        var chat = new MinimumOutputChatCompletionClient(minimumOutputTokens: 4_096);
         var preflight = new ReferenceMaterializationModelPreflight(
             new FixedSettingsService("deepseek/deepseek-v4-pro"),
             chat,
@@ -77,7 +77,7 @@ public sealed class ReferenceMaterializationModelPreflightTests
         await preflight.VerifyAsync(CancellationToken.None);
 
         Assert.NotNull(chat.Request);
-        Assert.Equal(256, chat.Request.MaxOutputTokens);
+        Assert.Equal(4_096, chat.Request.MaxOutputTokens);
     }
 
     private sealed class FixedSettingsService(string selectedModelKey) : IAppSettingsService

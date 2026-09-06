@@ -6,7 +6,9 @@ namespace Novelist.Infrastructure.App;
 // I7：public——桌面组合根显式接线时需要构造（复用组合根的同一套配置客户端）。
 public sealed class ReferenceMaterializationModelPreflight : IReferenceMaterializationModelPreflight
 {
-    private const int LlmHealthCheckMaxOutputTokens = 256;
+    // 思考模型（如 deepseek-v4-flash，推理力度 high/max）的推理 token 也计入输出预算，
+    // 256 会被纯推理耗尽导致无正文输出；连通检查只要求能拿到一个文本增量，给足余量。
+    private const int LlmHealthCheckMaxOutputTokens = 4_096;
 
     private readonly IAppSettingsService _settings;
     private readonly IChatCompletionClient _completion;
@@ -80,11 +82,12 @@ public sealed class ReferenceMaterializationModelPreflight : IReferenceMateriali
         {
             throw;
         }
-        catch (Exception)
+        catch (Exception exception)
         {
+            // 保留底层原因（API Key、网络、流式终止原因），诊断详情不再只有一句笼统话。
             throw new ReferenceMaterializationException(
                 ReferenceMaterializationErrorCodes.LlmHealthCheckFailed,
-                "Selected LLM health check failed.");
+                $"Selected LLM health check failed: {exception.Message}");
         }
 
         return new ReferenceMaterializationModelIdentityPayload(selected.Provider, selected.ModelId);
@@ -128,11 +131,11 @@ public sealed class ReferenceMaterializationModelPreflight : IReferenceMateriali
         {
             throw;
         }
-        catch (Exception)
+        catch (Exception exception)
         {
             throw new ReferenceMaterializationException(
                 ReferenceMaterializationErrorCodes.EmbeddingHealthCheckFailed,
-                "Embedding health check failed.");
+                $"Embedding health check failed: {exception.Message}");
         }
     }
 

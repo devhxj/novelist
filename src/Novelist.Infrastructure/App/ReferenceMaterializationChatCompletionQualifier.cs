@@ -13,7 +13,8 @@ public sealed class ReferenceMaterializationChatCompletionQualifier : IReference
     public const int MaxCandidatesPerRequest = 5;
     private const string QualificationToolName = "submit_materialization_qualification";
     private const int MaxOutputChars = 128 * 1024;
-    private const int MaxOutputTokens = 8_192;
+    // 思考模型在 high/max 推理力度下的推理 token 计入输出预算，8192 会被纯推理耗尽导致无声结束。
+    private const int MaxOutputTokens = 32_768;
     private const int MaxCandidateTextChars = 1_200;
     private const int MaxSourceNodeTextChars = 1_200;
     private const int MaxIdentifierLength = 256;
@@ -94,18 +95,15 @@ public sealed class ReferenceMaterializationChatCompletionQualifier : IReference
                 QualificationToolSchema,
                 Strict: true)],
             MaxOutputTokens: MaxOutputTokens,
-            TemperatureOverride: 0);
+            TemperatureOverride: 0,
+            RequireToolCall: true);
 
         ChatToolCall? toolCall = null;
         try
         {
             await foreach (var item in _completion.StreamChatAsync(request, cancellationToken))
             {
-                if (item.Kind == ChatCompletionStreamEventKind.Content && !string.IsNullOrWhiteSpace(item.Data))
-                {
-                    throw InvalidOutput("Material qualification must use the required tool call.");
-                }
-
+                // 正文/思考增量一律忽略：结果只认工具调用实参。
                 if (item.Kind != ChatCompletionStreamEventKind.ToolCall)
                 {
                     continue;
@@ -130,7 +128,7 @@ public sealed class ReferenceMaterializationChatCompletionQualifier : IReference
         {
             throw new ReferenceMaterializationException(
                 ReferenceMaterializationErrorCodes.LlmRequestFailed,
-                "Material qualification request failed.");
+                $"Material qualification request failed: {exception.Message}");
         }
 
         return toolCall is null
