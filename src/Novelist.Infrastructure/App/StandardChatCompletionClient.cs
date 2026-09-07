@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Net;
 using System.Net.Http.Headers;
 using System.Runtime.CompilerServices;
@@ -14,9 +15,15 @@ public sealed class StandardChatCompletionClient : IChatCompletionClient
 {
     private const int ErrorBodyLimitBytes = 64 * 1024;
     private const int SseLineLimitChars = 2 * 1024 * 1024;
-    // 限流/网关突发保护（如方舟 request burst）按 1s/3s 退避重试；重试只发生在流开始前，调用方无感。
-    private const int MaxSendAttempts = 3;
-    private static readonly TimeSpan[] ResendDelays = [TimeSpan.FromSeconds(1), TimeSpan.FromSeconds(3)];
+    // 突发保护（如方舟 request burst）以流内 error/429 形式出现，且保护窗口常超过一秒级：
+    // 每次流式请求最多尝试 3 次（间隔 2s/5s），只要尚未向调用方吐出任何事件就可以重启。
+    private const int MaxStreamAttempts = 3;
+    private static readonly TimeSpan[] StreamRetryDelays = [TimeSpan.FromSeconds(2), TimeSpan.FromSeconds(5)];
+    // 请求起步间隔：突发保护按单位时间请求量触发，同一供应商的请求起点至少间隔 2 秒，
+    // 材料化并行批次的并发起点在这里自动排队，从源头避免触发保护。
+    private const int MinProviderStartGapMs = 2_000;
+    private static readonly ConcurrentDictionary<string, SemaphoreSlim> ProviderStartGates = new(StringComparer.Ordinal);
+    private static readonly ConcurrentDictionary<string, DateTimeOffset> ProviderLastRequestStart = new(StringComparer.Ordinal);
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
 
     private readonly ILlmConfigurationService _configuration;
@@ -37,70 +44,153 @@ public sealed class StandardChatCompletionClient : IChatCompletionClient
         ValidateMaxOutputTokens(request);
         var provider = await ResolveProviderAsync(request, cancellationToken);
         var payload = BuildPayload(provider, request, stream: true, titleGeneration: false);
-        using var httpRequest = CreateHttpRequest(provider, payload);
-
-        using var response = await SendAsync(httpRequest, cancellationToken);
-        if ((int)response.StatusCode >= 400)
+        for (var attempt = 1; ; attempt++)
         {
-            var body = await ReadContentLimitedAsync(response.Content, cancellationToken);
-            throw ProviderError(FormatProviderError(response.StatusCode, body, provider.ApiKey), Retryable(response.StatusCode));
-        }
-
-        if (provider.EndpointType == LlmEndpoint.Responses)
-        {
-            await foreach (var item in ParseResponsesStreamAsync(response.Content, cancellationToken))
+            await PaceProviderStartAsync(provider.Key, cancellationToken);
+            var emitted = false;
+            BridgeRequestException? failure = null;
+            await foreach (var item in StreamAttemptAsync(provider, payload, cancellationToken))
             {
-                yield return item;
+                if (item.Event is { } streamEvent)
+                {
+                    emitted = true;
+                    yield return streamEvent;
+                    continue;
+                }
+
+                failure = item.Failure;
             }
 
+            if (failure is null)
+            {
+                yield break;
+            }
+
+            // 已向调用方吐出事件后不再重启（会导致重复输出）；不可重试的失败直接抛出。
+            if (!failure.Retryable || emitted || attempt >= MaxStreamAttempts)
+            {
+                throw failure;
+            }
+
+            await Task.Delay(StreamRetryDelays[attempt - 1], cancellationToken);
+        }
+    }
+
+    private async IAsyncEnumerable<AttemptItem> StreamAttemptAsync(
+        ResolvedProvider provider,
+        Dictionary<string, object?> payload,
+        [EnumeratorCancellation] CancellationToken cancellationToken)
+    {
+        using var httpRequest = CreateHttpRequest(provider, payload);
+        HttpResponseMessage response;
+        BridgeRequestException? transportFailure = null;
+        try
+        {
+            response = await SendAsync(httpRequest, cancellationToken);
+        }
+        catch (HttpRequestException ex)
+        {
+            response = null!;
+            transportFailure = ProviderError($"请求失败: {ex.Message}", retryable: true);
+        }
+
+        if (transportFailure is not null)
+        {
+            yield return AttemptItem.Fail(transportFailure);
             yield break;
         }
 
-        var toolCalls = new Dictionary<int, StreamingToolCall>();
-        await using var stream = await response.Content.ReadAsStreamAsync(cancellationToken);
-        using var reader = new StreamReader(stream, Encoding.UTF8, detectEncodingFromByteOrderMarks: false, bufferSize: 8192);
-        while (true)
+        using (response)
         {
-            var line = await reader.ReadLineAsync(cancellationToken);
-            if (line is null)
+            if ((int)response.StatusCode >= 400)
             {
-                break;
+                var body = await ReadContentLimitedAsync(response.Content, cancellationToken);
+                yield return AttemptItem.Fail(ProviderError(
+                    FormatProviderError(response.StatusCode, body, provider.ApiKey),
+                    Retryable(response.StatusCode)));
+                yield break;
             }
 
-            if (line.Length > SseLineLimitChars)
+            if (provider.EndpointType == LlmEndpoint.Responses)
             {
-                throw ProviderError("服务商返回的 SSE 行过大，已拒绝处理。", retryable: false);
-            }
-
-            if (!line.StartsWith("data:", StringComparison.Ordinal))
-            {
-                continue;
-            }
-
-            var data = line["data:".Length..].TrimStart();
-            if (string.Equals(data, "[DONE]", StringComparison.Ordinal))
-            {
-                foreach (var call in FlushToolCalls(toolCalls))
+                await foreach (var item in ParseResponsesStreamItemsAsync(response.Content, cancellationToken))
                 {
-                    yield return new ChatCompletionStreamEvent(
-                        ChatCompletionStreamEventKind.ToolCall,
-                        ToolCall: call);
+                    yield return item;
                 }
 
-                break;
+                yield break;
             }
 
-            foreach (var item in ParseSseData(data, toolCalls))
+            var toolCalls = new Dictionary<int, StreamingToolCall>();
+            await using var stream = await response.Content.ReadAsStreamAsync(cancellationToken);
+            using var reader = new StreamReader(stream, Encoding.UTF8, detectEncodingFromByteOrderMarks: false, bufferSize: 8192);
+            while (true)
             {
-                yield return item;
+                var line = await reader.ReadLineAsync(cancellationToken);
+                if (line is null)
+                {
+                    break;
+                }
+
+                if (line.Length > SseLineLimitChars)
+                {
+                    yield return AttemptItem.Fail(ProviderError("服务商返回的 SSE 行过大，已拒绝处理。", retryable: false));
+                    yield break;
+                }
+
+                if (!line.StartsWith("data:", StringComparison.Ordinal))
+                {
+                    continue;
+                }
+
+                var data = line["data:".Length..].TrimStart();
+                if (string.Equals(data, "[DONE]", StringComparison.Ordinal))
+                {
+                    foreach (var call in FlushToolCalls(toolCalls))
+                    {
+                        yield return AttemptItem.Item(new ChatCompletionStreamEvent(
+                            ChatCompletionStreamEventKind.ToolCall,
+                            ToolCall: call));
+                    }
+
+                    break;
+                }
+
+                foreach (var item in ParseSseData(data, toolCalls))
+                {
+                    yield return AttemptItem.Item(item);
+                }
+            }
+
+            foreach (var call in FlushToolCalls(toolCalls))
+            {
+                yield return AttemptItem.Item(new ChatCompletionStreamEvent(
+                    ChatCompletionStreamEventKind.ToolCall,
+                    ToolCall: call));
             }
         }
+    }
 
-        foreach (var call in FlushToolCalls(toolCalls))
+    private static async Task PaceProviderStartAsync(string providerKey, CancellationToken cancellationToken)
+    {
+        var gate = ProviderStartGates.GetOrAdd(providerKey, _ => new SemaphoreSlim(1, 1));
+        await gate.WaitAsync(cancellationToken);
+        try
         {
-            yield return new ChatCompletionStreamEvent(
-                ChatCompletionStreamEventKind.ToolCall,
-                ToolCall: call);
+            var lastStart = ProviderLastRequestStart.TryGetValue(providerKey, out var value)
+                ? value
+                : DateTimeOffset.MinValue;
+            var waitUntil = lastStart.AddMilliseconds(MinProviderStartGapMs);
+            if (waitUntil > DateTimeOffset.UtcNow)
+            {
+                await Task.Delay(waitUntil - DateTimeOffset.UtcNow, cancellationToken);
+            }
+
+            ProviderLastRequestStart[providerKey] = DateTimeOffset.UtcNow;
+        }
+        finally
+        {
+            gate.Release();
         }
     }
 
@@ -111,15 +201,62 @@ public sealed class StandardChatCompletionClient : IChatCompletionClient
         ValidateMaxOutputTokens(request);
         var provider = await ResolveProviderAsync(request, cancellationToken);
         var payload = BuildPayload(provider, request, stream: false, titleGeneration: true);
-        using var httpRequest = CreateHttpRequest(provider, payload);
-
-        using var response = await SendAsync(httpRequest, cancellationToken);
-        var body = await ReadContentLimitedAsync(response.Content, cancellationToken);
-        if ((int)response.StatusCode >= 400)
+        for (var attempt = 1; ; attempt++)
         {
-            throw ProviderError(FormatProviderError(response.StatusCode, body, provider.ApiKey), Retryable(response.StatusCode));
-        }
+            await PaceProviderStartAsync(provider.Key, cancellationToken);
+            using var httpRequest = CreateHttpRequest(provider, payload);
+            HttpResponseMessage response;
+            BridgeRequestException? transportFailure = null;
+            try
+            {
+                response = await SendAsync(httpRequest, cancellationToken);
+            }
+            catch (HttpRequestException ex)
+            {
+                response = null!;
+                transportFailure = ProviderError($"请求失败: {ex.Message}", retryable: true);
+            }
 
+            using (response ??= CreateEmptyResponse())
+            {
+                var body = await ReadContentLimitedAsync(response.Content, cancellationToken);
+                if ((int)response.StatusCode >= 400)
+                {
+                    var failure = ProviderError(
+                        FormatProviderError(response.StatusCode, body, provider.ApiKey),
+                        Retryable(response.StatusCode));
+                    if (!failure.Retryable || attempt >= MaxStreamAttempts)
+                    {
+                        throw failure;
+                    }
+
+                    await Task.Delay(StreamRetryDelays[attempt - 1], cancellationToken);
+                    continue;
+                }
+
+                if (transportFailure is not null)
+                {
+                    if (attempt >= MaxStreamAttempts)
+                    {
+                        throw transportFailure;
+                    }
+
+                    await Task.Delay(StreamRetryDelays[attempt - 1], cancellationToken);
+                    continue;
+                }
+
+                return ParseGeneratedText(provider, body);
+            }
+        }
+    }
+
+    private static HttpResponseMessage CreateEmptyResponse() => new(HttpStatusCode.OK)
+    {
+        Content = new StringContent(string.Empty)
+    };
+
+    private static string ParseGeneratedText(ResolvedProvider provider, byte[] body)
+    {
         if (provider.EndpointType == LlmEndpoint.Responses)
         {
             return ParseResponsesText(body);
@@ -377,64 +514,14 @@ public sealed class StandardChatCompletionClient : IChatCompletionClient
         HttpRequestMessage request,
         CancellationToken cancellationToken)
     {
-        var body = request.Content is null
-            ? []
-            : await request.Content.ReadAsByteArrayAsync(cancellationToken);
-        for (var attempt = 1; ; attempt++)
+        try
         {
-            HttpResponseMessage response;
-            try
-            {
-                using var attemptRequest = CloneChatRequest(request, body);
-                response = await _httpClient.SendAsync(attemptRequest, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
-            }
-            catch (OperationCanceledException)
-            {
-                throw;
-            }
-            catch (HttpRequestException) when (attempt < MaxSendAttempts)
-            {
-                await Task.Delay(ResendDelays[attempt - 1], cancellationToken);
-                continue;
-            }
-            catch (HttpRequestException ex)
-            {
-                throw ProviderError($"请求失败: {ex.Message}", retryable: true);
-            }
-
-            if ((int)response.StatusCode < 400 || !Retryable(response.StatusCode) || attempt >= MaxSendAttempts)
-            {
-                return response;
-            }
-
-            // 限流/5xx：排掉错误体后按退避间隔重发；此时流尚未开始，对调用方完全透明。
-            using (response)
-            {
-                await ReadContentLimitedAsync(response.Content, cancellationToken);
-            }
-
-            await Task.Delay(ResendDelays[attempt - 1], cancellationToken);
+            return await _httpClient.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
         }
-    }
-
-    private static HttpRequestMessage CloneChatRequest(HttpRequestMessage source, byte[] body)
-    {
-        var clone = new HttpRequestMessage(source.Method, source.RequestUri);
-        foreach (var header in source.Headers)
+        catch (OperationCanceledException)
         {
-            clone.Headers.TryAddWithoutValidation(header.Key, header.Value);
+            throw;
         }
-
-        if (body.Length > 0)
-        {
-            clone.Content = new ByteArrayContent(body);
-            foreach (var header in source.Content!.Headers)
-            {
-                clone.Content.Headers.TryAddWithoutValidation(header.Key, header.Value);
-            }
-        }
-
-        return clone;
     }
 
     private static IEnumerable<ChatCompletionStreamEvent> ParseSseData(
@@ -652,7 +739,7 @@ public sealed class StandardChatCompletionClient : IChatCompletionClient
         return target.ToArray();
     }
 
-    private static async IAsyncEnumerable<ChatCompletionStreamEvent> ParseResponsesStreamAsync(
+    private static async IAsyncEnumerable<AttemptItem> ParseResponsesStreamItemsAsync(
         HttpContent content,
         [EnumeratorCancellation] CancellationToken cancellationToken)
     {
@@ -668,7 +755,8 @@ public sealed class StandardChatCompletionClient : IChatCompletionClient
 
             if (line.Length > SseLineLimitChars)
             {
-                throw ProviderError("服务商返回的 SSE 行过大，已拒绝处理。", retryable: false);
+                yield return AttemptItem.Fail(ProviderError("服务商返回的 SSE 行过大，已拒绝处理。", retryable: false));
+                yield break;
             }
 
             if (!line.StartsWith("data:", StringComparison.Ordinal))
@@ -689,7 +777,7 @@ public sealed class StandardChatCompletionClient : IChatCompletionClient
         }
     }
 
-    private static IEnumerable<ChatCompletionStreamEvent> ParseResponsesSseData(string data)
+    private static IEnumerable<AttemptItem> ParseResponsesSseData(string data)
     {
         JsonDocument document;
         try
@@ -710,7 +798,7 @@ public sealed class StandardChatCompletionClient : IChatCompletionClient
                 case "response.output_text.delta":
                     if (ReadString(root, "delta") is { Length: > 0 } delta)
                     {
-                        yield return new ChatCompletionStreamEvent(ChatCompletionStreamEventKind.Content, delta);
+                        yield return AttemptItem.Item(new ChatCompletionStreamEvent(ChatCompletionStreamEventKind.Content, delta));
                     }
 
                     break;
@@ -718,16 +806,16 @@ public sealed class StandardChatCompletionClient : IChatCompletionClient
                 case "response.reasoning_summary_text.delta":
                     if (ReadString(root, "delta") is { Length: > 0 } reasoning)
                     {
-                        yield return new ChatCompletionStreamEvent(ChatCompletionStreamEventKind.Thinking, reasoning);
+                        yield return AttemptItem.Item(new ChatCompletionStreamEvent(ChatCompletionStreamEventKind.Thinking, reasoning));
                     }
 
                     break;
                 case "response.output_item.done":
                     if (TryReadFunctionCall(root, out var call))
                     {
-                        yield return new ChatCompletionStreamEvent(
+                        yield return AttemptItem.Item(new ChatCompletionStreamEvent(
                             ChatCompletionStreamEventKind.ToolCall,
-                            ToolCall: call);
+                            ToolCall: call));
                     }
 
                     break;
@@ -736,16 +824,16 @@ public sealed class StandardChatCompletionClient : IChatCompletionClient
                         TryReadProperty(completed, "usage", out var completedUsage) &&
                         completedUsage.ValueKind is JsonValueKind.Object or JsonValueKind.Array)
                     {
-                        yield return new ChatCompletionStreamEvent(
+                        yield return AttemptItem.Item(new ChatCompletionStreamEvent(
                             ChatCompletionStreamEventKind.Usage,
                             string.Empty,
-                            completedUsage.Clone());
+                            completedUsage.Clone()));
                     }
 
                     break;
                 case "response.incomplete":
                     // 不抛异常就只剩"无声结束"，分析端只能报笼统的 invalid structured output；
-                    // 这里把服务商给出的终止原因转成可行动的错误。
+                    // 这里把服务商给出的终止原因转成可行动的错误。预算耗尽是确定性的，不重试。
                     var incompleteReason = "unknown";
                     if (TryReadProperty(root, "response", out var incomplete) &&
                         TryReadProperty(incomplete, "incomplete_details", out var details) &&
@@ -755,11 +843,12 @@ public sealed class StandardChatCompletionClient : IChatCompletionClient
                         incompleteReason = reason.GetString() ?? incompleteReason;
                     }
 
-                    throw ProviderError(
+                    yield return AttemptItem.Fail(ProviderError(
                         incompleteReason == "max_output_tokens"
                             ? $"模型输出预算耗尽（推理过长，已用 {incompleteReason}）；请降低推理力度或减小输入后重试。"
                             : $"模型响应不完整（{incompleteReason}），请重试。",
-                        retryable: false);
+                        retryable: false));
+                    break;
                 case "response.failed":
                     var failedMessage = "模型服务返回失败。";
                     if (TryReadProperty(root, "response", out var failedResponse) &&
@@ -772,10 +861,13 @@ public sealed class StandardChatCompletionClient : IChatCompletionClient
                         }
                     }
 
-                    throw ProviderError(failedMessage, retryable: false);
+                    yield return AttemptItem.Fail(ProviderError(failedMessage, retryable: true));
+                    break;
                 case "error":
+                    // 限流/突发保护等错误以流内 error 事件出现；可重试，由外层在未吐出事件时重启。
                     var streamErrorMessage = ReadString(root, "message") ?? "模型服务返回流式错误。";
-                    throw ProviderError(streamErrorMessage, retryable: true);
+                    yield return AttemptItem.Fail(ProviderError(streamErrorMessage, retryable: true));
+                    break;
             }
         }
     }
@@ -1056,5 +1148,16 @@ public sealed class StandardChatCompletionClient : IChatCompletionClient
         public string Name { get; set; } = string.Empty;
 
         public StringBuilder Arguments { get; } = new();
+    }
+
+    /// <summary>
+    /// 单次流式尝试的产出：正常事件流经 <see cref="Event"/>；终结性失败经 <see cref="Failure"/>
+    /// 返回（由外层决定重试还是抛出），这样迭代器内部不需要 try/catch 包裹 yield。
+    /// </summary>
+    private sealed record AttemptItem(ChatCompletionStreamEvent? Event, BridgeRequestException? Failure)
+    {
+        public static AttemptItem Item(ChatCompletionStreamEvent eventItem) => new(eventItem, null);
+
+        public static AttemptItem Fail(BridgeRequestException failure) => new(null, failure);
     }
 }

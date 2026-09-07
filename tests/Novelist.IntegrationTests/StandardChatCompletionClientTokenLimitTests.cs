@@ -187,6 +187,48 @@ public sealed class StandardChatCompletionClientTokenLimitTests
     }
 
     [Fact]
+    public async Task StreamChatAsyncRestartsWhenBurstProtectionErrorsBeforeAnyEvent()
+    {
+        var handler = new ScriptedResponseHandler(
+            (HttpStatusCode.OK, """
+                data: {"type":"error","code":"_arc_rate_limit_","message":"System protection triggered by request burst. Please slow down traffic growth and increase requests gradually before retrying."}
+
+                data: [DONE]
+
+                """, "text/event-stream"),
+            (HttpStatusCode.OK, """
+                data: {"type":"response.output_text.delta","delta":"ok"}
+
+                data: [DONE]
+
+                """, "text/event-stream"));
+        var client = CreateClient(responsesEndpoint: true, 2048, handler);
+
+        await DrainAsync(client.StreamChatAsync(CreateRequest(640), CancellationToken.None));
+
+        Assert.Equal(2, handler.SendCount);
+    }
+
+    [Fact]
+    public async Task StreamChatAsyncThrowsBurstProtectionErrorAfterStreamRetriesExhausted()
+    {
+        var handler = new ScriptedResponseHandler(
+            (HttpStatusCode.OK, """
+                data: {"type":"error","code":"_arc_rate_limit_","message":"System protection triggered by request burst."}
+
+                data: [DONE]
+
+                """, "text/event-stream"));
+        var client = CreateClient(responsesEndpoint: true, 2048, handler);
+
+        var exception = await Assert.ThrowsAsync<BridgeRequestException>(async () =>
+            await DrainAsync(client.StreamChatAsync(CreateRequest(640), CancellationToken.None)));
+
+        Assert.Equal(3, handler.SendCount);
+        Assert.Contains("System protection triggered by request burst", exception.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task StreamChatAsyncRetriesRateLimitedResponsesBeforeStreaming()
     {
         var handler = new ScriptedResponseHandler(
