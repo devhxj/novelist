@@ -15,12 +15,9 @@ public sealed class StandardChatCompletionClient : IChatCompletionClient
 {
     private const int ErrorBodyLimitBytes = 64 * 1024;
     private const int SseLineLimitChars = 2 * 1024 * 1024;
-    // 突发保护（如方舟 request burst）以流内 error/429 形式出现，且保护窗口常超过一秒级：
-    // 每次流式请求最多尝试 3 次（间隔 2s/5s），只要尚未向调用方吐出任何事件就可以重启。
-    private const int MaxStreamAttempts = 3;
-    private static readonly TimeSpan[] StreamRetryDelays = [TimeSpan.FromSeconds(2), TimeSpan.FromSeconds(5)];
     // 请求起步间隔：突发保护按单位时间请求量触发，同一供应商的请求起点至少间隔 2 秒，
-    // 材料化并行批次的并发起点在这里自动排队，从源头避免触发保护。
+    // 材料化并行批次的并发起点在这里自动排队，从源头避免触发保护。失败一律立即上抛，
+    // 不做机器重试（冷却型保护越重试越糟）；是否重试由用户通过界面按钮决定。
     private const int MinProviderStartGapMs = 2_000;
     private static readonly ConcurrentDictionary<string, SemaphoreSlim> ProviderStartGates = new(StringComparer.Ordinal);
     private static readonly ConcurrentDictionary<string, DateTimeOffset> ProviderLastRequestStart = new(StringComparer.Ordinal);
@@ -44,35 +41,16 @@ public sealed class StandardChatCompletionClient : IChatCompletionClient
         ValidateMaxOutputTokens(request);
         var provider = await ResolveProviderAsync(request, cancellationToken);
         var payload = BuildPayload(provider, request, stream: true, titleGeneration: false);
-        for (var attempt = 1; ; attempt++)
+        await PaceProviderStartAsync(provider.Key, cancellationToken);
+        await foreach (var item in StreamAttemptAsync(provider, payload, cancellationToken))
         {
-            await PaceProviderStartAsync(provider.Key, cancellationToken);
-            var emitted = false;
-            BridgeRequestException? failure = null;
-            await foreach (var item in StreamAttemptAsync(provider, payload, cancellationToken))
+            if (item.Event is { } streamEvent)
             {
-                if (item.Event is { } streamEvent)
-                {
-                    emitted = true;
-                    yield return streamEvent;
-                    continue;
-                }
-
-                failure = item.Failure;
+                yield return streamEvent;
+                continue;
             }
 
-            if (failure is null)
-            {
-                yield break;
-            }
-
-            // 已向调用方吐出事件后不再重启（会导致重复输出）；不可重试的失败直接抛出。
-            if (!failure.Retryable || emitted || attempt >= MaxStreamAttempts)
-            {
-                throw failure;
-            }
-
-            await Task.Delay(StreamRetryDelays[attempt - 1], cancellationToken);
+            throw item.Failure ?? ProviderError("模型服务返回流式错误。", retryable: true);
         }
     }
 
@@ -105,9 +83,10 @@ public sealed class StandardChatCompletionClient : IChatCompletionClient
             if ((int)response.StatusCode >= 400)
             {
                 var body = await ReadContentLimitedAsync(response.Content, cancellationToken);
-                yield return AttemptItem.Fail(ProviderError(
+                var failure = ProviderError(
                     FormatProviderError(response.StatusCode, body, provider.ApiKey),
-                    Retryable(response.StatusCode)));
+                    Retryable(response.StatusCode));
+                yield return AttemptItem.Fail(WithBurstProtectionGuidance(failure));
                 yield break;
             }
 
@@ -201,59 +180,29 @@ public sealed class StandardChatCompletionClient : IChatCompletionClient
         ValidateMaxOutputTokens(request);
         var provider = await ResolveProviderAsync(request, cancellationToken);
         var payload = BuildPayload(provider, request, stream: false, titleGeneration: true);
-        for (var attempt = 1; ; attempt++)
+        await PaceProviderStartAsync(provider.Key, cancellationToken);
+        using var httpRequest = CreateHttpRequest(provider, payload);
+
+        HttpResponseMessage response;
+        try
         {
-            await PaceProviderStartAsync(provider.Key, cancellationToken);
-            using var httpRequest = CreateHttpRequest(provider, payload);
-            HttpResponseMessage response;
-            BridgeRequestException? transportFailure = null;
-            try
-            {
-                response = await SendAsync(httpRequest, cancellationToken);
-            }
-            catch (HttpRequestException ex)
-            {
-                response = null!;
-                transportFailure = ProviderError($"请求失败: {ex.Message}", retryable: true);
-            }
-
-            using (response ??= CreateEmptyResponse())
-            {
-                var body = await ReadContentLimitedAsync(response.Content, cancellationToken);
-                if ((int)response.StatusCode >= 400)
-                {
-                    var failure = ProviderError(
-                        FormatProviderError(response.StatusCode, body, provider.ApiKey),
-                        Retryable(response.StatusCode));
-                    if (!failure.Retryable || attempt >= MaxStreamAttempts)
-                    {
-                        throw failure;
-                    }
-
-                    await Task.Delay(StreamRetryDelays[attempt - 1], cancellationToken);
-                    continue;
-                }
-
-                if (transportFailure is not null)
-                {
-                    if (attempt >= MaxStreamAttempts)
-                    {
-                        throw transportFailure;
-                    }
-
-                    await Task.Delay(StreamRetryDelays[attempt - 1], cancellationToken);
-                    continue;
-                }
-
-                return ParseGeneratedText(provider, body);
-            }
+            response = await SendAsync(httpRequest, cancellationToken);
         }
-    }
+        catch (HttpRequestException ex)
+        {
+            throw ProviderError($"请求失败: {ex.Message}", retryable: true);
+        }
 
-    private static HttpResponseMessage CreateEmptyResponse() => new(HttpStatusCode.OK)
-    {
-        Content = new StringContent(string.Empty)
-    };
+        var body = await ReadContentLimitedAsync(response.Content, cancellationToken);
+        if ((int)response.StatusCode >= 400)
+        {
+            throw WithBurstProtectionGuidance(ProviderError(
+                FormatProviderError(response.StatusCode, body, provider.ApiKey),
+                Retryable(response.StatusCode)));
+        }
+
+        return ParseGeneratedText(provider, body);
+    }
 
     private static string ParseGeneratedText(ResolvedProvider provider, byte[] body)
     {
@@ -857,16 +806,17 @@ public sealed class StandardChatCompletionClient : IChatCompletionClient
                         var errorText = ReadString(failedError, "message");
                         if (!string.IsNullOrWhiteSpace(errorText))
                         {
-                            failedMessage = $"模型服务返回失败: {errorText}";
+                            failedMessage = failedMessage + " " + errorText;
                         }
                     }
 
-                    yield return AttemptItem.Fail(ProviderError(failedMessage, retryable: true));
+                    yield return AttemptItem.Fail(WithBurstProtectionGuidance(ProviderError(failedMessage, retryable: true)));
                     break;
                 case "error":
-                    // 限流/突发保护等错误以流内 error 事件出现；可重试，由外层在未吐出事件时重启。
+                    // 请求频率保护（burst）属于冷却窗口：重试会不断重置窗口，必须立即失败；
+                    // WithBurstProtectionGuidance 命中签名时改为不可重试并给出等待指引。
                     var streamErrorMessage = ReadString(root, "message") ?? "模型服务返回流式错误。";
-                    yield return AttemptItem.Fail(ProviderError(streamErrorMessage, retryable: true));
+                    yield return AttemptItem.Fail(WithBurstProtectionGuidance(ProviderError(streamErrorMessage, retryable: true)));
                     break;
             }
         }
@@ -1049,6 +999,33 @@ public sealed class StandardChatCompletionClient : IChatCompletionClient
             BridgeErrorCodes.LlmProviderError,
             message,
             retryable: retryable);
+    }
+
+    private const string BurstProtectionGuidance =
+        "服务商触发了请求频率保护：请等待 1-2 分钟后再点重试，连续快速重试会延长保护窗口。";
+
+    private static bool IsBurstProtectionMessage(string message)
+    {
+        return message.Contains("request burst", StringComparison.OrdinalIgnoreCase) ||
+            message.Contains("system protection", StringComparison.OrdinalIgnoreCase);
+    }
+
+    /// <summary>
+    /// 突发保护是冷却窗口型错误：冷却期内每次重试都会重置窗口，机器重试只会帮倒忙。
+    /// 命中签名时改为不可机器重试，并在消息里给出可行动的等待指引。
+    /// </summary>
+    private static BridgeRequestException WithBurstProtectionGuidance(BridgeRequestException failure)
+    {
+        if (!failure.Retryable || !IsBurstProtectionMessage(failure.Message))
+        {
+            return failure;
+        }
+
+        return new BridgeRequestException(
+            failure.Code,
+            $"{BurstProtectionGuidance}（服务商原话：{failure.Message}）",
+            failure.Details,
+            retryable: false);
     }
 
     private static string NormalizeProviderName(string? value)

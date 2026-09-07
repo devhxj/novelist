@@ -187,34 +187,11 @@ public sealed class StandardChatCompletionClientTokenLimitTests
     }
 
     [Fact]
-    public async Task StreamChatAsyncRestartsWhenBurstProtectionErrorsBeforeAnyEvent()
+    public async Task StreamChatAsyncGuidsBurstProtectionCooldownInsteadOfRetrying()
     {
         var handler = new ScriptedResponseHandler(
             (HttpStatusCode.OK, """
                 data: {"type":"error","code":"_arc_rate_limit_","message":"System protection triggered by request burst. Please slow down traffic growth and increase requests gradually before retrying."}
-
-                data: [DONE]
-
-                """, "text/event-stream"),
-            (HttpStatusCode.OK, """
-                data: {"type":"response.output_text.delta","delta":"ok"}
-
-                data: [DONE]
-
-                """, "text/event-stream"));
-        var client = CreateClient(responsesEndpoint: true, 2048, handler);
-
-        await DrainAsync(client.StreamChatAsync(CreateRequest(640), CancellationToken.None));
-
-        Assert.Equal(2, handler.SendCount);
-    }
-
-    [Fact]
-    public async Task StreamChatAsyncThrowsBurstProtectionErrorAfterStreamRetriesExhausted()
-    {
-        var handler = new ScriptedResponseHandler(
-            (HttpStatusCode.OK, """
-                data: {"type":"error","code":"_arc_rate_limit_","message":"System protection triggered by request burst."}
 
                 data: [DONE]
 
@@ -224,31 +201,15 @@ public sealed class StandardChatCompletionClientTokenLimitTests
         var exception = await Assert.ThrowsAsync<BridgeRequestException>(async () =>
             await DrainAsync(client.StreamChatAsync(CreateRequest(640), CancellationToken.None)));
 
-        Assert.Equal(3, handler.SendCount);
+        // 突发保护是冷却窗口：机器重试会重置窗口，必须立即失败并给出等待指引。
+        Assert.Equal(1, handler.SendCount);
+        Assert.False(exception.Retryable);
+        Assert.Contains("请求频率保护", exception.Message, StringComparison.Ordinal);
         Assert.Contains("System protection triggered by request burst", exception.Message, StringComparison.Ordinal);
     }
 
     [Fact]
-    public async Task StreamChatAsyncRetriesRateLimitedResponsesBeforeStreaming()
-    {
-        var handler = new ScriptedResponseHandler(
-            (HttpStatusCode.TooManyRequests, """{"error":"burst"}""", "application/json"),
-            (HttpStatusCode.TooManyRequests, """{"error":"burst"}""", "application/json"),
-            (HttpStatusCode.OK, """
-                data: {"type":"response.output_text.delta","delta":"ok"}
-
-                data: [DONE]
-
-                """, "text/event-stream"));
-        var client = CreateClient(responsesEndpoint: true, 2048, handler);
-
-        await DrainAsync(client.StreamChatAsync(CreateRequest(640), CancellationToken.None));
-
-        Assert.Equal(3, handler.SendCount);
-    }
-
-    [Fact]
-    public async Task StreamChatAsyncGivesUpAfterMaxRetriesOnRateLimit()
+    public async Task StreamChatAsyncFailsImmediatelyOnRateLimitWithoutMachineRetry()
     {
         var handler = new ScriptedResponseHandler(
             (HttpStatusCode.TooManyRequests, """{"error":"burst"}""", "application/json"));
@@ -257,12 +218,14 @@ public sealed class StandardChatCompletionClientTokenLimitTests
         var exception = await Assert.ThrowsAsync<BridgeRequestException>(async () =>
             await DrainAsync(client.StreamChatAsync(CreateRequest(640), CancellationToken.None)));
 
-        Assert.Equal(3, handler.SendCount);
+        // 失败立即上抛，不做机器重试；是否重试由用户在界面上决定。
+        Assert.Equal(1, handler.SendCount);
+        Assert.True(exception.Retryable);
         Assert.Contains("429", exception.Message, StringComparison.Ordinal);
     }
 
     [Fact]
-    public async Task StreamChatAsyncDoesNotRetryNonRetryableStatuses()
+    public async Task StreamChatAsyncFailsImmediatelyOnNonRetryableStatuses()
     {
         var handler = new ScriptedResponseHandler(
             (HttpStatusCode.BadRequest, """{"error":"bad request"}""", "application/json"));
@@ -272,6 +235,7 @@ public sealed class StandardChatCompletionClientTokenLimitTests
             await DrainAsync(client.StreamChatAsync(CreateRequest(640), CancellationToken.None)));
 
         Assert.Equal(1, handler.SendCount);
+        Assert.False(exception.Retryable);
         Assert.Contains("400", exception.Message, StringComparison.Ordinal);
     }
 
