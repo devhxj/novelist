@@ -209,7 +209,52 @@ public sealed partial class SqliteReferenceMaterializationService
             }
         }
 
+        await DeleteOrphanSplitNodesAsync(nodeConnection, transaction, anchorId, splitProfileId, cancellationToken);
         await transaction.CommitAsync(cancellationToken);
+    }
+
+    // 重新分析会生成新的 split profile，旧 profile 的 split 节点/分段随即失效。
+    // 最佳努力清理：仍被候选证据或分析引用的节点跳过（FK RESTRICT），清理失败不阻断入队。
+    private static async ValueTask DeleteOrphanSplitNodesAsync(
+        SqliteConnection connection,
+        SqliteTransaction transaction,
+        long anchorId,
+        string splitProfileId,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            await using var deleteSegments = connection.CreateCommand();
+            deleteSegments.Transaction = transaction;
+            deleteSegments.CommandText = """
+                DELETE FROM reference_source_segments
+                WHERE anchor_id = $anchor_id
+                  AND segment_id LIKE 'split-seg:%'
+                  AND segment_id NOT LIKE $keep_pattern;
+                """;
+            deleteSegments.Parameters.AddWithValue("$anchor_id", anchorId);
+            deleteSegments.Parameters.AddWithValue("$keep_pattern", $"split-seg:{splitProfileId}:%");
+            await deleteSegments.ExecuteNonQueryAsync(cancellationToken);
+
+            await using var deleteNodes = connection.CreateCommand();
+            deleteNodes.Transaction = transaction;
+            deleteNodes.CommandText = """
+                DELETE FROM reference_text_nodes
+                WHERE anchor_id = $anchor_id
+                  AND node_id LIKE 'split-node:%'
+                  AND node_id NOT LIKE $keep_pattern
+                  AND node_id NOT IN (SELECT node_id FROM reference_material_candidate_nodes)
+                  AND node_id NOT IN (SELECT node_id FROM reference_analysis_work_items WHERE node_id IS NOT NULL)
+                  AND node_id NOT IN (SELECT node_id FROM reference_blueprint_beat_pieces);
+                """;
+            deleteNodes.Parameters.AddWithValue("$anchor_id", anchorId);
+            deleteNodes.Parameters.AddWithValue("$keep_pattern", $"split-node:{splitProfileId}:%");
+            await deleteNodes.ExecuteNonQueryAsync(cancellationToken);
+        }
+        catch (SqliteException)
+        {
+            // 孤儿清理是尽力而为；引用关系复杂时保留旧节点不影响正确性。
+        }
     }
 
     private static IEnumerable<(string Text, int Start, int End)> SplitParagraphSpans(string text)

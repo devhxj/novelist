@@ -325,6 +325,8 @@ public sealed class ReferenceMaterializationChatCompletionQualifier : IReference
               vivid dialogue exchanges, emotional beats, hooks, payoffs, sensory or technique passages.
               Skip plain plot-advancing filler and scene transitions.
             - At most 40 materials; each excerpt between 8 and 1200 characters.
+              Return the strongest materials first: if the budget forces truncation, the most valuable
+              fragments must appear earliest in the array.
             - material_type is one of: passage, dialogue_exchange, action_reaction, emotion, hook, payoff.
             - Tag and reason values must be copied verbatim from the allowed lists (exact English tokens);
               never translate them or invent new values; unknown values are dropped.

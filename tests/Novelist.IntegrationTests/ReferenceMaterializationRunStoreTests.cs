@@ -1053,9 +1053,40 @@ public sealed class ReferenceMaterializationRunStoreTests : IDisposable
             new ReferenceMaterializationModelIdentityPayload("llm", "model"),
             new ReferenceMaterializationModelIdentityPayload("embedding", "model", 8)));
         var service = new SqliteReferenceMaterializationService(options, new EmptyChapterSplitAnalyzer(), modelPreflight: preflight);
+
+        // 旧 profile 的孤儿节点在再次入队时被尽力清理（不被候选证据引用即删）。
+        var databasePath = Path.Combine(options.DefaultDataDirectory, "reference-anchor", "index.sqlite");
+        await using (var orphan = new SqliteConnection(new SqliteConnectionStringBuilder { DataSource = databasePath, Pooling = false }.ToString()))
+        {
+            await orphan.OpenAsync(CancellationToken.None);
+            await using var insert = orphan.CreateCommand();
+            insert.CommandText = """
+                INSERT INTO reference_text_nodes (
+                  node_id, anchor_id, parent_node_id, node_type, sequence_index, depth,
+                  chapter_index, start_offset, end_offset, char_len, text_hash, text, created_at)
+                VALUES (
+                  'split-node:old-profile:c1', $anchor_id, NULL, 'chapter', 1, 1, 1,
+                  0, 10, 10, 'orphan', '孤儿节点', '2026-09-07T00:00:00Z');
+                """;
+            insert.Parameters.AddWithValue("$anchor_id", anchor.AnchorId);
+            await insert.ExecuteNonQueryAsync(CancellationToken.None);
+        }
+
         var run = await service.EnqueueMaterializationAsync(
             new EnqueueReferenceMaterializationPayload(anchor.NovelId, anchor.AnchorId, profile.SplitProfileId, ChapterBatchSize: 5),
             CancellationToken.None);
+
+        await using (var verify = new SqliteConnection(new SqliteConnectionStringBuilder { DataSource = databasePath, Pooling = false }.ToString()))
+        {
+            await verify.OpenAsync(CancellationToken.None);
+            await using var count = verify.CreateCommand();
+            count.CommandText = """
+                SELECT COUNT(*) FROM reference_text_nodes
+                WHERE anchor_id = $anchor_id AND node_id = 'split-node:old-profile:c1';
+                """;
+            count.Parameters.AddWithValue("$anchor_id", anchor.AnchorId);
+            Assert.Equal(0, Convert.ToInt32(await count.ExecuteScalarAsync(CancellationToken.None)));
+        }
 
         var work = await store.BeginChapterExtractionAsync(run.RunId, chapterIndex: 1, CancellationToken.None);
         Assert.NotNull(work);

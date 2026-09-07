@@ -167,14 +167,23 @@ internal sealed partial class SqliteReferenceMaterializationRunStore
             {
                 insert.Transaction = transaction;
                 insert.CommandText = """
-                    INSERT OR IGNORE INTO reference_material_candidates (
+                    INSERT INTO reference_material_candidates (
                       candidate_id, candidate_key, run_id, anchor_id, candidate_type, text_hash,
                       decision, decision_origin, quality_score, confidence, scores_json, tags_json,
                       reason_codes_json, created_at)
                     VALUES (
                       $candidate_id, $candidate_key, $run_id, $anchor_id, $candidate_type, $text_hash,
                       $decision, $decision_origin, $quality_score, $confidence, $scores_json, $tags_json,
-                      $reason_codes_json, $created_at);
+                      $reason_codes_json, $created_at)
+                    ON CONFLICT(candidate_id) DO UPDATE SET
+                      decision = excluded.decision,
+                      decision_origin = excluded.decision_origin,
+                      quality_score = excluded.quality_score,
+                      confidence = excluded.confidence,
+                      scores_json = excluded.scores_json,
+                      tags_json = excluded.tags_json,
+                      reason_codes_json = excluded.reason_codes_json,
+                      row_version = reference_material_candidates.row_version + 1;
                     """;
                 insert.Parameters.AddWithValue("$candidate_id", candidateId);
                 insert.Parameters.AddWithValue("$candidate_key", candidateKey);
@@ -190,12 +199,8 @@ internal sealed partial class SqliteReferenceMaterializationRunStore
                 insert.Parameters.AddWithValue("$tags_json", SerializeTags(material.Tags));
                 insert.Parameters.AddWithValue("$reason_codes_json", JsonSerializer.Serialize(material.ReasonCodes));
                 insert.Parameters.AddWithValue("$created_at", FormatTimestamp(DateTimeOffset.UtcNow));
-                var insertedRows = await insert.ExecuteNonQueryAsync(cancellationToken);
-                if (insertedRows == 0)
-                {
-                    skipped++;
-                    continue;
-                }
+                // upsert：重复提取的同一摘录会重判既有候选（复核接纳后重开的章节依赖这一点）。
+                await insert.ExecuteNonQueryAsync(cancellationToken);
             }
 
             inserted++;
