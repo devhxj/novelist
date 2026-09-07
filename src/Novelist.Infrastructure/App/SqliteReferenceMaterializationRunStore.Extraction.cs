@@ -208,25 +208,85 @@ internal sealed partial class SqliteReferenceMaterializationRunStore
                 review++;
             }
 
-            await using (var linkNodes = connection.CreateCommand())
+            // 证据节点按粒度择优：摘录若与句子节点精确对齐（完全包含），只链接句子节点；
+            // 否则若被段落节点完全包含，只链接段落节点；再退回所有相交节点（交集作为证据区间）。
+            // 混用段落+句子会因层级重叠导致材料文本重复拼接。
+            var overlappingNodes = new List<ExtractionEvidenceNode>();
+            await using (var selectNodes = connection.CreateCommand())
             {
-                linkNodes.Transaction = transaction;
-                linkNodes.CommandText = """
-                    INSERT OR IGNORE INTO reference_material_candidate_nodes (
-                      candidate_id, node_id, ordinal, evidence_start, evidence_end, text_hash)
-                    SELECT $candidate_id, node.node_id, ROW_NUMBER() OVER (ORDER BY node.start_offset) - 1,
-                           0, node.char_len, node.text_hash
+                selectNodes.Transaction = transaction;
+                selectNodes.CommandText = """
+                    SELECT node.node_id, node.node_type, node.char_len, node.start_offset, node.text_hash
                     FROM reference_text_nodes node
                     WHERE node.anchor_id = $anchor_id
                       AND node.node_type IN ('paragraph', 'sentence')
                       AND node.start_offset < $absolute_end
-                      AND node.end_offset > $absolute_start;
+                      AND node.end_offset > $absolute_start
+                    ORDER BY node.start_offset;
                     """;
-                linkNodes.Parameters.AddWithValue("$candidate_id", candidateId);
-                linkNodes.Parameters.AddWithValue("$anchor_id", snapshot.AnchorId);
-                linkNodes.Parameters.AddWithValue("$absolute_end", absoluteEnd);
-                linkNodes.Parameters.AddWithValue("$absolute_start", absoluteStart);
-                await linkNodes.ExecuteNonQueryAsync(cancellationToken);
+                selectNodes.Parameters.AddWithValue("$anchor_id", snapshot.AnchorId);
+                selectNodes.Parameters.AddWithValue("$absolute_end", absoluteEnd);
+                selectNodes.Parameters.AddWithValue("$absolute_start", absoluteStart);
+                await using var nodeReader = await selectNodes.ExecuteReaderAsync(cancellationToken);
+                while (await nodeReader.ReadAsync(cancellationToken))
+                {
+                    overlappingNodes.Add(new ExtractionEvidenceNode(
+                        nodeReader.GetString(0),
+                        nodeReader.GetString(1),
+                        nodeReader.GetInt32(2),
+                        nodeReader.GetInt32(3),
+                        nodeReader.GetString(4)));
+                }
+            }
+
+            var containedSentences = overlappingNodes
+                .Where(node => node.NodeType == "sentence" &&
+                    node.StartOffset >= absoluteStart && node.StartOffset + node.CharLen <= absoluteEnd)
+                .ToList();
+            var containedParagraphs = overlappingNodes
+                .Where(node => node.NodeType == "paragraph" &&
+                    node.StartOffset >= absoluteStart && node.StartOffset + node.CharLen <= absoluteEnd)
+                .ToList();
+            List<ExtractionEvidenceNode> evidenceNodes;
+            if (containedSentences.Count > 0)
+            {
+                evidenceNodes = containedSentences;
+            }
+            else if (containedParagraphs.Count > 0)
+            {
+                evidenceNodes = containedParagraphs;
+            }
+            else
+            {
+                evidenceNodes = overlappingNodes;
+            }
+
+            var ordinal = 0;
+            foreach (var evidenceNode in evidenceNodes)
+            {
+                var evidenceStart = Math.Max(0, absoluteStart - evidenceNode.StartOffset);
+                var evidenceEnd = Math.Min(evidenceNode.CharLen, absoluteEnd - evidenceNode.StartOffset);
+                if (evidenceEnd <= evidenceStart)
+                {
+                    continue;
+                }
+
+                await using var linkNode = connection.CreateCommand();
+                linkNode.Transaction = transaction;
+                linkNode.CommandText = """
+                    INSERT OR IGNORE INTO reference_material_candidate_nodes (
+                      candidate_id, node_id, ordinal, evidence_start, evidence_end, text_hash)
+                    VALUES (
+                      $candidate_id, $node_id, $ordinal, $evidence_start, $evidence_end, $text_hash);
+                    """;
+                linkNode.Parameters.AddWithValue("$candidate_id", candidateId);
+                linkNode.Parameters.AddWithValue("$node_id", evidenceNode.NodeId);
+                linkNode.Parameters.AddWithValue("$ordinal", ordinal);
+                linkNode.Parameters.AddWithValue("$evidence_start", evidenceStart);
+                linkNode.Parameters.AddWithValue("$evidence_end", evidenceEnd);
+                linkNode.Parameters.AddWithValue("$text_hash", evidenceNode.TextHash);
+                await linkNode.ExecuteNonQueryAsync(cancellationToken);
+                ordinal++;
             }
         }
 
@@ -337,4 +397,11 @@ internal sealed partial class SqliteReferenceMaterializationRunStore
         int ContentStart,
         int ContentEnd,
         string Status);
+
+    private sealed record ExtractionEvidenceNode(
+        string NodeId,
+        string NodeType,
+        int CharLen,
+        int StartOffset,
+        string TextHash);
 }

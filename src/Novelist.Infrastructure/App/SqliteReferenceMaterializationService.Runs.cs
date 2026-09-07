@@ -426,6 +426,13 @@ public sealed partial class SqliteReferenceMaterializationService
                 "The material qualification schema changed after this run started. Create a new run instead of retrying this generation.");
         }
 
+        // 旧版入队可能没有补建章节级文本分段；重试前补齐，让失败章节也走章节级提取管线。
+        await EnsureCandidateSourceNodesAsync(
+            input.NovelId,
+            input.AnchorId,
+            current.SplitProfileId,
+            cancellationToken);
+
         return await _runStore.RetryCurrentBatchAsync(current.RunId, cancellationToken);
     }
 

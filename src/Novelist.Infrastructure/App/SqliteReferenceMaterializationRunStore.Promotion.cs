@@ -29,6 +29,41 @@ internal sealed partial class SqliteReferenceMaterializationRunStore
             return false;
         }
 
+        // 零候选守卫：整轮完成但一个候选都没有，几乎必然是模型侧故障
+        //（空摘录 / 全部未通过逐字校验）。标记为 failed 并给出重新材料化的指引，
+        // 而不是静默显示"已完成 · 全 0"。
+        if (run.CandidateCount == 0)
+        {
+            ReferenceMaterializationRunStateMachine.EnsureCanTransition(
+                ReferenceMaterializationRunStates.Running,
+                ReferenceMaterializationRunStates.Failed);
+            var failedAt = DateTimeOffset.UtcNow;
+            await using (var failure = connection.CreateCommand())
+            {
+                failure.Transaction = transaction;
+                failure.CommandText = """
+                    UPDATE reference_materialization_runs
+                    SET status = $failed,
+                        last_error_code = $error_code,
+                        last_error_message = $error_message,
+                        completed_at = $completed_at
+                    WHERE run_id = $run_id AND status = $running;
+                    """;
+                failure.Parameters.AddWithValue("$failed", ReferenceMaterializationRunStates.Failed);
+                failure.Parameters.AddWithValue("$error_code", ReferenceMaterializationErrorCodes.LlmOutputInvalid);
+                failure.Parameters.AddWithValue(
+                    "$error_message",
+                    "材料化完成但未产生任何候选材料：模型没有摘录有效内容（或摘录均未通过逐字校验）。请更换模型或调整后重新材料化。");
+                failure.Parameters.AddWithValue("$completed_at", FormatTimestamp(failedAt));
+                failure.Parameters.AddWithValue("$run_id", normalizedRunId);
+                failure.Parameters.AddWithValue("$running", ReferenceMaterializationRunStates.Running);
+                await failure.ExecuteNonQueryAsync(cancellationToken);
+            }
+
+            await transaction.CommitAsync(cancellationToken);
+            return false;
+        }
+
         var materials = await ReadAcceptedMaterialsAsync(connection, transaction, run, cancellationToken);
         if (materials.Count != run.AcceptedCount)
         {
@@ -57,7 +92,7 @@ internal sealed partial class SqliteReferenceMaterializationRunStore
         command.CommandText = """
             SELECT run_id, anchor_id, generation_id, status, current_batch_index,
                    total_chapters, processed_chapters, accepted_count, vector_count,
-                   embedding_provider, embedding_model_id, embedding_dimensions
+                   embedding_provider, embedding_model_id, embedding_dimensions, candidate_count
             FROM reference_materialization_runs
             WHERE run_id = $run_id;
             """;
@@ -76,7 +111,8 @@ internal sealed partial class SqliteReferenceMaterializationRunStore
                 reader.GetInt32(8),
                 reader.GetString(9),
                 reader.GetString(10),
-                reader.GetInt32(11))
+                reader.GetInt32(11),
+                reader.GetInt32(12))
             : null;
     }
 
@@ -354,7 +390,8 @@ internal sealed partial class SqliteReferenceMaterializationRunStore
         int VectorCount,
         string EmbeddingProvider,
         string EmbeddingModelId,
-        int EmbeddingDimensions);
+        int EmbeddingDimensions,
+        int CandidateCount);
 
     private sealed record PromotionCandidate(
         string CandidateId,

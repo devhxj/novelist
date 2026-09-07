@@ -1,3 +1,4 @@
+using System.Text;
 using Microsoft.Data.Sqlite;
 using Novelist.Contracts.App;
 using Novelist.Core.App;
@@ -960,6 +961,161 @@ public sealed class ReferenceMaterializationRunStoreTests : IDisposable
         {
             Directory.Delete(_root, recursive: true);
         }
+    }
+
+    [Fact]
+    public async Task WorkerUsesChapterExtractionAndSkipsHallucinatedExcerptsForRegisteredSources()
+    {
+        var options = CreateOptions();
+        var anchor = await CreateRegisteredSourceAnchorAsync(options);
+        var splitService = new SqliteReferenceMaterializationService(options, new EmptyChapterSplitAnalyzer());
+        var profile = await splitService.PreviewChapterSplitAsync(
+            new PreviewReferenceChapterSplitPayload(anchor.NovelId, anchor.AnchorId, "第{number}章 {title}"),
+            CancellationToken.None);
+        await splitService.ConfirmChapterSplitAsync(
+            new ConfirmReferenceChapterSplitPayload(anchor.NovelId, anchor.AnchorId, profile.SplitProfileId),
+            CancellationToken.None);
+        var resolver = new ReferenceCorpusDatabasePathResolver(options);
+        var store = new SqliteReferenceMaterializationRunStore(resolver);
+        var preflight = new RecordingPreflight(new ReferenceMaterializationModelPreflightResult(
+            new ReferenceMaterializationModelIdentityPayload("llm", "model"),
+            new ReferenceMaterializationModelIdentityPayload("embedding", "model", 8)));
+        var service = new SqliteReferenceMaterializationService(options, new EmptyChapterSplitAnalyzer(), modelPreflight: preflight);
+        var run = await service.EnqueueMaterializationAsync(
+            new EnqueueReferenceMaterializationPayload(anchor.NovelId, anchor.AnchorId, profile.SplitProfileId, ChapterBatchSize: 5),
+            CancellationToken.None);
+
+        // extractor 提供一条逐字摘录 + 一条幻觉摘录；FailingQualifier 若被调用说明走错了管线。
+        StubChapterMaterialExtractor extractor = new(
+        [
+            new ReferenceChapterExtractedMaterial(
+                "他推门而入，屋里安静得能听见雨声。",
+                ReferenceMaterializationCandidateTypes.Passage,
+                new ReferenceMaterializationQualificationTags(["worldbuilding"], [], [], []),
+                new ReferenceMaterializationQualityScores(0.9, 0.7, 0.8, 0.6, 0.7, 0.5),
+                0.9,
+                ["worldbuilding"]),
+            new ReferenceChapterExtractedMaterial(
+                "这句摘录在原文中并不存在。",
+                ReferenceMaterializationCandidateTypes.Hook,
+                new ReferenceMaterializationQualificationTags([], [], [], []),
+                new ReferenceMaterializationQualityScores(0.5, 0.5, 0.5, 0.5, 0.5, 0.5),
+                0.4,
+                []),
+        ]);
+        var worker = new ReferenceMaterializationWorker(
+            resolver,
+            new FailingQualifier(),
+            new AcceptingEmbedder(),
+            new ReferenceMaterializationVectorIndexer(resolver, new RecordingVecProvisioner()),
+            workerId: "chapter-extraction-worker",
+            chapterMaterialExtractor: extractor);
+
+        Assert.True(await worker.ProcessRunOnceAsync(run.RunId, CancellationToken.None));
+        var status = await store.GetAsync(run.RunId, CancellationToken.None);
+        Assert.NotNull(status);
+        var allProgress = await store.ListChapterProgressAsync(run.RunId, page: 1, size: 10, CancellationToken.None);
+        Assert.True(
+            status.Status == ReferenceMaterializationRunStates.Completed,
+            $"run status={status.Status}, error={status.LastErrorCode}:{status.LastErrorMessage}, " +
+            string.Join(";", allProgress.Items.Select(item => $"c{item.ChapterIndex}:{item.Status}:{item.CandidateCount}/{item.AcceptedCount}")));
+        Assert.Equal(1, status.AcceptedCount);
+        Assert.Equal(1, status.VectorCount);
+        Assert.Equal(0, status.ReviewCount);
+        var candidates = await splitService.ListMaterializationCandidatesAsync(
+            new ListReferenceMaterializationCandidatesPayload(
+                anchor.NovelId,
+                anchor.AnchorId,
+                run.RunId,
+                ReferenceMaterializationCandidateDecisions.Accepted),
+            CancellationToken.None);
+        var accepted = Assert.Single(candidates.Items);
+        Assert.Equal("他推门而入，屋里安静得能听见雨声。", accepted.TextPreview);
+        Assert.Equal("chapter_extraction", accepted.DecisionOrigin);
+        Assert.Equal(2, extractor.Requests.Count);
+    }
+
+    [Fact]
+    public async Task ChapterExtractionPersistsVerbatimMaterialsAndSkipsHallucinatedOnes()
+    {
+        var options = CreateOptions();
+        var anchor = await CreateRegisteredSourceAnchorAsync(options);
+        var splitService = new SqliteReferenceMaterializationService(options, new EmptyChapterSplitAnalyzer());
+        var profile = await splitService.PreviewChapterSplitAsync(
+            new PreviewReferenceChapterSplitPayload(anchor.NovelId, anchor.AnchorId, "第{number}章 {title}"),
+            CancellationToken.None);
+        await splitService.ConfirmChapterSplitAsync(
+            new ConfirmReferenceChapterSplitPayload(anchor.NovelId, anchor.AnchorId, profile.SplitProfileId),
+            CancellationToken.None);
+        var resolver = new ReferenceCorpusDatabasePathResolver(options);
+        var store = new SqliteReferenceMaterializationRunStore(resolver);
+        var preflight = new RecordingPreflight(new ReferenceMaterializationModelPreflightResult(
+            new ReferenceMaterializationModelIdentityPayload("llm", "model"),
+            new ReferenceMaterializationModelIdentityPayload("embedding", "model", 8)));
+        var service = new SqliteReferenceMaterializationService(options, new EmptyChapterSplitAnalyzer(), modelPreflight: preflight);
+        var run = await service.EnqueueMaterializationAsync(
+            new EnqueueReferenceMaterializationPayload(anchor.NovelId, anchor.AnchorId, profile.SplitProfileId, ChapterBatchSize: 5),
+            CancellationToken.None);
+
+        var work = await store.BeginChapterExtractionAsync(run.RunId, chapterIndex: 1, CancellationToken.None);
+        Assert.NotNull(work);
+        Assert.Contains("他推门而入", work!.ChapterText, StringComparison.Ordinal);
+        var materials = new List<ReferenceChapterExtractedMaterial>
+        {
+            new(
+                "他推门而入，屋里安静得能听见雨声。",
+                ReferenceMaterializationCandidateTypes.Passage,
+                new ReferenceMaterializationQualificationTags(["worldbuilding"], [], [], []),
+                new ReferenceMaterializationQualityScores(0.9, 0.7, 0.8, 0.6, 0.7, 0.5),
+                0.9,
+                ["worldbuilding"]),
+            new(
+                "这句摘录在原文中并不存在。",
+                ReferenceMaterializationCandidateTypes.Hook,
+                new ReferenceMaterializationQualificationTags([], [], [], []),
+                new ReferenceMaterializationQualityScores(0.5, 0.5, 0.5, 0.5, 0.5, 0.5),
+                0.4,
+                []),
+        };
+        var persisted = await store.PersistChapterExtractionAsync(run.RunId, chapterIndex: 1, materials, CancellationToken.None);
+
+        Assert.Equal(1, persisted.CandidateCount);
+        Assert.Equal(1, persisted.AcceptedCount);
+        Assert.Equal(1, persisted.SkippedCount);
+        var embeddingWork = await store.ReadEmbeddingWorkItemAsync(run.RunId, chapterIndex: 1, CancellationToken.None);
+        Assert.NotEmpty(embeddingWork.Request.Items);
+    }
+
+    private sealed class StubChapterMaterialExtractor(
+        IReadOnlyList<ReferenceChapterExtractedMaterial> materials) : IReferenceChapterMaterialExtractor
+    {
+        public List<ReferenceChapterExtractionRequest> Requests { get; } = [];
+
+        public ValueTask<ReferenceChapterExtractionResult> ExtractChapterMaterialsAsync(
+            ReferenceChapterExtractionRequest request,
+            CancellationToken cancellationToken)
+        {
+            Requests.Add(request);
+            return ValueTask.FromResult(new ReferenceChapterExtractionResult(materials));
+        }
+    }
+
+    private async ValueTask<ReferenceAnchorPayload> CreateRegisteredSourceAnchorAsync(AppInitializationOptions options)
+    {
+        await new FileSystemAppInitializationService(options).InitializeAsync(options.DefaultDataDirectory, CancellationToken.None);
+        var novels = new FileSystemNovelService(options, new FileSystemAppSettingsService(options));
+        var novel = await novels.CreateNovelAsync(new CreateNovelPayload("章节提取来源登记", "", ""), CancellationToken.None);
+        var anchors = new SqliteReferenceAnchorService(options, novels);
+        var chapterText = "他推门而入，屋里安静得能听见雨声。雨声压住窗沿，他想起昨夜的电话。";
+        var content = $"第1章 开端\n{chapterText}\n\n第2章 结束\n门外响起第三次敲门。\n";
+        return await anchors.RegisterMaterializationSourceFromContentAsync(
+            new CreateReferenceAnchorFromContentPayload(
+                novel.Id,
+                "章节提取来源",
+                null,
+                "extraction.txt",
+                Convert.ToBase64String(Encoding.UTF8.GetBytes(content))),
+            CancellationToken.None);
     }
 
     private async ValueTask<ReferenceAnchorPayload> CreateAnchorAsync(
