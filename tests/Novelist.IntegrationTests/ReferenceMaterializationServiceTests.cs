@@ -1,3 +1,4 @@
+using System.Text;
 using Microsoft.Data.Sqlite;
 using Novelist.Contracts.App;
 using Novelist.Core.App;
@@ -43,6 +44,50 @@ public sealed class ReferenceMaterializationServiceTests : IDisposable
         Assert.NotNull(status);
         Assert.Equal(created.GenerationId, status!.GenerationId);
         Assert.Equal(2, progress.Total);
+    }
+
+    [Fact]
+    public async Task EnqueueBuildsCandidateSourceNodesForRegisteredMaterializationSources()
+    {
+        var options = CreateOptions();
+        await new FileSystemAppInitializationService(options).InitializeAsync(options.DefaultDataDirectory, CancellationToken.None);
+        var novels = new FileSystemNovelService(options, new FileSystemAppSettingsService(options));
+        var novel = await novels.CreateNovelAsync(new CreateNovelPayload("零候选回归", "", ""), CancellationToken.None);
+        var anchors = new SqliteReferenceAnchorService(options, novels);
+        var content = "第1章 开端\n他推门而入，屋里安静得能听见雨声。\n雨声压住窗沿，他想起昨夜的电话。\n\n第2章 结束\n门外响起第三次敲门。\n他终于开口，说出了那个藏了很久的真相。\n";
+        var anchor = await anchors.RegisterMaterializationSourceFromContentAsync(
+            new CreateReferenceAnchorFromContentPayload(
+                novel.Id,
+                "零候选回归来源",
+                null,
+                "regression.txt",
+                Convert.ToBase64String(Encoding.UTF8.GetBytes(content))),
+            CancellationToken.None);
+        var service = new SqliteReferenceMaterializationService(
+            options,
+            new EmptyChapterSplitAnalyzer(),
+            modelPreflight: new RecordingPreflight(new ReferenceMaterializationModelPreflightResult(
+                new ReferenceMaterializationModelIdentityPayload("llm", "model"),
+                new ReferenceMaterializationModelIdentityPayload("embedding", "model", 8))));
+        var profile = await service.PreviewChapterSplitAsync(
+            new PreviewReferenceChapterSplitPayload(anchor.NovelId, anchor.AnchorId, "第{number}章 {title}"),
+            CancellationToken.None);
+        await service.ConfirmChapterSplitAsync(
+            new ConfirmReferenceChapterSplitPayload(anchor.NovelId, anchor.AnchorId, profile.SplitProfileId),
+            CancellationToken.None);
+
+        // 回归：材料化来源登记按设计跳过旧导出管线的分段，入队时必须补建段落/句子
+        // 文本节点，否则 worker 构建不出候选窗口，整轮材料化"完成"但产出全 0。
+        var created = await service.EnqueueMaterializationAsync(
+            new EnqueueReferenceMaterializationPayload(anchor.NovelId, anchor.AnchorId, profile.SplitProfileId, ChapterBatchSize: 5),
+            CancellationToken.None);
+
+        var store = new SqliteReferenceMaterializationRunStore(new ReferenceCorpusDatabasePathResolver(options));
+        var built = await store.BuildCandidatesForChapterAsync(created.RunId, chapterIndex: 1, CancellationToken.None);
+        Assert.True(built.CandidateCount > 0, "chapter 1 must produce candidate windows from the enqueued source nodes");
+        var workItem = await store.ReadQualificationWorkItemAsync(created.RunId, built.ChapterIndex, CancellationToken.None);
+        Assert.NotEmpty(workItem.Request.Candidates);
+        Assert.All(workItem.Request.Candidates, candidate => Assert.NotEmpty(candidate.SourceNodes));
     }
 
     [Fact]
