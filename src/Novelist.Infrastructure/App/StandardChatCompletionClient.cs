@@ -14,6 +14,9 @@ public sealed class StandardChatCompletionClient : IChatCompletionClient
 {
     private const int ErrorBodyLimitBytes = 64 * 1024;
     private const int SseLineLimitChars = 2 * 1024 * 1024;
+    // 限流/网关突发保护（如方舟 request burst）按 1s/3s 退避重试；重试只发生在流开始前，调用方无感。
+    private const int MaxSendAttempts = 3;
+    private static readonly TimeSpan[] ResendDelays = [TimeSpan.FromSeconds(1), TimeSpan.FromSeconds(3)];
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
 
     private readonly ILlmConfigurationService _configuration;
@@ -374,18 +377,64 @@ public sealed class StandardChatCompletionClient : IChatCompletionClient
         HttpRequestMessage request,
         CancellationToken cancellationToken)
     {
-        try
+        var body = request.Content is null
+            ? []
+            : await request.Content.ReadAsByteArrayAsync(cancellationToken);
+        for (var attempt = 1; ; attempt++)
         {
-            return await _httpClient.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
+            HttpResponseMessage response;
+            try
+            {
+                using var attemptRequest = CloneChatRequest(request, body);
+                response = await _httpClient.SendAsync(attemptRequest, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
+            }
+            catch (OperationCanceledException)
+            {
+                throw;
+            }
+            catch (HttpRequestException) when (attempt < MaxSendAttempts)
+            {
+                await Task.Delay(ResendDelays[attempt - 1], cancellationToken);
+                continue;
+            }
+            catch (HttpRequestException ex)
+            {
+                throw ProviderError($"请求失败: {ex.Message}", retryable: true);
+            }
+
+            if ((int)response.StatusCode < 400 || !Retryable(response.StatusCode) || attempt >= MaxSendAttempts)
+            {
+                return response;
+            }
+
+            // 限流/5xx：排掉错误体后按退避间隔重发；此时流尚未开始，对调用方完全透明。
+            using (response)
+            {
+                await ReadContentLimitedAsync(response.Content, cancellationToken);
+            }
+
+            await Task.Delay(ResendDelays[attempt - 1], cancellationToken);
         }
-        catch (OperationCanceledException)
+    }
+
+    private static HttpRequestMessage CloneChatRequest(HttpRequestMessage source, byte[] body)
+    {
+        var clone = new HttpRequestMessage(source.Method, source.RequestUri);
+        foreach (var header in source.Headers)
         {
-            throw;
+            clone.Headers.TryAddWithoutValidation(header.Key, header.Value);
         }
-        catch (HttpRequestException ex)
+
+        if (body.Length > 0)
         {
-            throw ProviderError($"请求失败: {ex.Message}", retryable: true);
+            clone.Content = new ByteArrayContent(body);
+            foreach (var header in source.Content!.Headers)
+            {
+                clone.Content.Headers.TryAddWithoutValidation(header.Key, header.Value);
+            }
         }
+
+        return clone;
     }
 
     private static IEnumerable<ChatCompletionStreamEvent> ParseSseData(

@@ -186,10 +186,57 @@ public sealed class StandardChatCompletionClientTokenLimitTests
         Assert.Contains("service overloaded", exception.Message, StringComparison.Ordinal);
     }
 
+    [Fact]
+    public async Task StreamChatAsyncRetriesRateLimitedResponsesBeforeStreaming()
+    {
+        var handler = new ScriptedResponseHandler(
+            (HttpStatusCode.TooManyRequests, """{"error":"burst"}""", "application/json"),
+            (HttpStatusCode.TooManyRequests, """{"error":"burst"}""", "application/json"),
+            (HttpStatusCode.OK, """
+                data: {"type":"response.output_text.delta","delta":"ok"}
+
+                data: [DONE]
+
+                """, "text/event-stream"));
+        var client = CreateClient(responsesEndpoint: true, 2048, handler);
+
+        await DrainAsync(client.StreamChatAsync(CreateRequest(640), CancellationToken.None));
+
+        Assert.Equal(3, handler.SendCount);
+    }
+
+    [Fact]
+    public async Task StreamChatAsyncGivesUpAfterMaxRetriesOnRateLimit()
+    {
+        var handler = new ScriptedResponseHandler(
+            (HttpStatusCode.TooManyRequests, """{"error":"burst"}""", "application/json"));
+        var client = CreateClient(responsesEndpoint: true, 2048, handler);
+
+        var exception = await Assert.ThrowsAsync<BridgeRequestException>(async () =>
+            await DrainAsync(client.StreamChatAsync(CreateRequest(640), CancellationToken.None)));
+
+        Assert.Equal(3, handler.SendCount);
+        Assert.Contains("429", exception.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task StreamChatAsyncDoesNotRetryNonRetryableStatuses()
+    {
+        var handler = new ScriptedResponseHandler(
+            (HttpStatusCode.BadRequest, """{"error":"bad request"}""", "application/json"));
+        var client = CreateClient(responsesEndpoint: true, 2048, handler);
+
+        var exception = await Assert.ThrowsAsync<BridgeRequestException>(async () =>
+            await DrainAsync(client.StreamChatAsync(CreateRequest(640), CancellationToken.None)));
+
+        Assert.Equal(1, handler.SendCount);
+        Assert.Contains("400", exception.Message, StringComparison.Ordinal);
+    }
+
     private static StandardChatCompletionClient CreateClient(
  bool responsesEndpoint,
  int modelLimit,
- RecordingHandler handler)
+ HttpMessageHandler handler)
     {
         var model = new ModelInfoPayload(
  nameof(Names.model_a),
@@ -258,6 +305,24 @@ public sealed class StandardChatCompletionClientTokenLimitTests
 
         public ValueTask TestConnectionAsync(TestConnectionPayload input, CancellationToken cancellationToken) =>
  throw new NotSupportedException();
+    }
+
+    private sealed class ScriptedResponseHandler(params (HttpStatusCode status, string body, string contentType)[] responses)
+ : HttpMessageHandler
+    {
+        public int SendCount { get; private set; }
+
+        protected override Task<HttpResponseMessage> SendAsync(
+        HttpRequestMessage request,
+        CancellationToken cancellationToken)
+        {
+            var (status, body, contentType) = responses[Math.Min(SendCount, responses.Length - 1)];
+            SendCount++;
+            return Task.FromResult(new HttpResponseMessage(status)
+            {
+                Content = new StringContent(body, Encoding.UTF8, contentType)
+            });
+        }
     }
 
     private sealed class RecordingHandler(string? responsesStream = null) : HttpMessageHandler
