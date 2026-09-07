@@ -91,21 +91,22 @@ public sealed class ReferenceMaterializationChatCompletionQualifierTests
     }
 
     [Fact]
-    public async Task QualifyAsyncRejectsUnknownExtendedTagValues()
+    public async Task QualifyAsyncDropsUnknownExtendedTagValues()
     {
         var qualifier = new ReferenceMaterializationChatCompletionQualifier(
             new RecordingChatCompletionClient([ToolCall("""
                 {"decisions":[{"candidate_id":"candidate-a","decision":"accept","source_spans":[{"node_id":"node-a","start":0,"end":7}],"scores":{"semantic_completeness":0.5,"information_density":0.5,"narrative_value":0.5,"transferability":0.5,"context_independence":0.5,"technique_distinctiveness":0.5},"tags":{"narrative_functions":[],"emotion_mechanics":[],"pov":[],"techniques":[],"scene_beat_roles":["invented_beat"],"character_relations":[],"causal_information_roles":[]},"confidence":0.5,"reason_codes":["complete_exchange"]}]}
                 """)]));
 
-        var exception = await Assert.ThrowsAsync<ReferenceMaterializationException>(async () =>
-            await qualifier.QualifyAsync(
-                new ReferenceMaterializationQualificationRequest(
-                    new ReferenceMaterializationLlmSelection("qwen", "qwen-plus", "high"),
-                    [Candidate("candidate-a", "node-a", "他说出了真相。")]),
-                CancellationToken.None));
+        var result = await qualifier.QualifyAsync(
+            new ReferenceMaterializationQualificationRequest(
+                new ReferenceMaterializationLlmSelection("qwen", "qwen-plus", "high"),
+                [Candidate("candidate-a", "node-a", "他说出了真相。")]),
+            CancellationToken.None);
 
-        Assert.Equal(ReferenceMaterializationErrorCodes.LlmOutputInvalid, exception.ErrorCode);
+        // 未知扩展标签值被丢弃，不再让整章材料化失败。
+        var decision = Assert.Single(result.Decisions);
+        Assert.Empty(decision.Tags.SceneBeatRoles);
     }
 
     [Fact]
@@ -127,6 +128,57 @@ public sealed class ReferenceMaterializationChatCompletionQualifierTests
             CancellationToken.None);
 
         Assert.Single(result.Decisions);
+    }
+
+    [Fact]
+    public async Task QualifyAsyncDropsUnknownTagValuesAndKeepsTheDecision()
+    {
+        // 2026-09-07 回归：deepseek-v4-flash 偶尔把标签本地化/发明清单外的值，
+        // 此前一个未知值就废掉整章；现在未知值丢弃，决策与评分保留。
+        var chat = new RecordingChatCompletionClient(
+        [
+            ToolCall("""
+                {"decisions":[{"candidate_id":"candidate-a","decision":"accept","source_spans":[{"node_id":"node-a","start":0,"end":7}],"scores":{"semantic_completeness":0.9,"information_density":0.7,"narrative_value":0.8,"transferability":0.6,"context_independence":0.7,"technique_distinctiveness":0.6},"tags":{"narrative_functions":["reveal","情绪张力"],"emotion_mechanics":["escalation","未知机制"],"pov":["第三人称"],"techniques":["subtext"],"scene_beat_roles":["turn_beat"],"character_relations":["mistrust"],"causal_information_roles":["reveal"]},"confidence":0.9,"reason_codes":["complete_exchange","自造原因"]}]}
+                """)
+        ]);
+        var qualifier = new ReferenceMaterializationChatCompletionQualifier(chat);
+
+        var result = await qualifier.QualifyAsync(
+            new ReferenceMaterializationQualificationRequest(
+                new ReferenceMaterializationLlmSelection("deepseek", "deepseek-v4-flash", "high"),
+                [Candidate("candidate-a", "node-a", "他说出了真相。")]),
+            CancellationToken.None);
+
+        var decision = Assert.Single(result.Decisions);
+        Assert.Equal(ReferenceMaterializationCandidateDecisions.Accepted, decision.Decision);
+        Assert.Equal(["reveal"], decision.Tags.NarrativeFunctions);
+        Assert.Equal(["escalation"], decision.Tags.EmotionMechanics);
+        Assert.Empty(decision.Tags.Pov);
+        Assert.Equal(["subtext"], decision.Tags.Techniques);
+        Assert.Equal(["turn_beat"], decision.Tags.SceneBeatRoles);
+        Assert.Equal(["complete_exchange"], decision.ReasonCodes);
+    }
+
+    [Fact]
+    public async Task QualifyAsyncRejectsStructurallyInvalidDecisions()
+    {
+        // 决策字段本身（accept/reject/review_required 之外）仍然是硬约束。
+        var chat = new RecordingChatCompletionClient(
+        [
+            ToolCall("""
+                {"decisions":[{"candidate_id":"candidate-a","decision":"approve","source_spans":[{"node_id":"node-a","start":0,"end":7}],"scores":{"semantic_completeness":0.5,"information_density":0.5,"narrative_value":0.5,"transferability":0.5,"context_independence":0.5,"technique_distinctiveness":0.5},"tags":{"narrative_functions":[],"emotion_mechanics":[],"pov":[],"techniques":[]},"confidence":0.5,"reason_codes":["complete_exchange"]}]}
+                """)
+        ]);
+        var qualifier = new ReferenceMaterializationChatCompletionQualifier(chat);
+
+        var exception = await Assert.ThrowsAsync<ReferenceMaterializationException>(async () =>
+            await qualifier.QualifyAsync(
+                new ReferenceMaterializationQualificationRequest(
+                    new ReferenceMaterializationLlmSelection("qwen", "qwen-plus", "high"),
+                    [Candidate("candidate-a", "node-a", "他说出了真相。")]),
+                CancellationToken.None));
+
+        Assert.Equal(ReferenceMaterializationErrorCodes.LlmOutputInvalid, exception.ErrorCode);
     }
 
     private static ChatCompletionStreamEvent ToolCall(string argumentsJson) => new(

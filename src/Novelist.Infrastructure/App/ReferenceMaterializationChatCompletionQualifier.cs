@@ -151,6 +151,8 @@ public sealed class ReferenceMaterializationChatCompletionQualifier : IReference
             - Do not output source text, rewrites, summaries, paths, URLs, hashes, commentary, Markdown, extra fields, or new identifiers.
             - Do not return plain text. Use only the required tool call.
             - decision must be accept, reject, or review_required.
+            - Tag and reason values must be copied verbatim from the allowed lists below (exact English tokens).
+              Never translate them into Chinese or any other language, and never invent new values; unknown values are dropped.
             - Allowed narrative_functions: characterization, conflict, hook, payoff, pacing, relationship_pressure, reveal, setup, transition, turn, worldbuilding.
             - Allowed emotion_mechanics: anger, anticipation, desire, escalation, fear, grief, relief, reversal, release, shame, suppression, tension.
             - Allowed pov: first_person, close_third, limited_third, omniscient, second_person, mixed.
@@ -404,7 +406,7 @@ public sealed class ReferenceMaterializationChatCompletionQualifier : IReference
         var scores = ParseScores(element);
         var tags = ParseTags(element);
         var confidence = ReadUnitInterval(element, "confidence", "decision");
-        var reasonCodes = ParseEnumList(element, "reason_codes", AllowedReasonCodes, MaxReasonCodes, "decision", minimumCount: 1);
+        var reasonCodes = ParseEnumList(element, "reason_codes", AllowedReasonCodes, MaxReasonCodes, "decision", dropUnknownValues: true);
 
         return new ReferenceMaterializationCandidateQualification(
             candidateId,
@@ -495,14 +497,14 @@ public sealed class ReferenceMaterializationChatCompletionQualifier : IReference
             "character_relations",
             "causal_information_roles");
         return new ReferenceMaterializationQualificationTags(
-            ParseEnumList(tagsElement, "narrative_functions", AllowedNarrativeFunctions, MaxTagsPerFamily, "tags"),
-            ParseEnumList(tagsElement, "emotion_mechanics", AllowedEmotionMechanics, MaxTagsPerFamily, "tags"),
-            ParseEnumList(tagsElement, "pov", AllowedPov, MaxTagsPerFamily, "tags"),
-            ParseEnumList(tagsElement, "techniques", AllowedTechniques, MaxTagsPerFamily, "tags"))
+            ParseEnumList(tagsElement, "narrative_functions", AllowedNarrativeFunctions, MaxTagsPerFamily, "tags", dropUnknownValues: true),
+            ParseEnumList(tagsElement, "emotion_mechanics", AllowedEmotionMechanics, MaxTagsPerFamily, "tags", dropUnknownValues: true),
+            ParseEnumList(tagsElement, "pov", AllowedPov, MaxTagsPerFamily, "tags", dropUnknownValues: true),
+            ParseEnumList(tagsElement, "techniques", AllowedTechniques, MaxTagsPerFamily, "tags", dropUnknownValues: true))
         {
-            SceneBeatRoles = ParseEnumList(tagsElement, "scene_beat_roles", AllowedSceneBeatRoles, MaxTagsPerFamily, "tags"),
-            CharacterRelations = ParseEnumList(tagsElement, "character_relations", AllowedCharacterRelations, MaxTagsPerFamily, "tags"),
-            CausalInformationRoles = ParseEnumList(tagsElement, "causal_information_roles", AllowedCausalInformationRoles, MaxTagsPerFamily, "tags")
+            SceneBeatRoles = ParseEnumList(tagsElement, "scene_beat_roles", AllowedSceneBeatRoles, MaxTagsPerFamily, "tags", dropUnknownValues: true),
+            CharacterRelations = ParseEnumList(tagsElement, "character_relations", AllowedCharacterRelations, MaxTagsPerFamily, "tags", dropUnknownValues: true),
+            CausalInformationRoles = ParseEnumList(tagsElement, "causal_information_roles", AllowedCausalInformationRoles, MaxTagsPerFamily, "tags", dropUnknownValues: true)
         };
     }
 
@@ -512,7 +514,8 @@ public sealed class ReferenceMaterializationChatCompletionQualifier : IReference
         IReadOnlySet<string> allowedValues,
         int maximumCount,
         string context,
-        int minimumCount = 0)
+        int minimumCount = 0,
+        bool dropUnknownValues = false)
     {
         if (!element.TryGetProperty(propertyName, out var valuesElement) || valuesElement.ValueKind != JsonValueKind.Array)
         {
@@ -524,19 +527,33 @@ public sealed class ReferenceMaterializationChatCompletionQualifier : IReference
         {
             if (valueElement.ValueKind != JsonValueKind.String || string.IsNullOrWhiteSpace(valueElement.GetString()))
             {
+                if (dropUnknownValues)
+                {
+                    continue;
+                }
+
                 throw InvalidOutput($"Material qualification response has invalid {context}.{propertyName}.");
             }
 
             var value = valueElement.GetString()!;
             if (!allowedValues.Contains(value))
             {
+                // 标签/原因是描述性元数据：模型偶尔会本地化或发明清单外的值，
+                // 丢弃它们保留决策与评分，好过让整章材料化失败。
+                if (dropUnknownValues)
+                {
+                    continue;
+                }
+
                 throw InvalidOutput($"Material qualification response has unsupported {context}.{propertyName}.");
             }
 
             values.Add(value);
         }
 
-        if (values.Count < minimumCount || values.Count > maximumCount || values.Distinct(StringComparer.Ordinal).Count() != values.Count)
+        values = values.Distinct(StringComparer.Ordinal).Take(maximumCount).ToList();
+
+        if (values.Count < minimumCount)
         {
             throw InvalidOutput($"Material qualification response has invalid {context}.{propertyName}.");
         }
