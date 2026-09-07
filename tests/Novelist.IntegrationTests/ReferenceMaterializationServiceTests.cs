@@ -88,6 +88,35 @@ public sealed class ReferenceMaterializationServiceTests : IDisposable
         var workItem = await store.ReadQualificationWorkItemAsync(created.RunId, built.ChapterIndex, CancellationToken.None);
         Assert.NotEmpty(workItem.Request.Candidates);
         Assert.All(workItem.Request.Candidates, candidate => Assert.NotEmpty(candidate.SourceNodes));
+
+        // 章节级直接提取：worker 用 Begin/Persist 完成打分；逐字校验丢弃不在原文中的幻觉摘录。
+        var work = await store.BeginChapterExtractionAsync(created.RunId, chapterIndex: 1, CancellationToken.None);
+        Assert.NotNull(work);
+        Assert.Contains("他推门而入", work!.ChapterText, StringComparison.Ordinal);
+        var materials = new List<ReferenceChapterExtractedMaterial>
+        {
+            new(
+                "他推门而入，屋里安静得能听见雨声。",
+                ReferenceMaterializationCandidateTypes.Passage,
+                new ReferenceMaterializationQualificationTags(["worldbuilding"], [], [], []),
+                new ReferenceMaterializationQualityScores(0.9, 0.7, 0.8, 0.6, 0.7, 0.5),
+                0.9,
+                ["worldbuilding"]),
+            new(
+                "这句摘录在原文中并不存在。",
+                ReferenceMaterializationCandidateTypes.Hook,
+                new ReferenceMaterializationQualificationTags([], [], [], []),
+                new ReferenceMaterializationQualityScores(0.5, 0.5, 0.5, 0.5, 0.5, 0.5),
+                0.9,
+                []),
+        };
+        var persisted = await store.PersistChapterExtractionAsync(created.RunId, chapterIndex: 1, materials, CancellationToken.None);
+        Assert.Equal(1, persisted.CandidateCount);
+        Assert.Equal(1, persisted.AcceptedCount);
+        Assert.Equal(1, persisted.SkippedCount);
+
+        var embeddingWork = await store.ReadEmbeddingWorkItemAsync(created.RunId, chapterIndex: 1, CancellationToken.None);
+        Assert.NotEmpty(embeddingWork.Request.Items);
     }
 
     [Fact]

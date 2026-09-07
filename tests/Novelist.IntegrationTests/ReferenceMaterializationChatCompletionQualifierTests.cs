@@ -189,11 +189,11 @@ public sealed class ReferenceMaterializationChatCompletionQualifierTests
             argumentsJson));
 
     [Fact]
-    public async Task QualifyAsyncRejectsRequestsThatExceedTheFiveCandidateModelBatch()
+    public async Task QualifyAsyncRejectsRequestsThatExceedTheCandidateModelBatch()
     {
         var qualifier = new ReferenceMaterializationChatCompletionQualifier(
             new RecordingChatCompletionClient([]));
-        var candidates = Enumerable.Range(1, 6)
+        var candidates = Enumerable.Range(1, ReferenceMaterializationChatCompletionQualifier.MaxCandidatesPerRequest + 1)
             .Select(index => Candidate($"candidate-{index}", $"node-{index}", "他说出了真相。"))
             .ToArray();
 

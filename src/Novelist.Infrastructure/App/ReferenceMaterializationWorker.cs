@@ -9,6 +9,7 @@ public sealed class ReferenceMaterializationWorker : IAsyncDisposable
     private static readonly TimeSpan DefaultIdleDelay = TimeSpan.FromSeconds(1);
     private readonly IReferenceCorpusDatabasePathResolver _databasePathResolver;
     private readonly IReferenceMaterializationQualifier _qualifier;
+    private readonly IReferenceChapterMaterialExtractor? _chapterMaterialExtractor;
     private readonly IReferenceMaterializationEmbedder _embedder;
     private readonly ReferenceMaterializationVectorIndexer _indexer;
     private readonly string _workerId;
@@ -27,12 +28,14 @@ public sealed class ReferenceMaterializationWorker : IAsyncDisposable
         ReferenceMaterializationVectorIndexer indexer,
         string? workerId = null,
         TimeSpan? leaseDuration = null,
-        TimeSpan? idleDelay = null)
+        TimeSpan? idleDelay = null,
+        IReferenceChapterMaterialExtractor? chapterMaterialExtractor = null)
     {
         _databasePathResolver = databasePathResolver ?? throw new ArgumentNullException(nameof(databasePathResolver));
         _qualifier = qualifier ?? throw new ArgumentNullException(nameof(qualifier));
         _embedder = embedder ?? throw new ArgumentNullException(nameof(embedder));
         _indexer = indexer ?? throw new ArgumentNullException(nameof(indexer));
+        _chapterMaterialExtractor = chapterMaterialExtractor;
         _workerId = string.IsNullOrWhiteSpace(workerId)
             ? $"materialization-worker:{Environment.ProcessId}:{Guid.NewGuid():N}"
             : workerId;
@@ -139,27 +142,32 @@ public sealed class ReferenceMaterializationWorker : IAsyncDisposable
         try
         {
             using var batchCancellation = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, leaseLost.Token);
-            var builtCandidates = new List<ReferenceCandidateBuildResult>(claim.ChapterIndexes.Count);
             Task[] tasks = [];
             try
             {
-                // SQLite writes are short but serialized; stage them before the model calls so every chapter
-                // in the frozen batch can qualify concurrently without holding an open database transaction.
+                // legacy 窗口管线需要先落候选（SQLite 写短但串行），预构建结果直接传入任务；
+                // 章节级提取路径自带文本，无需预构建。两类章节按各自管线并发处理。
+                var legacyBuilds = new Dictionary<int, ReferenceCandidateBuildResult>(claim.ChapterIndexes.Count);
                 foreach (var chapterIndex in claim.ChapterIndexes)
                 {
-                    builtCandidates.Add(await store.BuildCandidatesForChapterAsync(
+                    if (_chapterMaterialExtractor is not null &&
+                        await store.HasChapterSourceSegmentAsync(claim.RunId, chapterIndex, batchCancellation.Token))
+                    {
+                        continue;
+                    }
+
+                    legacyBuilds[chapterIndex] = await store.BuildCandidatesForChapterAsync(
                         claim.RunId,
                         chapterIndex,
-                        batchCancellation.Token));
+                        batchCancellation.Token);
                 }
 
-                tasks = builtCandidates
-                    .Select(candidateBuild => ProcessPreparedChapterAsync(
+                tasks = claim.ChapterIndexes
+                    .Select(chapterIndex => ProcessChapterAsync(
                         store,
                         claim.RunId,
-                        candidateBuild.ChapterIndex,
-                        candidateBuild.PendingCandidateCount,
-                        candidateBuild.AcceptedCandidateCount,
+                        chapterIndex,
+                        legacyBuilds.GetValueOrDefault(chapterIndex),
                         batchCancellation.Token))
                     .ToArray();
                 await Task.WhenAll(tasks);
@@ -276,6 +284,57 @@ public sealed class ReferenceMaterializationWorker : IAsyncDisposable
                 }
             }
         }
+    }
+
+    // 章节处理分派：有章节级文本分段（材料化入队补建）走"整章直接提取"，
+    // 否则回退 legacy 窗口切分 + 逐个打分管线。
+    private async Task ProcessChapterAsync(
+        SqliteReferenceMaterializationRunStore store,
+        string runId,
+        int chapterIndex,
+        ReferenceCandidateBuildResult? legacyBuild,
+        CancellationToken cancellationToken)
+    {
+        if (_chapterMaterialExtractor is not null &&
+            await store.HasChapterSourceSegmentAsync(runId, chapterIndex, cancellationToken))
+        {
+            var work = await store.BeginChapterExtractionAsync(runId, chapterIndex, cancellationToken);
+            if (work is not null)
+            {
+                var extraction = await _chapterMaterialExtractor.ExtractChapterMaterialsAsync(
+                    new ReferenceChapterExtractionRequest(
+                        work.AnchorId,
+                        work.ChapterIndex,
+                        work.ChapterTitle,
+                        work.ChapterText,
+                        work.Model),
+                    cancellationToken);
+                var persisted = await store.PersistChapterExtractionAsync(
+                    runId,
+                    chapterIndex,
+                    extraction.Materials,
+                    cancellationToken);
+                if (persisted.AcceptedCount == 0)
+                {
+                    await store.CompleteEmptyEmbeddingAsync(runId, chapterIndex, cancellationToken);
+                    return;
+                }
+
+                var embeddingWork = await store.ReadEmbeddingWorkItemAsync(runId, chapterIndex, cancellationToken);
+                var embeddings = await _embedder.EmbedAsync(embeddingWork.Request, cancellationToken);
+                await store.PersistEmbeddingsAsync(runId, chapterIndex, embeddings, cancellationToken);
+                return;
+            }
+        }
+
+        var built = legacyBuild ?? await store.BuildCandidatesForChapterAsync(runId, chapterIndex, cancellationToken);
+        await ProcessPreparedChapterAsync(
+            store,
+            runId,
+            built.ChapterIndex,
+            built.PendingCandidateCount,
+            built.AcceptedCandidateCount,
+            cancellationToken);
     }
 
     private async Task ProcessPreparedChapterAsync(

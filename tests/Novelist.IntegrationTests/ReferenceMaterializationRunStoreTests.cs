@@ -899,7 +899,7 @@ public sealed class ReferenceMaterializationRunStoreTests : IDisposable
         var options = CreateOptions();
         var repeated = string.Join(
             "\n\n",
-            Enumerable.Range(1, 12).Select(index => $"第{index}段的冲突在门外持续升级，她把钥匙攥进掌心，没有立刻回答。"));
+            Enumerable.Range(1, 40).Select(index => $"第{index}段的冲突在门外持续升级，她把钥匙攥进掌心，没有立刻回答。"));
         var anchor = await CreateAnchorAsync(
             options,
             chapterCount: 2,
@@ -927,7 +927,7 @@ public sealed class ReferenceMaterializationRunStoreTests : IDisposable
         var options = CreateOptions();
         var repeated = string.Join(
             "\n\n",
-            Enumerable.Range(1, 12).Select(index => $"第{index}段的冲突在门外持续升级，她把钥匙攥进掌心，没有立刻回答。"));
+            Enumerable.Range(1, 40).Select(index => $"第{index}段的冲突在门外持续升级，她把钥匙攥进掌心，没有立刻回答。"));
         var anchor = await CreateAnchorAsync(
             options,
             chapterCount: 2,
@@ -1120,11 +1120,12 @@ public sealed class ReferenceMaterializationRunStoreTests : IDisposable
                   AND node.chapter_index = $chapter_index
                 GROUP BY candidate.candidate_id
                 ORDER BY MIN(node.start_offset), MIN(node.end_offset), candidate.candidate_id
-                LIMIT 1 OFFSET 5;
+                LIMIT 1 OFFSET $skip;
                 """;
             select.Parameters.AddWithValue("$run_id", runId);
             select.Parameters.AddWithValue("$decision", ReferenceMaterializationCandidateDecisions.Pending);
             select.Parameters.AddWithValue("$chapter_index", chapterIndex);
+            select.Parameters.AddWithValue("$skip", ReferenceMaterializationChatCompletionQualifier.MaxCandidatesPerRequest);
             candidateId = (string?)await select.ExecuteScalarAsync(CancellationToken.None);
         }
 

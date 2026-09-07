@@ -95,6 +95,39 @@ public sealed partial class SqliteReferenceMaterializationService
             }
 
             var chapterText = normalized[contentStart..contentEnd];
+            var chapterNodeId = $"split-node:{splitProfileId}:c{chapterIndex}";
+            var chapterSegmentId = $"split-seg:{splitProfileId}:c{chapterIndex}";
+            var chapterHash = Sha256Hex(chapterText);
+            await UpsertCandidateNodeRowAsync(
+                nodeConnection,
+                transaction,
+                chapterNodeId,
+                anchorId,
+                chapterIndex,
+                "chapter",
+                contentStart,
+                contentEnd,
+                chapterText,
+                chapterHash,
+                now,
+                cancellationToken);
+            await UpsertCandidateSourceRowAsync(
+                nodeConnection,
+                transaction,
+                chapterSegmentId,
+                anchorId,
+                chapterIndex,
+                title,
+                "chapter",
+                chapterIndex,
+                parentSegmentId: null,
+                contentStart,
+                contentEnd,
+                chapterText,
+                chapterHash,
+                chapterNodeId,
+                now,
+                cancellationToken);
             var paragraphIndex = 0;
             foreach (var (paragraphText, paragraphStart, paragraphEnd) in SplitParagraphSpans(chapterText))
             {
