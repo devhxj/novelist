@@ -298,7 +298,7 @@ public sealed class ReferenceMaterializationWorker : IAsyncDisposable
                 var persisted = await store.PersistChapterExtractionAsync(
                     runId,
                     chapterIndex,
-                    extraction.Materials,
+                    extraction,
                     cancellationToken);
                 if (persisted.AcceptedCount == 0)
                 {

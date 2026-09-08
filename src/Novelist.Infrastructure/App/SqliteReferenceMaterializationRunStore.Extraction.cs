@@ -110,10 +110,11 @@ internal sealed partial class SqliteReferenceMaterializationRunStore
     public async ValueTask<ReferenceChapterExtractionPersistenceResult> PersistChapterExtractionAsync(
         string runId,
         int chapterIndex,
-        IReadOnlyList<ReferenceChapterExtractedMaterial> materials,
+        ReferenceChapterExtractionResult extraction,
         CancellationToken cancellationToken)
     {
-        ArgumentNullException.ThrowIfNull(materials);
+        ArgumentNullException.ThrowIfNull(extraction);
+        var materials = extraction.Materials;
         var normalizedRunId = NormalizeRunId(runId);
         if (chapterIndex <= 0)
         {
@@ -302,20 +303,22 @@ internal sealed partial class SqliteReferenceMaterializationRunStore
         {
             update.Transaction = transaction;
             update.CommandText = """
-                UPDATE reference_materialization_chapter_progress
-                SET status = $status, current_stage = $current_stage,
-                    candidate_count = $candidate_count, decided_count = $decided_count,
-                    accepted_count = $accepted_count, rejected_count = 0, review_count = $review_count,
-                    row_version = row_version + 1,
-                    started_at = COALESCE(started_at, $started_at)
-                WHERE run_id = $run_id AND chapter_index = $chapter_index;
-                """;
-            update.Parameters.AddWithValue("$status", ReferenceMaterializationChapterStates.Embedding);
-            update.Parameters.AddWithValue("$current_stage", ReferenceMaterializationChapterStates.Embedding);
-            update.Parameters.AddWithValue("$candidate_count", inserted);
-            update.Parameters.AddWithValue("$decided_count", inserted);
-            update.Parameters.AddWithValue("$accepted_count", accepted);
-            update.Parameters.AddWithValue("$review_count", review);
+            UPDATE reference_materialization_chapter_progress
+            SET status = $status, current_stage = $current_stage,
+                candidate_count = $candidate_count, decided_count = $decided_count,
+                accepted_count = $accepted_count, rejected_count = 0, review_count = $review_count,
+                model_call_count = MAX(model_call_count, $model_call_count),
+                row_version = row_version + 1,
+                started_at = COALESCE(started_at, $started_at)
+            WHERE run_id = $run_id AND chapter_index = $chapter_index;
+            """;
+        update.Parameters.AddWithValue("$status", ReferenceMaterializationChapterStates.Embedding);
+        update.Parameters.AddWithValue("$current_stage", ReferenceMaterializationChapterStates.Embedding);
+        update.Parameters.AddWithValue("$candidate_count", inserted);
+        update.Parameters.AddWithValue("$decided_count", inserted);
+        update.Parameters.AddWithValue("$accepted_count", accepted);
+        update.Parameters.AddWithValue("$review_count", review);
+        update.Parameters.AddWithValue("$model_call_count", extraction.ModelCallCount);
             update.Parameters.AddWithValue("$started_at", FormatTimestamp(DateTimeOffset.UtcNow));
             update.Parameters.AddWithValue("$run_id", normalizedRunId);
             update.Parameters.AddWithValue("$chapter_index", chapterIndex);

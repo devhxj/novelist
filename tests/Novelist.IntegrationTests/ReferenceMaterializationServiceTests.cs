@@ -110,7 +110,7 @@ public sealed class ReferenceMaterializationServiceTests : IDisposable
                 0.9,
                 []),
         };
-        var persisted = await store.PersistChapterExtractionAsync(created.RunId, chapterIndex: 1, materials, CancellationToken.None);
+        var persisted = await store.PersistChapterExtractionAsync(created.RunId, chapterIndex: 1, new ReferenceChapterExtractionResult(materials), CancellationToken.None);
         Assert.Equal(1, persisted.CandidateCount);
         Assert.Equal(1, persisted.AcceptedCount);
         Assert.Equal(1, persisted.SkippedCount);

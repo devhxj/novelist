@@ -25,7 +25,8 @@ public sealed record ReferenceChapterExtractedMaterial(
     IReadOnlyList<string> ReasonCodes);
 
 public sealed record ReferenceChapterExtractionResult(
-    IReadOnlyList<ReferenceChapterExtractedMaterial> Materials);
+    IReadOnlyList<ReferenceChapterExtractedMaterial> Materials,
+    int ModelCallCount = 1);
 
 public sealed record ReferenceChapterExtractionWorkItem(
     long AnchorId,
