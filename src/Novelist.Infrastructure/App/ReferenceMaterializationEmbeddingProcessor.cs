@@ -91,8 +91,10 @@ public sealed class ReferenceMaterializationEmbeddingProcessor : IReferenceMater
             !string.Equals(model.ModelId, options.ModelId, StringComparison.Ordinal) ||
             dimensions != model.Dimensions)
         {
+            // 配置漂移与"启动后模型变了"同类：旧 run 无法续跑，归入 retry_requires_new_run，
+            // 前端会引导（或自动）用当前配置新建 run，而不是让作者对着 health check 报错发呆。
             throw new ReferenceMaterializationException(
-                ReferenceMaterializationErrorCodes.EmbeddingHealthCheckFailed,
+                ReferenceMaterializationErrorCodes.RetryRequiresNewRun,
                 "The active embedding configuration no longer matches the frozen materialization model.");
         }
     }

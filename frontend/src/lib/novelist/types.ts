@@ -945,7 +945,7 @@ has_more: boolean
     novel_id: number
     anchor_id: number
     split_profile_id: string
-    chapter_batch_size?: 5 | 10
+    chapter_batch_size?: 1 | 5 | 10
   }
 
   export interface GetMaterializationStatusInput {
@@ -1026,7 +1026,7 @@ has_more: boolean
     split_profile_id: string
     generation_id: string
     status: string
-    chapter_batch_size: 5 | 10
+    chapter_batch_size: 1 | 5 | 10
     total_chapters: number
     processed_chapters: number
     total_chapter_batches: number

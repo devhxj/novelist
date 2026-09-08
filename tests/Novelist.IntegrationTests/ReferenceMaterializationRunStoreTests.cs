@@ -1037,6 +1037,77 @@ public sealed class ReferenceMaterializationRunStoreTests : IDisposable
     }
 
     [Fact]
+    public async Task WorkerResumesInterruptedEmbeddingChapterWithoutReExtracting()
+    {
+        var options = CreateOptions();
+        var anchor = await CreateRegisteredSourceAnchorAsync(options);
+        var splitService = new SqliteReferenceMaterializationService(options, new EmptyChapterSplitAnalyzer());
+        var profile = await splitService.PreviewChapterSplitAsync(
+            new PreviewReferenceChapterSplitPayload(anchor.NovelId, anchor.AnchorId, "第{number}章 {title}"),
+            CancellationToken.None);
+        await splitService.ConfirmChapterSplitAsync(
+            new ConfirmReferenceChapterSplitPayload(anchor.NovelId, anchor.AnchorId, profile.SplitProfileId),
+            CancellationToken.None);
+        var resolver = new ReferenceCorpusDatabasePathResolver(options);
+        var store = new SqliteReferenceMaterializationRunStore(resolver);
+        var preflight = new RecordingPreflight(new ReferenceMaterializationModelPreflightResult(
+            new ReferenceMaterializationModelIdentityPayload("llm", "model"),
+            new ReferenceMaterializationModelIdentityPayload("embedding", "model", 8)));
+        var service = new SqliteReferenceMaterializationService(options, new EmptyChapterSplitAnalyzer(), modelPreflight: preflight);
+        var run = await service.EnqueueMaterializationAsync(
+            new EnqueueReferenceMaterializationPayload(anchor.NovelId, anchor.AnchorId, profile.SplitProfileId, ChapterBatchSize: 1),
+            CancellationToken.None);
+
+        // 模拟中断点：提取已持久化（章节停在 embedding），嵌入未完成，批次租约已释放。
+        var claim = await store.ClaimCurrentBatchAsync(run.RunId, "resume-worker", TimeSpan.FromMinutes(1), CancellationToken.None);
+        Assert.NotNull(claim);
+        var work = await store.BeginChapterExtractionAsync(run.RunId, 1, CancellationToken.None);
+        Assert.NotNull(work);
+        await store.PersistChapterExtractionAsync(
+            run.RunId,
+            1,
+            new ReferenceChapterExtractionResult(
+            [
+                new ReferenceChapterExtractedMaterial(
+                    "他推门而入，屋里安静得能听见雨声。",
+                    ReferenceMaterializationCandidateTypes.Passage,
+                    new ReferenceMaterializationQualificationTags(["worldbuilding"], [], [], []),
+                    new ReferenceMaterializationQualityScores(0.9, 0.7, 0.8, 0.6, 0.7, 0.5),
+                    0.9,
+                    ["worldbuilding"]),
+            ]),
+            CancellationToken.None);
+        await store.ReleaseBatchLeaseAsync(claim, CancellationToken.None);
+
+        // 修复重试：不重新提取（extractor 保持零调用），从嵌入阶段续跑直至整本完成。
+        var extractor = new StubChapterMaterialExtractor([]);
+        var worker = new ReferenceMaterializationWorker(
+            resolver,
+            new FailingQualifier(),
+            new AcceptingEmbedder(),
+            new ReferenceMaterializationVectorIndexer(resolver, new RecordingVecProvisioner()),
+            workerId: "resume-worker-2",
+            chapterMaterialExtractor: extractor);
+        for (var pump = 0; pump < 5; pump++)
+        {
+            if (!await worker.ProcessRunOnceAsync(run.RunId, CancellationToken.None))
+            {
+                break;
+            }
+        }
+
+        var status = await store.GetAsync(run.RunId, CancellationToken.None);
+        Assert.NotNull(status);
+        Assert.True(
+            status.Status == ReferenceMaterializationRunStates.Completed,
+            $"run status={status.Status}, error={status.LastErrorCode}:{status.LastErrorMessage}");
+        // 第 1 章停在 embedding 中断后不重新提取，只提取仍处于 pending 的第 2 章。
+        var request = Assert.Single(extractor.Requests);
+        Assert.Equal(2, request.ChapterIndex);
+        Assert.True(status.VectorCount >= 1);
+    }
+
+    [Fact]
     public async Task ChapterExtractionPersistsVerbatimMaterialsAndSkipsHallucinatedOnes()
     {
         var options = CreateOptions();

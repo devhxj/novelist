@@ -117,7 +117,7 @@ export default function ReferenceCorpusWorkspace({
   const [run, setRun] = useState<reference.MaterializationStatus | null>(null)
   const [progress, setProgress] = useState<reference.MaterializationChapterProgress[]>([])
   const [candidates, setCandidates] = useState<reference.MaterializationCandidate[]>([])
-  const [batchSize, setBatchSize] = useState<5 | 10>(5)
+  const [batchSize, setBatchSize] = useState<1 | 5 | 10>(1)
   const [manualTemplate, setManualTemplate] = useState('')
   const [action, setAction] = useState<Action>(null)
   const [error, setError] = useState<{ message: string; detail: string | null } | null>(null)
@@ -749,13 +749,13 @@ export default function ReferenceCorpusWorkspace({
 
           {!run && activeProfile?.status === 'confirmed' && (
             <div className="mt-3 flex flex-wrap items-center gap-2" role="group" aria-label="章节批次大小">
-              <span className="text-xs text-muted-foreground">每批并行章节</span>
-              {([5, 10] as const).map((size) => (
+              <span className="text-xs text-muted-foreground">每批章节</span>
+              {([1, 5, 10] as const).map((size) => (
                 <button key={size} type="button" onClick={() => setBatchSize(size)} disabled={isBusy} aria-pressed={batchSize === size} className={`h-8 min-w-10 rounded-md border px-2.5 text-xs font-medium transition-colors ${batchSize === size ? 'border-primary bg-primary text-primary-foreground' : 'border-border text-foreground hover:bg-secondary'}`}>
-                  {size}
+                  {size === 1 ? '逐章' : size}
                 </button>
               ))}
-              <span className="text-[11px] text-muted-foreground">默认 5；选择 10 会以 10 章为一个并行批次。</span>
+              <span className="text-[11px] text-muted-foreground">默认逐章处理：一章失败只影响该章；5/10 会把多章并为一个批次，失败时整批停住。</span>
             </div>
           )}
 

@@ -71,6 +71,16 @@ internal sealed partial class SqliteReferenceMaterializationRunStore
             return null;
         }
 
+        // 提取结果已持久化的章节（embedding/indexing）不能也不需要重新提取：
+        // embedding→building 是非法迁移，直接抛异常会把修复路径锁死；返回 null
+        // 让 worker 从嵌入阶段恢复。
+        if (snapshot.Status is ReferenceMaterializationChapterStates.Embedding or
+            ReferenceMaterializationChapterStates.Indexing)
+        {
+            await transaction.CommitAsync(cancellationToken);
+            return null;
+        }
+
         if (snapshot.Status != ReferenceMaterializationChapterStates.LlmQualifying)
         {
             ReferenceMaterializationChapterStateMachine.EnsureCanTransition(
@@ -105,6 +115,52 @@ internal sealed partial class SqliteReferenceMaterializationRunStore
             snapshot.ContentStart,
             snapshot.ContentEnd,
             model);
+    }
+
+    public async ValueTask<string?> ReadChapterStageAsync(
+        string runId,
+        int chapterIndex,
+        CancellationToken cancellationToken)
+    {
+        var normalizedRunId = NormalizeRunId(runId);
+        if (chapterIndex <= 0)
+        {
+            throw new ArgumentOutOfRangeException(nameof(chapterIndex), "Chapter index must be positive.");
+        }
+
+        var databasePath = await EnsureSchemaAsync(cancellationToken);
+        await using var connection = await OpenConnectionAsync(databasePath, cancellationToken);
+        await using var command = connection.CreateCommand();
+        command.CommandText = """
+            SELECT status FROM reference_materialization_chapter_progress
+            WHERE run_id = $run_id AND chapter_index = $chapter_index;
+            """;
+        command.Parameters.AddWithValue("$run_id", normalizedRunId);
+        command.Parameters.AddWithValue("$chapter_index", chapterIndex);
+        return (string?)await command.ExecuteScalarAsync(cancellationToken);
+    }
+
+    public async ValueTask<int> ReadChapterAcceptedCountAsync(
+        string runId,
+        int chapterIndex,
+        CancellationToken cancellationToken)
+    {
+        var normalizedRunId = NormalizeRunId(runId);
+        if (chapterIndex <= 0)
+        {
+            throw new ArgumentOutOfRangeException(nameof(chapterIndex), "Chapter index must be positive.");
+        }
+
+        var databasePath = await EnsureSchemaAsync(cancellationToken);
+        await using var connection = await OpenConnectionAsync(databasePath, cancellationToken);
+        await using var command = connection.CreateCommand();
+        command.CommandText = """
+            SELECT accepted_count FROM reference_materialization_chapter_progress
+            WHERE run_id = $run_id AND chapter_index = $chapter_index;
+            """;
+        command.Parameters.AddWithValue("$run_id", normalizedRunId);
+        command.Parameters.AddWithValue("$chapter_index", chapterIndex);
+        return Convert.ToInt32(await command.ExecuteScalarAsync(cancellationToken), System.Globalization.CultureInfo.InvariantCulture);
     }
 
     public async ValueTask<ReferenceChapterExtractionPersistenceResult> PersistChapterExtractionAsync(

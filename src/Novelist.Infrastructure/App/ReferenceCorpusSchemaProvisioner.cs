@@ -10,6 +10,7 @@ internal static class ReferenceCorpusSchemaProvisioner
     {
         await RebuildStaleChapterProgressTableAsync(connection, cancellationToken);
         await RebuildLegacyMaterializationRunsTableAsync(connection, cancellationToken);
+        await RelaxMaterializationBatchSizeConstraintAsync(connection, cancellationToken);
         await using var command = connection.CreateCommand();
         command.CommandText = """
             CREATE TABLE IF NOT EXISTS reference_anchors (
@@ -97,7 +98,7 @@ internal static class ReferenceCorpusSchemaProvisioner
               embedding_model_id TEXT NOT NULL,
               embedding_dimensions INTEGER NOT NULL CHECK(embedding_dimensions > 0),
               status TEXT NOT NULL,
-              chapter_batch_size INTEGER NOT NULL CHECK(chapter_batch_size IN (5, 10)),
+              chapter_batch_size INTEGER NOT NULL CHECK(chapter_batch_size IN (1, 5, 10)),
               total_chapters INTEGER NOT NULL DEFAULT 0 CHECK(total_chapters >= 0),
               processed_chapters INTEGER NOT NULL DEFAULT 0 CHECK(processed_chapters >= 0),
               total_chapter_batches INTEGER NOT NULL DEFAULT 0 CHECK(total_chapter_batches >= 0),
@@ -814,7 +815,7 @@ await command.ExecuteNonQueryAsync(cancellationToken);
               embedding_model_id TEXT NOT NULL,
               embedding_dimensions INTEGER NOT NULL CHECK(embedding_dimensions > 0),
               status TEXT NOT NULL,
-              chapter_batch_size INTEGER NOT NULL CHECK(chapter_batch_size IN (5, 10)),
+              chapter_batch_size INTEGER NOT NULL CHECK(chapter_batch_size IN (1, 5, 10)),
               total_chapters INTEGER NOT NULL DEFAULT 0 CHECK(total_chapters >= 0),
               processed_chapters INTEGER NOT NULL DEFAULT 0 CHECK(processed_chapters >= 0),
               total_chapter_batches INTEGER NOT NULL DEFAULT 0 CHECK(total_chapter_batches >= 0),
@@ -856,6 +857,123 @@ await command.ExecuteNonQueryAsync(cancellationToken);
  backupTable,
  "runs-rebuild",
  "pre-v6 reference_materialization_runs shape cannot be additively upgraded (legacy NOT NULL columns without defaults block v6 inserts); table renamed copy-first, legacy rows carried over with v6 defaults, and the table recreated with the v6 shape.",
+ cancellationToken);
+ }
+
+ // v7 挨章处理：runs 表的 chapter_batch_size CHECK 从 (5, 10) 放宽为 (1, 5, 10)。
+ // CHECK 属于表定义，ADD COLUMN 无法修改——copy-first：旧表改名备份、原样回填全部行、
+ // 按新约束重建，并写 manifest。行数据逐字保留，不引入默认值。
+ private static async ValueTask RelaxMaterializationBatchSizeConstraintAsync(
+ SqliteConnection connection,
+ CancellationToken cancellationToken)
+ {
+ string? createSql = null;
+ await using (var read = connection.CreateCommand())
+ {
+ read.CommandText = "SELECT sql FROM sqlite_master WHERE type='table' AND name='reference_materialization_runs';";
+ createSql = await read.ExecuteScalarAsync(cancellationToken) as string;
+ }
+
+ if (createSql is null ||
+ !createSql.Contains("chapter_batch_size IN (5, 10)", StringComparison.Ordinal))
+ {
+ return;
+ }
+
+ var suffix = $"{DateTimeOffset.UtcNow:yyyyMMddHHmmss}_{Guid.NewGuid():N}";
+ var backupTable = $"reference_materialization_runs_legacy_{suffix}";
+ var foreignKeysEnabled = await ScalarPragmaAsync(connection, "PRAGMA foreign_keys;", cancellationToken);
+ await using (var rename = connection.CreateCommand())
+ {
+ rename.CommandText = $"""
+            PRAGMA foreign_keys=OFF;
+            PRAGMA legacy_alter_table=ON;
+            ALTER TABLE reference_materialization_runs RENAME TO {backupTable};
+            PRAGMA legacy_alter_table=OFF;
+            """;
+ await rename.ExecuteNonQueryAsync(cancellationToken);
+ }
+
+ await using (var dropIndexes = connection.CreateCommand())
+ {
+ dropIndexes.CommandText = """
+            DROP INDEX IF EXISTS ux_reference_materialization_runs_generation;
+            DROP INDEX IF EXISTS idx_reference_materialization_runs_anchor_status;
+            """;
+ await dropIndexes.ExecuteNonQueryAsync(cancellationToken);
+ }
+
+ await using (var create = connection.CreateCommand())
+ {
+ create.CommandText = """
+            CREATE TABLE reference_materialization_runs (
+              run_id TEXT PRIMARY KEY,
+              anchor_id INTEGER NOT NULL,
+              split_profile_id TEXT NOT NULL,
+              generation_id TEXT NOT NULL,
+              policy_version TEXT NOT NULL,
+              candidate_version TEXT NOT NULL,
+              qualifier_version TEXT NOT NULL,
+              model_provider TEXT NOT NULL,
+              model_id TEXT NOT NULL,
+              embedding_provider TEXT NOT NULL,
+              embedding_model_id TEXT NOT NULL,
+              embedding_dimensions INTEGER NOT NULL CHECK(embedding_dimensions > 0),
+              status TEXT NOT NULL,
+              chapter_batch_size INTEGER NOT NULL CHECK(chapter_batch_size IN (1, 5, 10)),
+              total_chapters INTEGER NOT NULL DEFAULT 0 CHECK(total_chapters >= 0),
+              processed_chapters INTEGER NOT NULL DEFAULT 0 CHECK(processed_chapters >= 0),
+              total_chapter_batches INTEGER NOT NULL DEFAULT 0 CHECK(total_chapter_batches >= 0),
+              completed_chapter_batches INTEGER NOT NULL DEFAULT 0 CHECK(completed_chapter_batches >= 0),
+              current_batch_index INTEGER,
+              current_batch_start_chapter INTEGER,
+              current_batch_end_chapter INTEGER,
+              candidate_count INTEGER NOT NULL DEFAULT 0 CHECK(candidate_count >= 0),
+              accepted_count INTEGER NOT NULL DEFAULT 0 CHECK(accepted_count >= 0),
+              rejected_count INTEGER NOT NULL DEFAULT 0 CHECK(rejected_count >= 0),
+              review_count INTEGER NOT NULL DEFAULT 0 CHECK(review_count >= 0),
+              vector_count INTEGER NOT NULL DEFAULT 0 CHECK(vector_count >= 0),
+              tokens_spent INTEGER NOT NULL DEFAULT 0 CHECK(tokens_spent >= 0),
+              last_error_code TEXT,
+              last_error_message TEXT,
+              started_at TEXT NOT NULL,
+              completed_at TEXT,
+              activated_at TEXT,
+              FOREIGN KEY(anchor_id) REFERENCES reference_anchors(anchor_id) ON DELETE CASCADE,
+              FOREIGN KEY(split_profile_id) REFERENCES reference_chapter_split_profiles(split_profile_id) ON DELETE RESTRICT
+            );
+            """;
+ await create.ExecuteNonQueryAsync(cancellationToken);
+ }
+
+ // 回填在外键恢复前执行（同 v6 重建：FK 开启时 prepare 阶段解析父表会误报缺失）。
+ await using (var copy = connection.CreateCommand())
+ {
+ copy.CommandText = $"""
+            INSERT INTO reference_materialization_runs
+            SELECT run_id, anchor_id, split_profile_id, generation_id, policy_version, candidate_version,
+                   qualifier_version, model_provider, model_id, embedding_provider, embedding_model_id,
+                   embedding_dimensions, status, chapter_batch_size, total_chapters, processed_chapters,
+                   total_chapter_batches, completed_chapter_batches, current_batch_index,
+                   current_batch_start_chapter, current_batch_end_chapter, candidate_count, accepted_count,
+                   rejected_count, review_count, vector_count, tokens_spent, last_error_code,
+                   last_error_message, started_at, completed_at, activated_at
+            FROM {backupTable};
+            """;
+ await copy.ExecuteNonQueryAsync(cancellationToken);
+ }
+
+ await using (var restore = connection.CreateCommand())
+ {
+ restore.CommandText = $"PRAGMA foreign_keys={(foreignKeysEnabled != 0 ? "ON" : "OFF")};";
+ await restore.ExecuteNonQueryAsync(cancellationToken);
+ }
+
+ await WriteRebuildManifestAsync(
+ connection,
+ backupTable,
+ "runs-rebuild",
+ "chapter_batch_size CHECK relaxed from (5, 10) to (1, 5, 10) for chapter-wise processing; table renamed copy-first, rows carried over unchanged, and the table recreated.",
  cancellationToken);
  }
 

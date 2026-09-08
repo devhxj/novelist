@@ -311,6 +311,40 @@ public sealed class ReferenceMaterializationWorker : IAsyncDisposable
                 await store.PersistEmbeddingsAsync(runId, chapterIndex, embeddings, cancellationToken);
                 return;
             }
+
+            // work 为 null 且章节分段存在：提取已持久化（embedding/indexing 阶段）。
+            // 崩溃/失败后修复从这里恢复——embedding 重做嵌入，indexing 等批次索引器收尾；
+            // 不再回到 legacy 窗口管线重新提取。
+            var stage = await store.ReadChapterStageAsync(runId, chapterIndex, cancellationToken);
+            if (stage == ReferenceMaterializationChapterStates.Embedding)
+            {
+                try
+                {
+                    var resumeWork = await store.ReadEmbeddingWorkItemAsync(runId, chapterIndex, cancellationToken);
+                    var resumeEmbeddings = await _embedder.EmbedAsync(resumeWork.Request, cancellationToken);
+                    await store.PersistEmbeddingsAsync(runId, chapterIndex, resumeEmbeddings, cancellationToken);
+                }
+                catch (InvalidOperationException)
+                {
+                    // 无可嵌入候选（accepted=0）的 embedding 章节走空章收尾；其他 IOE 原样上抛。
+                    if (await store.ReadChapterStageAsync(runId, chapterIndex, cancellationToken) ==
+                            ReferenceMaterializationChapterStates.Embedding &&
+                        await store.ReadChapterAcceptedCountAsync(runId, chapterIndex, cancellationToken) == 0)
+                    {
+                        await store.CompleteEmptyEmbeddingAsync(runId, chapterIndex, cancellationToken);
+                        return;
+                    }
+
+                    throw;
+                }
+
+                return;
+            }
+
+            if (stage == ReferenceMaterializationChapterStates.Indexing)
+            {
+                return;
+            }
         }
 
         var built = legacyBuild ?? await store.BuildCandidatesForChapterAsync(runId, chapterIndex, cancellationToken);

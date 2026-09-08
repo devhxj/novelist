@@ -22,14 +22,16 @@ public static class ReferenceChapterSplitProfileStates
 
 public static class ReferenceMaterializationBatchSizes
 {
-    public const int Default = 5;
-    public static IReadOnlyList<int> All { get; } = [5, 10];
+    // 挨章处理：默认每批 1 章，一章失败只影响自身，不连坐其他章节。
+    public const int ChapterWise = 1;
+    public const int Default = ChapterWise;
+    public static IReadOnlyList<int> All { get; } = [ChapterWise, 5, 10];
 
     public static void Validate(int value)
     {
         if (!All.Contains(value))
         {
-            throw new ArgumentOutOfRangeException(nameof(value), value, "Chapter batch size must be 5 or 10.");
+            throw new ArgumentOutOfRangeException(nameof(value), value, "Chapter batch size must be 1, 5, or 10.");
         }
     }
 }
