@@ -447,12 +447,14 @@ internal sealed partial class SqliteReferenceMaterializationRunStore
                     row_version = row_version + 1
                 WHERE run_id = $run_id
                   AND batch_index = $batch_index
-                  AND status <> $completed;
+                  AND status IN ($pending, $building, $qualifying, $failed);
                 """;
             chapters.Parameters.AddWithValue("$pending", ReferenceMaterializationChapterStates.Pending);
+            chapters.Parameters.AddWithValue("$building", ReferenceMaterializationChapterStates.BuildingCandidates);
+            chapters.Parameters.AddWithValue("$qualifying", ReferenceMaterializationChapterStates.LlmQualifying);
+            chapters.Parameters.AddWithValue("$failed", ReferenceMaterializationChapterStates.Failed);
             chapters.Parameters.AddWithValue("$run_id", runId);
             chapters.Parameters.AddWithValue("$batch_index", batchIndex);
-            chapters.Parameters.AddWithValue("$completed", ReferenceMaterializationChapterStates.Completed);
             await chapters.ExecuteNonQueryAsync(cancellationToken);
         }
 
@@ -602,6 +604,8 @@ internal sealed partial class SqliteReferenceMaterializationRunStore
         return await command.ExecuteScalarAsync(cancellationToken) is not null;
     }
 
+    // 回滚范围内的候选：显式重试打回 failed 章节、租约回收打回中断（pending/building/qualifying）
+    // 章节；embedding/indexing 章节已持久化提取成果，候选与向量原样保留供恢复续跑。
     private const string CurrentBatchCandidateIdsSql = """
         SELECT DISTINCT candidate.candidate_id
         FROM reference_material_candidates candidate
@@ -611,6 +615,7 @@ internal sealed partial class SqliteReferenceMaterializationRunStore
         JOIN reference_materialization_chapter_progress progress
           ON progress.run_id = run.run_id
          AND progress.batch_index = $batch_index
+         AND progress.status IN ('pending', 'building_candidates', 'llm_qualifying', 'failed')
         JOIN reference_chapter_split_boundaries boundary
           ON boundary.split_profile_id = run.split_profile_id
          AND boundary.chapter_index = progress.chapter_index

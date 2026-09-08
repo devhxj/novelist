@@ -735,6 +735,89 @@ public sealed class ReferenceMaterializationRunStoreTests : IDisposable
     }
 
     [Fact]
+    public async Task ExpiredLeaseReclaimKeepsPersistedExtractionOfEmbeddingChapter()
+    {
+        var options = CreateOptions();
+        var anchor = await CreateRegisteredSourceAnchorAsync(options);
+        var splitService = new SqliteReferenceMaterializationService(options, new EmptyChapterSplitAnalyzer());
+        var profile = await splitService.PreviewChapterSplitAsync(
+            new PreviewReferenceChapterSplitPayload(anchor.NovelId, anchor.AnchorId, "第{number}章 {title}"),
+            CancellationToken.None);
+        await splitService.ConfirmChapterSplitAsync(
+            new ConfirmReferenceChapterSplitPayload(anchor.NovelId, anchor.AnchorId, profile.SplitProfileId),
+            CancellationToken.None);
+        var resolver = new ReferenceCorpusDatabasePathResolver(options);
+        var store = new SqliteReferenceMaterializationRunStore(resolver);
+        var preflight = new RecordingPreflight(new ReferenceMaterializationModelPreflightResult(
+            new ReferenceMaterializationModelIdentityPayload("llm", "model"),
+            new ReferenceMaterializationModelIdentityPayload("embedding", "model", 8)));
+        var service = new SqliteReferenceMaterializationService(options, new EmptyChapterSplitAnalyzer(), modelPreflight: preflight);
+        var run = await service.EnqueueMaterializationAsync(
+            new EnqueueReferenceMaterializationPayload(anchor.NovelId, anchor.AnchorId, profile.SplitProfileId),
+            CancellationToken.None);
+
+        // 中断点：第 1 章提取已持久化（embedding 阶段），租约随后过期。
+        var claim = await store.ClaimCurrentBatchAsync(run.RunId, "interrupted-owner", TimeSpan.FromMinutes(1), CancellationToken.None);
+        Assert.NotNull(claim);
+        var work = await store.BeginChapterExtractionAsync(run.RunId, 1, CancellationToken.None);
+        Assert.NotNull(work);
+        await store.PersistChapterExtractionAsync(
+            run.RunId,
+            1,
+            new ReferenceChapterExtractionResult(
+            [
+                new ReferenceChapterExtractedMaterial(
+                    "他推门而入，屋里安静得能听见雨声。",
+                    ReferenceMaterializationCandidateTypes.Passage,
+                    new ReferenceMaterializationQualificationTags(["worldbuilding"], [], [], []),
+                    new ReferenceMaterializationQualityScores(0.9, 0.7, 0.8, 0.6, 0.7, 0.5),
+                    0.9,
+                    ["worldbuilding"]),
+            ]),
+            CancellationToken.None);
+        await MarkLeaseExpiredAsync(options, run.RunId);
+
+        // 回收：embedding 章节的提取成果（候选 + 状态）必须原样保留，不再打回 pending 重新提取。
+        var reclaimed = await store.ClaimCurrentBatchAsync(run.RunId, "recovery-owner", TimeSpan.FromMinutes(1), CancellationToken.None);
+        Assert.NotNull(reclaimed);
+        var chapter1 = await store.ListChapterProgressAsync(run.RunId, 1, 10, CancellationToken.None);
+        var embeddingChapter = Assert.Single(chapter1.Items, item => item.ChapterIndex == 1);
+        Assert.True(
+            embeddingChapter.Status == ReferenceMaterializationChapterStates.Embedding,
+            $"c1 status after reclaim: {embeddingChapter.Status}");
+        var c1Candidates = await splitService.ListMaterializationCandidatesAsync(
+            new ListReferenceMaterializationCandidatesPayload(
+                anchor.NovelId, anchor.AnchorId, run.RunId, "accepted"), CancellationToken.None);
+        Assert.NotEmpty(c1Candidates.Items);
+        Assert.Equal(1, embeddingChapter.CandidateCount);
+        Assert.Equal(1, embeddingChapter.AcceptedCount);
+        await store.ReleaseBatchLeaseAsync(reclaimed, CancellationToken.None);
+
+        // 恢复 worker 从嵌入续跑（extractor 不被再次调用），整本完成。
+        var extractor = new StubChapterMaterialExtractor([]);
+        var worker = new ReferenceMaterializationWorker(
+            resolver,
+            new FailingQualifier(),
+            new AcceptingEmbedder(),
+            new ReferenceMaterializationVectorIndexer(resolver, new RecordingVecProvisioner()),
+            workerId: "lease-recovery-worker",
+            chapterMaterialExtractor: extractor);
+        await DrainRunAsync(worker, run.RunId, maxPumps: 12);
+        var status = await store.GetAsync(run.RunId, CancellationToken.None);
+        Assert.True(
+            status?.Status == ReferenceMaterializationRunStates.Completed,
+            $"run status={status?.Status}, error={status?.LastErrorCode}:{status?.LastErrorMessage}; chapters=" +
+            string.Join(";", (await store.ListChapterProgressAsync(run.RunId, 1, 10, CancellationToken.None))
+                .Items.Select(item => $"c{item.ChapterIndex}:{item.Status}:{item.CandidateCount}/{item.AcceptedCount}:{item.VectorCount}")));
+        var allChapters = await store.ListChapterProgressAsync(run.RunId, 1, 10, CancellationToken.None);
+        Assert.True(
+            status?.Status == ReferenceMaterializationRunStates.Completed,
+            $"run status={status?.Status}, error={status?.LastErrorCode}:{status?.LastErrorMessage}; chapters=" +
+            string.Join(";", allChapters.Items.Select(item => $"c{item.ChapterIndex}:{item.Status}:{item.CandidateCount}/{item.AcceptedCount}:{item.VectorCount}")));
+        Assert.DoesNotContain(extractor.Requests, request => request.ChapterIndex == 1);
+    }
+
+    [Fact]
     public async Task ClaimReclaimsAnExpiredLeaseAndResetsOnlyTheCurrentIncompleteBatch()
     {
         var options = CreateOptions();
@@ -789,7 +872,6 @@ public sealed class ReferenceMaterializationRunStoreTests : IDisposable
         });
         var later = Assert.Single(progress.Items, item => item.BatchIndex == 1);
         Assert.Equal(ReferenceMaterializationChapterStates.Pending, later.Status);
-        await store.ReleaseBatchLeaseAsync(reclaimed, CancellationToken.None);
     }
 
     [Fact]

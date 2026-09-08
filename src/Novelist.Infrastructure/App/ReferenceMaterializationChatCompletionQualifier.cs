@@ -283,17 +283,26 @@ public sealed class ReferenceMaterializationChatCompletionQualifier : IReference
 
                 toolCall = item.ToolCall;
             }
+
+            // 间隔从上一次供应商交互"结束"起算：长流式响应期间供应商仍在承压。
+            // 只在真实交互后记账（含失败）；外部取消/停机不算完成，不占用下一个间隔。
+            _lastRequestCompletedAt = DateTimeOffset.UtcNow;
         }
         catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
         {
+            _lastRequestCompletedAt = DateTimeOffset.UtcNow;
             throw new ReferenceMaterializationException(
                 ReferenceMaterializationErrorCodes.LlmRequestFailed,
                 $"单个模型请求超过 {(int)RequestDeadline.TotalMinutes} 分钟未完成，已中止；请重试或降低推理力度。");
         }
-        finally
+        catch (Exception exception) when (exception is not OperationCanceledException)
         {
-            // 间隔从上一次请求"完成"起算：长流式响应期间供应商仍在承压。
+            // 供应商已经收到并拒绝了这次请求（含限流）：按已承压记账，
+            // 避免失败后立即重试撞进冷却窗口。包装为材料化错误继续上抛。
             _lastRequestCompletedAt = DateTimeOffset.UtcNow;
+            throw new ReferenceMaterializationException(
+                ReferenceMaterializationErrorCodes.LlmRequestFailed,
+                $"模型请求失败: {exception.Message}");
         }
 
         return toolCall
