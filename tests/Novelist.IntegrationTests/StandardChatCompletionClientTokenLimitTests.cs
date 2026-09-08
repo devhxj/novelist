@@ -158,6 +158,23 @@ public sealed class StandardChatCompletionClientTokenLimitTests
     }
 
     [Fact]
+    public async Task StreamChatAsyncTreatsLengthIncompleteReasonAsBudgetExhaustion()
+    {
+        var handler = new RecordingHandler(responsesStream: """
+            {"type":"response.created","response":{}}
+            {"type":"response.incomplete","response":{"status":"incomplete","incomplete_details":{"reason":"length"}}}
+            """);
+        var client = CreateClient(responsesEndpoint: true, 2048, handler);
+
+        var exception = await Assert.ThrowsAsync<BridgeRequestException>(async () =>
+            await DrainAsync(client.StreamChatAsync(CreateRequest(640), CancellationToken.None)));
+
+        // DeepSeek 风格的 Responses 端点用 chat-completions 的 "length" 表示预算耗尽。
+        Assert.Contains("输出预算", exception.Message, StringComparison.Ordinal);
+        Assert.Contains("length", exception.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task StreamChatAsyncSurfacesFailureEventForResponsesEndpoint()
     {
         var handler = new RecordingHandler(responsesStream: """

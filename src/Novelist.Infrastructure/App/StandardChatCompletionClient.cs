@@ -793,8 +793,10 @@ public sealed class StandardChatCompletionClient : IChatCompletionClient
                     }
 
                     yield return AttemptItem.Fail(ProviderError(
-                        incompleteReason == "max_output_tokens"
-                            ? $"模型输出预算耗尽（推理过长，已用 {incompleteReason}）；请降低推理力度或减小输入后重试。"
+                        // DeepSeek 风格的 Responses 端点用 chat-completions 的 "length"
+                        // 表示预算耗尽，与 OpenAI 的 "max_output_tokens" 同义。
+                        incompleteReason is "max_output_tokens" or "length"
+                            ? $"模型输出预算耗尽（{incompleteReason}）；请降低推理力度或减小输出需求后重试。"
                             : $"模型响应不完整（{incompleteReason}），请重试。",
                         retryable: false));
                     break;
