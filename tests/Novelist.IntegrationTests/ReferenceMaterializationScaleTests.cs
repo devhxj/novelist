@@ -36,22 +36,19 @@ public sealed class ReferenceMaterializationScaleTests : IDisposable
 
         // Exclude one-time JIT and index initialization from the steady-state fake-provider throughput gate.
         var warmup = await store.CreateAsync(
-            CreateSeed(sources[0].Anchor.AnchorId, sources[0].Profile.SplitProfileId, batchSize: 5),
+            CreateSeed(sources[0].Anchor.AnchorId, sources[0].Profile.SplitProfileId),
             CancellationToken.None);
         await DrainRunAsync(worker, store, warmup.RunId);
         var stopwatch = Stopwatch.StartNew();
 
         var schedule = new[]
         {
-            (Source: sources[0], BatchSize: 5),
-            (Source: sources[1], BatchSize: 5),
-            (Source: sources[0], BatchSize: 5),
-            (Source: sources[1], BatchSize: 10)
+            sources[0], sources[1], sources[0], sources[1]
         };
-        foreach (var work in schedule)
+        foreach (var source in schedule)
         {
             var run = await store.CreateAsync(
-                CreateSeed(work.Source.Anchor.AnchorId, work.Source.Profile.SplitProfileId, work.BatchSize),
+                CreateSeed(source.Anchor.AnchorId, source.Profile.SplitProfileId),
                 CancellationToken.None);
             runs.Add(await DrainRunAsync(worker, store, run.RunId));
         }
@@ -60,8 +57,7 @@ public sealed class ReferenceMaterializationScaleTests : IDisposable
         var processedCandidates = runs.Sum(run => run.CandidateCount);
         var throughput = processedCandidates / Math.Max(stopwatch.Elapsed.TotalSeconds, 0.001);
         Assert.Equal(4, runs.Count);
-        Assert.Equal(3, runs.Count(run => run.ChapterBatchSize == 5));
-        Assert.Equal(1, runs.Count(run => run.ChapterBatchSize == 10));
+
         Assert.All(runs, run =>
         {
             Assert.Equal(ReferenceMaterializationRunStates.Completed, run.Status);
@@ -152,7 +148,7 @@ public sealed class ReferenceMaterializationScaleTests : IDisposable
         return builder.ToString();
     }
 
-    private static ReferenceMaterializationRunSeed CreateSeed(long anchorId, string profileId, int batchSize) =>
+    private static ReferenceMaterializationRunSeed CreateSeed(long anchorId, string profileId) =>
         new(
             Guid.NewGuid().ToString("N"),
             anchorId,
@@ -163,7 +159,6 @@ public sealed class ReferenceMaterializationScaleTests : IDisposable
             ReferenceMaterializationChatCompletionQualifier.SchemaVersion,
             new ReferenceMaterializationModelIdentityPayload("scale-llm", "scale-llm-model"),
             new ReferenceMaterializationModelIdentityPayload("scale-embedding", "scale-embedding-model", 8),
-            batchSize,
             DateTimeOffset.UtcNow);
 
     private static async ValueTask<ReferenceMaterializationStatusPayload> DrainRunAsync(

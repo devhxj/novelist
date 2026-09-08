@@ -58,11 +58,8 @@ public sealed class ReferenceMaterializationStateMachineTests
     }
 
     [Fact]
-    public void EnqueueContractExposesTheChapterWiseFiveOrTenChapterBatchChoice()
+    public void EnqueueContractIsChapterWiseOnly()
     {
-        Assert.Equal([1, 5, 10], ReferenceMaterializationBatchSizes.All);
         Assert.Equal(1, ReferenceMaterializationBatchSizes.Default);
-        Assert.Throws<ArgumentOutOfRangeException>(() =>
-            ReferenceMaterializationBatchSizes.Validate(7));
     }
 }

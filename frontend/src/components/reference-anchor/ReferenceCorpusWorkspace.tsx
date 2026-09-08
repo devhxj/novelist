@@ -117,7 +117,6 @@ export default function ReferenceCorpusWorkspace({
   const [run, setRun] = useState<reference.MaterializationStatus | null>(null)
   const [progress, setProgress] = useState<reference.MaterializationChapterProgress[]>([])
   const [candidates, setCandidates] = useState<reference.MaterializationCandidate[]>([])
-  const [batchSize, setBatchSize] = useState<1 | 5 | 10>(1)
   const [manualTemplate, setManualTemplate] = useState('')
   const [action, setAction] = useState<Action>(null)
   const [error, setError] = useState<{ message: string; detail: string | null } | null>(null)
@@ -455,7 +454,6 @@ export default function ReferenceCorpusWorkspace({
         novel_id: novelId,
         anchor_id: selectedAnchor.anchor_id,
         split_profile_id: activeProfile.split_profile_id,
-        chapter_batch_size: batchSize,
       })
       setRun(status)
     } catch (err) {
@@ -486,7 +484,6 @@ export default function ReferenceCorpusWorkspace({
             novel_id: novelId,
             anchor_id: selectedAnchor.anchor_id,
             split_profile_id: run.split_profile_id,
-            chapter_batch_size: batchSize,
           })
           setRun(status)
         } catch (enqueueErr) {
@@ -712,7 +709,7 @@ export default function ReferenceCorpusWorkspace({
                 <p className="mt-1 text-xs leading-5 text-muted-foreground">
                   {run
                     ? `状态：${taxonomyLabel(RUN_STATUS_LABELS, run.status)} · ${formatCount(run.processed_chapters)} / ${formatCount(run.total_chapters)} 章节`
-                    : '确认章节边界后，按固定批次依次处理；批内可以并行，批次之间保持顺序。'}
+                    : '确认章节边界后逐章处理：一次一章、依次推进；失败只影响所在章节，修复后可续跑。'}
                 </p>
               </div>
             </div>
@@ -747,18 +744,6 @@ export default function ReferenceCorpusWorkspace({
             )}
           </div>
 
-          {!run && activeProfile?.status === 'confirmed' && (
-            <div className="mt-3 flex flex-wrap items-center gap-2" role="group" aria-label="章节批次大小">
-              <span className="text-xs text-muted-foreground">每批章节</span>
-              {([1, 5, 10] as const).map((size) => (
-                <button key={size} type="button" onClick={() => setBatchSize(size)} disabled={isBusy} aria-pressed={batchSize === size} className={`h-8 min-w-10 rounded-md border px-2.5 text-xs font-medium transition-colors ${batchSize === size ? 'border-primary bg-primary text-primary-foreground' : 'border-border text-foreground hover:bg-secondary'}`}>
-                  {size === 1 ? '逐章' : size}
-                </button>
-              ))}
-              <span className="text-[11px] text-muted-foreground">默认逐章处理：一章失败只影响该章；5/10 会把多章并为一个批次，失败时整批停住。</span>
-            </div>
-          )}
-
           {run && (
             <>
               <dl className="mt-3 grid grid-cols-2 divide-x divide-y divide-border border border-border sm:grid-cols-4" aria-label="材料化漏斗">
@@ -776,7 +761,6 @@ export default function ReferenceCorpusWorkspace({
               </dl>
               <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-1 text-[11px] text-muted-foreground">
                 <span className={runTone(run.status)}>运行 {run.status}</span>
-                <span>批次 {formatCount(run.completed_chapter_batches)} / {formatCount(run.total_chapter_batches)} · 每批 {run.chapter_batch_size} 章</span>
                 <span>模型调用 {formatCount(run.model_call_count)} 次{runDurationText(run) ? ` · 耗时 ${runDurationText(run)}` : ''}</span>
                 <span>{run.vector_index_healthy ? '向量索引完整' : '向量索引未就绪'}</span>
                 <span>LLM {run.llm.provider}/{run.llm.model_id}</span>

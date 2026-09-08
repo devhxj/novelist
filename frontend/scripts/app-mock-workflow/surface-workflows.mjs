@@ -1164,7 +1164,7 @@ export async function verifyReferenceWorkspaceWorkflow(page) {
   const confirmCount = await bridgeCallCount(page, 'ConfirmReferenceChapterSplit')
   await corpusWorkspace.getByRole('button', { name: '确认章节边界' }).click()
   await waitForBridgeCallCountAfter(page, 'ConfirmReferenceChapterSplit', confirmCount)
-  await corpusWorkspace.getByRole('button', { name: '10' }).click()
+  // 批次选择器已随批次概念废除：确认边界后直接入队（恒为逐章）。
   const enqueueCount = await bridgeCallCount(page, 'EnqueueReferenceMaterialization')
   await corpusWorkspace.getByRole('button', { name: '启动材料化' }).click()
   await waitForBridgeCallCountAfter(page, 'EnqueueReferenceMaterialization', enqueueCount)

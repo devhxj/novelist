@@ -480,7 +480,6 @@ internal sealed partial class SqliteReferenceMaterializationRunStore
             throw new ArgumentOutOfRangeException(nameof(seed), "Anchor id must be positive.");
         }
 
-        ReferenceMaterializationBatchSizes.Validate(seed.ChapterBatchSize);
         Require(seed.RunId, nameof(seed.RunId));
         Require(seed.SplitProfileId, nameof(seed.SplitProfileId));
         Require(seed.GenerationId, nameof(seed.GenerationId));
@@ -560,5 +559,8 @@ internal sealed record ReferenceMaterializationRunSeed(
     string QualifierVersion,
     ReferenceMaterializationModelIdentityPayload Llm,
     ReferenceMaterializationModelIdentityPayload Embedding,
-    int ChapterBatchSize,
-    DateTimeOffset StartedAt);
+    DateTimeOffset StartedAt)
+{
+    // 批次概念已废除：每批恒 1 章（状态表列名保留兼容旧库，值恒为 1）。
+    public int ChapterBatchSize => ReferenceMaterializationBatchSizes.Default;
+}

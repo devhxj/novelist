@@ -3578,18 +3578,18 @@ function referenceAnchors() {
     return { ...profile }
   }
 
-  function materializationStatus(anchorId, profile, batchSize = 5) {
+  function materializationStatus(anchorId, profile) {
     return {
       run_id: `mock-materialization-${anchorId}`,
       anchor_id: anchorId,
       split_profile_id: profile.split_profile_id,
       generation_id: `mock-generation-${anchorId}`,
       status: 'completed',
-      chapter_batch_size: batchSize,
+      chapter_batch_size: 1,
       total_chapters: profile.chapter_count,
       processed_chapters: profile.chapter_count,
-      total_chapter_batches: Math.ceil(profile.chapter_count / batchSize),
-      completed_chapter_batches: Math.ceil(profile.chapter_count / batchSize),
+      total_chapter_batches: profile.chapter_count,
+      completed_chapter_batches: profile.chapter_count,
       current_batch_index: null,
       current_batch_start_chapter: null,
       current_batch_end_chapter: null,
@@ -3615,9 +3615,7 @@ function referenceAnchors() {
     if (!profile || profile.status !== 'confirmed' || profile.split_profile_id !== input?.split_profile_id) {
       throw new Error('A confirmed chapter split profile is required.')
     }
-    const batchSize = Number(input?.chapter_batch_size ?? 5)
-    if (batchSize !== 5 && batchSize !== 10) throw new Error('Chapter batch size must be 5 or 10.')
-    const run = materializationStatus(anchorId, profile, batchSize)
+    const run = materializationStatus(anchorId, profile)
     state.materializationRuns = state.materializationRuns.filter((item) => item.anchor_id !== anchorId)
     state.materializationRuns.push(run)
     return { ...run }
@@ -3646,7 +3644,7 @@ function referenceAnchors() {
       const failed = chapterIndex % 7 === 5
       return {
         chapter_index: chapterIndex,
-        batch_index: Math.floor(index / run.chapter_batch_size),
+        batch_index: index,
         status: failed ? 'failed' : 'completed',
         current_stage: failed ? 'failed' : 'completed',
         candidate_count: 6,

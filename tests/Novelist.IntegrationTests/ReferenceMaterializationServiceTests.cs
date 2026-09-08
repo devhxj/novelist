@@ -27,7 +27,7 @@ public sealed class ReferenceMaterializationServiceTests : IDisposable
             CancellationToken.None);
 
         var created = await service.EnqueueMaterializationAsync(
-            new EnqueueReferenceMaterializationPayload(anchor.NovelId, anchor.AnchorId, profile.SplitProfileId, ChapterBatchSize: 10),
+            new EnqueueReferenceMaterializationPayload(anchor.NovelId, anchor.AnchorId, profile.SplitProfileId),
             CancellationToken.None);
         var status = await service.GetMaterializationStatusAsync(
             new GetReferenceMaterializationStatusPayload(anchor.NovelId, anchor.AnchorId, created.RunId),
@@ -38,7 +38,7 @@ public sealed class ReferenceMaterializationServiceTests : IDisposable
 
         Assert.Equal(1, preflight.CallCount);
         Assert.Equal(ReferenceMaterializationRunStates.Queued, created.Status);
-        Assert.Equal(10, created.ChapterBatchSize);
+        Assert.Equal(1, created.ChapterBatchSize);
         Assert.Equal("llm-provider", created.Llm.Provider);
         Assert.Equal("embedding-model", created.Embedding.ModelId);
         Assert.NotNull(status);
@@ -79,7 +79,7 @@ public sealed class ReferenceMaterializationServiceTests : IDisposable
         // 回归：材料化来源登记按设计跳过旧导出管线的分段，入队时必须补建段落/句子
         // 文本节点，否则 worker 构建不出候选窗口，整轮材料化"完成"但产出全 0。
         var created = await service.EnqueueMaterializationAsync(
-            new EnqueueReferenceMaterializationPayload(anchor.NovelId, anchor.AnchorId, profile.SplitProfileId, ChapterBatchSize: 5),
+            new EnqueueReferenceMaterializationPayload(anchor.NovelId, anchor.AnchorId, profile.SplitProfileId),
             CancellationToken.None);
 
         var store = new SqliteReferenceMaterializationRunStore(new ReferenceCorpusDatabasePathResolver(options));
@@ -229,7 +229,6 @@ public sealed class ReferenceMaterializationServiceTests : IDisposable
             "qualifier-v1",
             new ReferenceMaterializationModelIdentityPayload("llm", "model"),
             new ReferenceMaterializationModelIdentityPayload("embedding", "model", 8),
-            5,
             DateTimeOffset.UtcNow), CancellationToken.None);
         var claim = await store.ClaimCurrentBatchAsync(run.RunId, "failing-owner", TimeSpan.FromMinutes(1), CancellationToken.None);
         Assert.NotNull(claim);
@@ -277,7 +276,6 @@ public sealed class ReferenceMaterializationServiceTests : IDisposable
             "material-qualifier-v1",
             new ReferenceMaterializationModelIdentityPayload("llm", "model"),
             new ReferenceMaterializationModelIdentityPayload("embedding", "model", 8),
-            5,
             DateTimeOffset.UtcNow), CancellationToken.None);
         var claim = await store.ClaimCurrentBatchAsync(run.RunId, "failing-owner", TimeSpan.FromMinutes(1), CancellationToken.None);
         Assert.NotNull(claim);
@@ -408,7 +406,6 @@ public sealed class ReferenceMaterializationServiceTests : IDisposable
         ReferenceMaterializationChatCompletionQualifier.SchemaVersion,
         new ReferenceMaterializationModelIdentityPayload("llm-provider", "llm-model"),
         new ReferenceMaterializationModelIdentityPayload("embedding-provider", "embedding-model", 8),
-        ReferenceMaterializationBatchSizes.Default,
         DateTimeOffset.UtcNow);
 
     private static ReferenceMaterializationCandidateQualification ReviewRequiredDecision(

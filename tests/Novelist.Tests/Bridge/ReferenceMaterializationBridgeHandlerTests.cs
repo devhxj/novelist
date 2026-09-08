@@ -17,7 +17,7 @@ public sealed class ReferenceMaterializationBridgeHandlerTests
         await AssertOkAsync(dispatcher, "AnalyzeReferenceChapterSplit", new AnalyzeReferenceChapterSplitPayload(42, 99));
         await AssertOkAsync(dispatcher, "PreviewReferenceChapterSplit", new PreviewReferenceChapterSplitPayload(42, 99, "第{number}章 {title}"));
         await AssertOkAsync(dispatcher, "ConfirmReferenceChapterSplit", new ConfirmReferenceChapterSplitPayload(42, 99, "profile-1"));
-        await AssertOkAsync(dispatcher, "EnqueueReferenceMaterialization", new EnqueueReferenceMaterializationPayload(42, 99, "profile-1", 10));
+        await AssertOkAsync(dispatcher, "EnqueueReferenceMaterialization", new EnqueueReferenceMaterializationPayload(42, 99, "profile-1"));
         await AssertOkAsync(dispatcher, "GetReferenceMaterializationStatus", new GetReferenceMaterializationStatusPayload(42, 99, "run-1"));
         await AssertOkAsync(dispatcher, "RetryReferenceMaterialization", new RetryReferenceMaterializationPayload(42, 99, "run-1"));
         await AssertOkAsync(dispatcher, "ListReferenceMaterializationChapterProgress", new ListReferenceMaterializationChapterProgressPayload(42, 99, "run-1", 1, 20));
@@ -48,7 +48,7 @@ public sealed class ReferenceMaterializationBridgeHandlerTests
                 "analyze:42:99",
                 "preview:42:99:第{number}章 {title}",
                 "confirm:42:99:profile-1",
-                "enqueue:42:99:profile-1:10",
+                "enqueue:42:99:profile-1",
                 "status:42:99:run-1",
                 "retry:42:99:run-1",
                 "progress:42:99:run-1:1:20",
@@ -215,7 +215,7 @@ public sealed class ReferenceMaterializationBridgeHandlerTests
             EnqueueReferenceMaterializationPayload input,
             CancellationToken cancellationToken)
         {
-            Calls.Add($"enqueue:{input.NovelId}:{input.AnchorId}:{input.SplitProfileId}:{input.ChapterBatchSize}");
+            Calls.Add($"enqueue:{input.NovelId}:{input.AnchorId}:{input.SplitProfileId}");
             if (EnqueueException is not null)
             {
                 throw EnqueueException;

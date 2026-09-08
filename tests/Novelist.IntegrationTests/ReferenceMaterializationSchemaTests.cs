@@ -42,13 +42,13 @@ public sealed class ReferenceMaterializationSchemaTests : IDisposable
             new PreviewReferenceChapterSplitPayload(anchor.NovelId, anchor.AnchorId, "# {title}"),
             CancellationToken.None);
 
-        await InsertRunAsync(options, anchor.AnchorId, profile.SplitProfileId, "run-1", "generation-1", chapterBatchSize: 5);
+        await InsertRunAsync(options, anchor.AnchorId, profile.SplitProfileId, "run-1", "generation-1", 1);
         var invalidBatch = await Assert.ThrowsAsync<SqliteException>(() =>
-            InsertRunAsync(options, anchor.AnchorId, profile.SplitProfileId, "run-invalid", "generation-invalid", chapterBatchSize: 7).AsTask());
+            InsertRunAsync(options, anchor.AnchorId, profile.SplitProfileId, "run-invalid", "generation-invalid", 7).AsTask());
         Assert.Equal(19, invalidBatch.SqliteErrorCode);
 
         var duplicateGeneration = await Assert.ThrowsAsync<SqliteException>(() =>
-            InsertRunAsync(options, anchor.AnchorId, profile.SplitProfileId, "run-duplicate", "generation-1", chapterBatchSize: 10).AsTask());
+            InsertRunAsync(options, anchor.AnchorId, profile.SplitProfileId, "run-duplicate", "generation-1", 1).AsTask());
         Assert.Equal(19, duplicateGeneration.SqliteErrorCode);
     }
 

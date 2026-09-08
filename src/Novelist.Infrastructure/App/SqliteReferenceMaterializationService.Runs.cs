@@ -14,7 +14,6 @@ public sealed partial class SqliteReferenceMaterializationService
     {
         ArgumentNullException.ThrowIfNull(input);
         ValidateReferenceInput(input.NovelId, input.AnchorId);
-        ReferenceMaterializationBatchSizes.Validate(input.ChapterBatchSize);
         var splitProfileId = NormalizeProfileId(input.SplitProfileId);
         await EnsureConfirmedProfileMatchesCurrentSourceAsync(
             input.NovelId,
@@ -40,7 +39,6 @@ public sealed partial class SqliteReferenceMaterializationService
                 ReferenceMaterializationChatCompletionQualifier.SchemaVersion,
                 models.Llm,
                 models.Embedding,
-                input.ChapterBatchSize,
                 now),
             cancellationToken);
     }

@@ -22,27 +22,28 @@ public sealed class ReferenceMaterializationRunStoreTests : IDisposable
         var store = new SqliteReferenceMaterializationRunStore(new ReferenceCorpusDatabasePathResolver(options));
 
         await Assert.ThrowsAsync<InvalidOperationException>(async () =>
-            await store.CreateAsync(CreateSeed(anchor.AnchorId, profile.SplitProfileId, chapterBatchSize: 5), CancellationToken.None));
+            await store.CreateAsync(CreateSeed(anchor.AnchorId, profile.SplitProfileId), CancellationToken.None));
 
         var confirmed = await splitService.ConfirmChapterSplitAsync(
             new ConfirmReferenceChapterSplitPayload(anchor.NovelId, anchor.AnchorId, profile.SplitProfileId),
             CancellationToken.None);
-        var created = await store.CreateAsync(CreateSeed(anchor.AnchorId, confirmed.SplitProfileId, chapterBatchSize: 5), CancellationToken.None);
+        var created = await store.CreateAsync(CreateSeed(anchor.AnchorId, confirmed.SplitProfileId), CancellationToken.None);
         var progress = await store.ListChapterProgressAsync(created.RunId, page: 1, size: 20, CancellationToken.None);
 
         Assert.Equal(ReferenceMaterializationRunStates.Queued, created.Status);
         Assert.Equal(12, created.TotalChapters);
-        Assert.Equal(3, created.TotalChapterBatches);
+        // 逐章处理：每批恰一章。
+        Assert.Equal(12, created.TotalChapterBatches);
         Assert.Equal(0, created.CurrentBatchIndex);
         Assert.Equal(1, created.CurrentBatchStartChapter);
-        Assert.Equal(5, created.CurrentBatchEndChapter);
+        Assert.Equal(1, created.CurrentBatchEndChapter);
         Assert.Equal(12, progress.Total);
         Assert.All(progress.Items, item => Assert.Equal(ReferenceMaterializationChapterStates.Pending, item.Status));
-        Assert.Equal([0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 2, 2], progress.Items.Select(item => item.BatchIndex).ToArray());
+        Assert.Equal(Enumerable.Range(0, 12).ToArray(), progress.Items.Select(item => item.BatchIndex).ToArray());
     }
 
     [Fact]
-    public async Task CreateRunRejectsAnyBatchSizeOtherThanFiveOrTen()
+    public async Task CreateRunAlwaysRunsChapterWise()
     {
         var options = CreateOptions();
         var anchor = await CreateAnchorAsync(options, chapterCount: 2);
@@ -55,8 +56,10 @@ public sealed class ReferenceMaterializationRunStoreTests : IDisposable
             CancellationToken.None);
         var store = new SqliteReferenceMaterializationRunStore(new ReferenceCorpusDatabasePathResolver(options));
 
-        await Assert.ThrowsAsync<ArgumentOutOfRangeException>(async () =>
-            await store.CreateAsync(CreateSeed(anchor.AnchorId, profile.SplitProfileId, chapterBatchSize: 7), CancellationToken.None));
+        // 批次概念已废除：run 恒为逐章（批=章）。
+        var created = await store.CreateAsync(CreateSeed(anchor.AnchorId, profile.SplitProfileId), CancellationToken.None);
+        Assert.Equal(1, created.ChapterBatchSize);
+        Assert.Equal(created.TotalChapters, created.TotalChapterBatches);
     }
 
     [Fact]
@@ -75,10 +78,10 @@ public sealed class ReferenceMaterializationRunStoreTests : IDisposable
             new FailFirstCorpusDatabasePathResolver(new ReferenceCorpusDatabasePathResolver(options)));
 
         await Assert.ThrowsAsync<InvalidOperationException>(async () =>
-            await store.CreateAsync(CreateSeed(anchor.AnchorId, profile.SplitProfileId, chapterBatchSize: 5), CancellationToken.None));
+            await store.CreateAsync(CreateSeed(anchor.AnchorId, profile.SplitProfileId), CancellationToken.None));
 
         var created = await store.CreateAsync(
-            CreateSeed(anchor.AnchorId, profile.SplitProfileId, chapterBatchSize: 5),
+            CreateSeed(anchor.AnchorId, profile.SplitProfileId),
             CancellationToken.None);
 
         Assert.Equal(ReferenceMaterializationRunStates.Queued, created.Status);
@@ -97,7 +100,7 @@ public sealed class ReferenceMaterializationRunStoreTests : IDisposable
             new ConfirmReferenceChapterSplitPayload(anchor.NovelId, anchor.AnchorId, profile.SplitProfileId),
             CancellationToken.None);
         var store = new SqliteReferenceMaterializationRunStore(new ReferenceCorpusDatabasePathResolver(options));
-        var run = await store.CreateAsync(CreateSeed(anchor.AnchorId, profile.SplitProfileId, chapterBatchSize: 5), CancellationToken.None);
+        var run = await store.CreateAsync(CreateSeed(anchor.AnchorId, profile.SplitProfileId), CancellationToken.None);
 
         var first = await store.BuildCandidatesForChapterAsync(run.RunId, chapterIndex: 1, CancellationToken.None);
         var second = await store.BuildCandidatesForChapterAsync(run.RunId, chapterIndex: 1, CancellationToken.None);
@@ -125,7 +128,7 @@ public sealed class ReferenceMaterializationRunStoreTests : IDisposable
             new ConfirmReferenceChapterSplitPayload(anchor.NovelId, anchor.AnchorId, profile.SplitProfileId),
             CancellationToken.None);
         var store = new SqliteReferenceMaterializationRunStore(new ReferenceCorpusDatabasePathResolver(options));
-        var run = await store.CreateAsync(CreateSeed(anchor.AnchorId, profile.SplitProfileId, chapterBatchSize: 5), CancellationToken.None);
+        var run = await store.CreateAsync(CreateSeed(anchor.AnchorId, profile.SplitProfileId), CancellationToken.None);
         await store.BuildCandidatesForChapterAsync(run.RunId, chapterIndex: 1, CancellationToken.None);
 
         var work = await store.ReadQualificationWorkItemAsync(run.RunId, chapterIndex: 1, CancellationToken.None);
@@ -170,7 +173,7 @@ public sealed class ReferenceMaterializationRunStoreTests : IDisposable
             new ConfirmReferenceChapterSplitPayload(anchor.NovelId, anchor.AnchorId, profile.SplitProfileId),
             CancellationToken.None);
         var store = new SqliteReferenceMaterializationRunStore(new ReferenceCorpusDatabasePathResolver(options));
-        var run = await store.CreateAsync(CreateSeed(anchor.AnchorId, profile.SplitProfileId, chapterBatchSize: 5), CancellationToken.None);
+        var run = await store.CreateAsync(CreateSeed(anchor.AnchorId, profile.SplitProfileId), CancellationToken.None);
         await store.BuildCandidatesForChapterAsync(run.RunId, chapterIndex: 1, CancellationToken.None);
 
         await Assert.ThrowsAsync<InvalidOperationException>(async () =>
@@ -199,7 +202,7 @@ public sealed class ReferenceMaterializationRunStoreTests : IDisposable
             new ConfirmReferenceChapterSplitPayload(anchor.NovelId, anchor.AnchorId, profile.SplitProfileId),
             CancellationToken.None);
         var store = new SqliteReferenceMaterializationRunStore(new ReferenceCorpusDatabasePathResolver(options));
-        var run = await store.CreateAsync(CreateSeed(anchor.AnchorId, profile.SplitProfileId, chapterBatchSize: 5), CancellationToken.None);
+        var run = await store.CreateAsync(CreateSeed(anchor.AnchorId, profile.SplitProfileId), CancellationToken.None);
         await store.BuildCandidatesForChapterAsync(run.RunId, chapterIndex: 1, CancellationToken.None);
         var qualificationWork = await store.ReadQualificationWorkItemAsync(run.RunId, chapterIndex: 1, CancellationToken.None);
         await store.PersistQualificationAsync(
@@ -257,7 +260,7 @@ public sealed class ReferenceMaterializationRunStoreTests : IDisposable
             CancellationToken.None);
         var resolver = new ReferenceCorpusDatabasePathResolver(options);
         var store = new SqliteReferenceMaterializationRunStore(resolver);
-        var run = await store.CreateAsync(CreateSeed(anchor.AnchorId, profile.SplitProfileId, chapterBatchSize: 5), CancellationToken.None);
+        var run = await store.CreateAsync(CreateSeed(anchor.AnchorId, profile.SplitProfileId), CancellationToken.None);
         var embedder = new ReferenceMaterializationEmbeddingProcessor(
             new FixedEmbeddingConfigurationService(new EmbeddingRequestOptions(
                 "embedding-provider", "https://example.invalid", "key", "embedding-model", 8, null)),
@@ -283,17 +286,20 @@ public sealed class ReferenceMaterializationRunStoreTests : IDisposable
 
         var vec = new RecordingVecProvisioner();
         var indexer = new ReferenceMaterializationVectorIndexer(resolver, vec);
-        var indexed = await indexer.IndexCurrentBatchAsync(run.RunId, CancellationToken.None);
+        // 逐章处理：先索引第一章（批 0），再索引第二章（批 1），两章都完成。
+        var firstIndexed = await indexer.IndexCurrentBatchAsync(run.RunId, CancellationToken.None);
+        var secondIndexed = await indexer.IndexCurrentBatchAsync(run.RunId, CancellationToken.None);
         var progress = await store.ListChapterProgressAsync(run.RunId, page: 1, size: 10, CancellationToken.None);
         var status = await store.GetAsync(run.RunId, CancellationToken.None);
 
-        Assert.Equal(0, indexed.BatchIndex);
-        Assert.True(indexed.VectorCount > 0);
-        Assert.Equal(indexed.VectorCount, vec.LastRequest?.Vectors.Count);
+        Assert.Equal(0, firstIndexed.BatchIndex);
+        Assert.Equal(1, secondIndexed.BatchIndex);
+        Assert.True(secondIndexed.VectorCount > 0);
+        Assert.Equal(secondIndexed.VectorCount, vec.LastRequest?.Vectors.Count);
         Assert.Contains("vec_reference_materialization_", vec.LastRequest?.TableName, StringComparison.Ordinal);
         Assert.All(progress.Items, item => Assert.Equal(ReferenceMaterializationChapterStates.Completed, item.Status));
         Assert.Equal(2, status?.ProcessedChapters);
-        Assert.Equal(1, status?.CompletedChapterBatches);
+        Assert.Equal(2, status?.CompletedChapterBatches);
     }
 
     [Fact]
@@ -310,7 +316,7 @@ public sealed class ReferenceMaterializationRunStoreTests : IDisposable
             CancellationToken.None);
         var resolver = new ReferenceCorpusDatabasePathResolver(options);
         var store = new SqliteReferenceMaterializationRunStore(resolver);
-        var run = await store.CreateAsync(CreateSeed(anchor.AnchorId, profile.SplitProfileId, chapterBatchSize: 5), CancellationToken.None);
+        var run = await store.CreateAsync(CreateSeed(anchor.AnchorId, profile.SplitProfileId), CancellationToken.None);
         var qualifier = new RecordingAcceptingQualifier();
         var indexer = new ReferenceMaterializationVectorIndexer(resolver, new RecordingVecProvisioner());
         var worker = new ReferenceMaterializationWorker(
@@ -324,17 +330,23 @@ public sealed class ReferenceMaterializationRunStoreTests : IDisposable
         Assert.Equal(ReferenceMaterializationRunStates.Queued, before?.Status);
         Assert.Equal(0, before?.CurrentBatchIndex);
 
-        var processed = await worker.ProcessRunOnceAsync(run.RunId, CancellationToken.None);
+        // 逐章处理：一次 pump 只推进一章，循环直至完成；相邻模型调用保持串行。
+        for (var pump = 0; pump < 4; pump++)
+        {
+            if (!await worker.ProcessRunOnceAsync(run.RunId, CancellationToken.None))
+            {
+                break;
+            }
+        }
+
         var progress = await store.ListChapterProgressAsync(run.RunId, page: 1, size: 10, CancellationToken.None);
         var status = await store.GetAsync(run.RunId, CancellationToken.None);
 
-        Assert.True(processed);
         Assert.Equal(2, qualifier.InvocationCount);
-        // 批内章节依次调用模型：任一时刻最多一个打分调用在途，避免触发服务商限流。
         Assert.Equal(1, qualifier.MaximumConcurrency);
         Assert.All(progress.Items, item => Assert.Equal(ReferenceMaterializationChapterStates.Completed, item.Status));
         Assert.Equal(2, status?.ProcessedChapters);
-        Assert.Equal(1, status?.CompletedChapterBatches);
+        Assert.Equal(2, status?.CompletedChapterBatches);
         Assert.Null(status?.CurrentBatchIndex);
         Assert.True(
             status?.Status == ReferenceMaterializationRunStates.Completed,
@@ -373,7 +385,7 @@ public sealed class ReferenceMaterializationRunStoreTests : IDisposable
             CancellationToken.None);
         var resolver = new ReferenceCorpusDatabasePathResolver(options);
         var store = new SqliteReferenceMaterializationRunStore(resolver);
-        var run = await store.CreateAsync(CreateSeed(anchor.AnchorId, profile.SplitProfileId, chapterBatchSize: 5), CancellationToken.None);
+        var run = await store.CreateAsync(CreateSeed(anchor.AnchorId, profile.SplitProfileId), CancellationToken.None);
         var worker = new ReferenceMaterializationWorker(
             resolver,
             new FailingQualifier(),
@@ -381,7 +393,7 @@ public sealed class ReferenceMaterializationRunStoreTests : IDisposable
             new ReferenceMaterializationVectorIndexer(resolver, new RecordingVecProvisioner()),
             workerId: "rule-rejection-worker");
 
-        Assert.True(await worker.ProcessRunOnceAsync(run.RunId, CancellationToken.None));
+        await DrainRunAsync(worker, run.RunId);
         var status = await store.GetAsync(run.RunId, CancellationToken.None);
         var progress = await store.ListChapterProgressAsync(run.RunId, page: 1, size: 10, CancellationToken.None);
         var rejectedCandidates = await splitService.ListMaterializationCandidatesAsync(
@@ -424,7 +436,7 @@ public sealed class ReferenceMaterializationRunStoreTests : IDisposable
             CancellationToken.None);
         var resolver = new ReferenceCorpusDatabasePathResolver(options);
         var store = new SqliteReferenceMaterializationRunStore(resolver);
-        var run = await store.CreateAsync(CreateSeed(anchor.AnchorId, profile.SplitProfileId, chapterBatchSize: 5), CancellationToken.None);
+        var run = await store.CreateAsync(CreateSeed(anchor.AnchorId, profile.SplitProfileId), CancellationToken.None);
         var provisioner = new RecordingVecProvisioner();
         var initialWorker = new ReferenceMaterializationWorker(
             resolver,
@@ -433,7 +445,7 @@ public sealed class ReferenceMaterializationRunStoreTests : IDisposable
             new ReferenceMaterializationVectorIndexer(resolver, provisioner),
             workerId: "test-review-initial-worker");
 
-        Assert.True(await initialWorker.ProcessRunOnceAsync(run.RunId, CancellationToken.None));
+        await DrainRunAsync(initialWorker, run.RunId);
         var initial = await store.GetAsync(run.RunId, CancellationToken.None);
         Assert.Equal(ReferenceMaterializationRunStates.Completed, initial?.Status);
         Assert.Equal(1, initial?.ReviewCount);
@@ -459,7 +471,8 @@ public sealed class ReferenceMaterializationRunStoreTests : IDisposable
         Assert.True(reviewed.RequalificationQueued);
         Assert.Equal(ReferenceMaterializationCandidateDecisions.Pending, reviewed.Decision);
         Assert.Equal(ReferenceMaterializationRunStates.Running, reviewed.Status.Status);
-        Assert.Equal(0, reviewed.Status.CompletedChapterBatches);
+        // 逐章处理：重开目标章回零，其余已完成章节各占一批。
+        Assert.Equal(reviewed.Status.TotalChapterBatches - 1, reviewed.Status.CompletedChapterBatches);
         var conflict = await Assert.ThrowsAsync<ReferenceMaterializationException>(async () =>
             await materialization.ReviewMaterializationCandidateAsync(
                 new ReviewReferenceMaterializationCandidatePayload(
@@ -483,7 +496,7 @@ public sealed class ReferenceMaterializationRunStoreTests : IDisposable
             new AcceptingEmbedder(),
             new ReferenceMaterializationVectorIndexer(resolver, provisioner),
             workerId: "test-review-resumed-worker");
-        Assert.True(await resumedWorker.ProcessRunOnceAsync(run.RunId, CancellationToken.None));
+        await DrainRunAsync(resumedWorker, run.RunId);
         var completed = await store.GetAsync(run.RunId, CancellationToken.None);
         Assert.NotNull(completed);
         Assert.Equal(ReferenceMaterializationRunStates.Completed, completed.Status);
@@ -667,7 +680,7 @@ public sealed class ReferenceMaterializationRunStoreTests : IDisposable
             CancellationToken.None);
         var resolver = new ReferenceCorpusDatabasePathResolver(options);
         var store = new SqliteReferenceMaterializationRunStore(resolver);
-        var run = await store.CreateAsync(CreateSeed(anchor.AnchorId, profile.SplitProfileId, chapterBatchSize: 5), CancellationToken.None);
+        var run = await store.CreateAsync(CreateSeed(anchor.AnchorId, profile.SplitProfileId), CancellationToken.None);
         var worker = new ReferenceMaterializationWorker(
             resolver,
             new FailingQualifier(),
@@ -706,7 +719,7 @@ public sealed class ReferenceMaterializationRunStoreTests : IDisposable
             CancellationToken.None);
         var resolver = new ReferenceCorpusDatabasePathResolver(options);
         var store = new SqliteReferenceMaterializationRunStore(resolver);
-        var run = await store.CreateAsync(CreateSeed(anchor.AnchorId, profile.SplitProfileId, chapterBatchSize: 5), CancellationToken.None);
+        var run = await store.CreateAsync(CreateSeed(anchor.AnchorId, profile.SplitProfileId), CancellationToken.None);
         var worker = new ReferenceMaterializationWorker(
             resolver,
             new RecordingAcceptingQualifier(),
@@ -734,7 +747,7 @@ public sealed class ReferenceMaterializationRunStoreTests : IDisposable
             new ConfirmReferenceChapterSplitPayload(anchor.NovelId, anchor.AnchorId, profile.SplitProfileId),
             CancellationToken.None);
         var store = new SqliteReferenceMaterializationRunStore(new ReferenceCorpusDatabasePathResolver(options));
-        var run = await store.CreateAsync(CreateSeed(anchor.AnchorId, profile.SplitProfileId, chapterBatchSize: 5), CancellationToken.None);
+        var run = await store.CreateAsync(CreateSeed(anchor.AnchorId, profile.SplitProfileId), CancellationToken.None);
         var firstClaim = await store.ClaimCurrentBatchAsync(
             run.RunId,
             "expired-owner",
@@ -759,7 +772,8 @@ public sealed class ReferenceMaterializationRunStoreTests : IDisposable
             CancellationToken.None);
 
         Assert.NotNull(reclaimed);
-        Assert.Equal([1, 2, 3, 4, 5], reclaimed!.ChapterIndexes);
+        // 逐章处理：过期租约只重置被中断的那一章。
+        Assert.Equal([1], reclaimed!.ChapterIndexes);
         Assert.NotEmpty(pendingCandidates.Items);
         Assert.All(pendingCandidates.Items, item =>
         {
@@ -792,7 +806,7 @@ public sealed class ReferenceMaterializationRunStoreTests : IDisposable
             CancellationToken.None);
         var resolver = new ReferenceCorpusDatabasePathResolver(options);
         var store = new SqliteReferenceMaterializationRunStore(resolver);
-        var run = await store.CreateAsync(CreateSeed(anchor.AnchorId, profile.SplitProfileId, chapterBatchSize: 5), CancellationToken.None);
+        var run = await store.CreateAsync(CreateSeed(anchor.AnchorId, profile.SplitProfileId), CancellationToken.None);
         var qualifier = new BlockingQualifier();
         await using var worker = new ReferenceMaterializationWorker(
             resolver,
@@ -833,7 +847,7 @@ public sealed class ReferenceMaterializationRunStoreTests : IDisposable
             CancellationToken.None);
         var resolver = new ReferenceCorpusDatabasePathResolver(options);
         var store = new SqliteReferenceMaterializationRunStore(resolver);
-        var run = await store.CreateAsync(CreateSeed(anchor.AnchorId, profile.SplitProfileId, chapterBatchSize: 5), CancellationToken.None);
+        var run = await store.CreateAsync(CreateSeed(anchor.AnchorId, profile.SplitProfileId), CancellationToken.None);
         var claim = await store.ClaimCurrentBatchAsync(run.RunId, "failing-owner", TimeSpan.FromMinutes(1), CancellationToken.None);
         Assert.NotNull(claim);
         await store.BuildCandidatesForChapterAsync(run.RunId, claim!.ChapterIndexes[0], CancellationToken.None);
@@ -878,7 +892,7 @@ public sealed class ReferenceMaterializationRunStoreTests : IDisposable
             CancellationToken.None);
         var resolver = new ReferenceCorpusDatabasePathResolver(options);
         var store = new SqliteReferenceMaterializationRunStore(resolver);
-        var run = await store.CreateAsync(CreateSeed(anchor.AnchorId, profile.SplitProfileId, chapterBatchSize: 5), CancellationToken.None);
+        var run = await store.CreateAsync(CreateSeed(anchor.AnchorId, profile.SplitProfileId), CancellationToken.None);
         var qualifier = new RecordingAcceptingQualifier();
         var worker = new ReferenceMaterializationWorker(
             resolver,
@@ -887,7 +901,7 @@ public sealed class ReferenceMaterializationRunStoreTests : IDisposable
             new ReferenceMaterializationVectorIndexer(resolver, new RecordingVecProvisioner()),
             workerId: "test-materialization-batch-worker");
 
-        Assert.True(await worker.ProcessRunOnceAsync(run.RunId, CancellationToken.None));
+        await DrainRunAsync(worker, run.RunId);
         var progress = await store.ListChapterProgressAsync(run.RunId, page: 1, size: 10, CancellationToken.None);
 
         Assert.True(qualifier.InvocationCount >= 3);
@@ -914,7 +928,7 @@ public sealed class ReferenceMaterializationRunStoreTests : IDisposable
             new ConfirmReferenceChapterSplitPayload(anchor.NovelId, anchor.AnchorId, profile.SplitProfileId),
             CancellationToken.None);
         var store = new SqliteReferenceMaterializationRunStore(new ReferenceCorpusDatabasePathResolver(options));
-        var run = await store.CreateAsync(CreateSeed(anchor.AnchorId, profile.SplitProfileId, chapterBatchSize: 5), CancellationToken.None);
+        var run = await store.CreateAsync(CreateSeed(anchor.AnchorId, profile.SplitProfileId), CancellationToken.None);
         await store.BuildCandidatesForChapterAsync(run.RunId, chapterIndex: 1, CancellationToken.None);
         await CorruptSixthPendingCandidateEvidenceAsync(options, run.RunId, chapterIndex: 1);
 
@@ -942,7 +956,7 @@ public sealed class ReferenceMaterializationRunStoreTests : IDisposable
             new ConfirmReferenceChapterSplitPayload(anchor.NovelId, anchor.AnchorId, profile.SplitProfileId),
             CancellationToken.None);
         var store = new SqliteReferenceMaterializationRunStore(new ReferenceCorpusDatabasePathResolver(options));
-        var run = await store.CreateAsync(CreateSeed(anchor.AnchorId, profile.SplitProfileId, chapterBatchSize: 5), CancellationToken.None);
+        var run = await store.CreateAsync(CreateSeed(anchor.AnchorId, profile.SplitProfileId), CancellationToken.None);
         await store.BuildCandidatesForChapterAsync(run.RunId, chapterIndex: 1, CancellationToken.None);
         var work = await store.ReadQualificationWorkItemAsync(run.RunId, chapterIndex: 1, CancellationToken.None);
         await CorruptSixthPendingCandidateEvidenceAsync(options, run.RunId, chapterIndex: 1);
@@ -983,7 +997,7 @@ public sealed class ReferenceMaterializationRunStoreTests : IDisposable
             new ReferenceMaterializationModelIdentityPayload("embedding", "model", 8)));
         var service = new SqliteReferenceMaterializationService(options, new EmptyChapterSplitAnalyzer(), modelPreflight: preflight);
         var run = await service.EnqueueMaterializationAsync(
-            new EnqueueReferenceMaterializationPayload(anchor.NovelId, anchor.AnchorId, profile.SplitProfileId, ChapterBatchSize: 5),
+            new EnqueueReferenceMaterializationPayload(anchor.NovelId, anchor.AnchorId, profile.SplitProfileId),
             CancellationToken.None);
 
         // extractor 提供一条逐字摘录 + 一条幻觉摘录；FailingQualifier 若被调用说明走错了管线。
@@ -1012,7 +1026,7 @@ public sealed class ReferenceMaterializationRunStoreTests : IDisposable
             workerId: "chapter-extraction-worker",
             chapterMaterialExtractor: extractor);
 
-        Assert.True(await worker.ProcessRunOnceAsync(run.RunId, CancellationToken.None));
+        await DrainRunAsync(worker, run.RunId);
         var status = await store.GetAsync(run.RunId, CancellationToken.None);
         Assert.NotNull(status);
         var allProgress = await store.ListChapterProgressAsync(run.RunId, page: 1, size: 10, CancellationToken.None);
@@ -1055,7 +1069,7 @@ public sealed class ReferenceMaterializationRunStoreTests : IDisposable
             new ReferenceMaterializationModelIdentityPayload("embedding", "model", 8)));
         var service = new SqliteReferenceMaterializationService(options, new EmptyChapterSplitAnalyzer(), modelPreflight: preflight);
         var run = await service.EnqueueMaterializationAsync(
-            new EnqueueReferenceMaterializationPayload(anchor.NovelId, anchor.AnchorId, profile.SplitProfileId, ChapterBatchSize: 1),
+            new EnqueueReferenceMaterializationPayload(anchor.NovelId, anchor.AnchorId, profile.SplitProfileId),
             CancellationToken.None);
 
         // 模拟中断点：提取已持久化（章节停在 embedding），嵌入未完成，批次租约已释放。
@@ -1145,7 +1159,7 @@ public sealed class ReferenceMaterializationRunStoreTests : IDisposable
         }
 
         var run = await service.EnqueueMaterializationAsync(
-            new EnqueueReferenceMaterializationPayload(anchor.NovelId, anchor.AnchorId, profile.SplitProfileId, ChapterBatchSize: 5),
+            new EnqueueReferenceMaterializationPayload(anchor.NovelId, anchor.AnchorId, profile.SplitProfileId),
             CancellationToken.None);
 
         await using (var verify = new SqliteConnection(new SqliteConnectionStringBuilder { DataSource = databasePath, Pooling = false }.ToString()))
@@ -1257,7 +1271,7 @@ public sealed class ReferenceMaterializationRunStoreTests : IDisposable
 
         var resolver = new ReferenceCorpusDatabasePathResolver(options);
         var store = new SqliteReferenceMaterializationRunStore(resolver);
-        var run = await store.CreateAsync(CreateSeed(anchor.AnchorId, profile.SplitProfileId, chapterBatchSize: 5), CancellationToken.None);
+        var run = await store.CreateAsync(CreateSeed(anchor.AnchorId, profile.SplitProfileId), CancellationToken.None);
         var vec = new SearchableVecProvisioner();
         var worker = new ReferenceMaterializationWorker(
             resolver,
@@ -1266,7 +1280,7 @@ public sealed class ReferenceMaterializationRunStoreTests : IDisposable
             new ReferenceMaterializationVectorIndexer(resolver, vec),
             workerId: "test-materialization-semantic-search-worker");
 
-        Assert.True(await worker.ProcessRunOnceAsync(run.RunId, CancellationToken.None));
+        await DrainRunAsync(worker, run.RunId);
         var status = await store.GetAsync(run.RunId, CancellationToken.None);
         Assert.NotNull(status);
         Assert.Equal(ReferenceMaterializationRunStates.Completed, status.Status);
@@ -1274,7 +1288,23 @@ public sealed class ReferenceMaterializationRunStoreTests : IDisposable
         return (anchor, status, vec);
     }
 
-    private static ReferenceMaterializationRunSeed CreateSeed(long anchorId, string profileId, int chapterBatchSize)
+    // 逐章处理：一次 ProcessRunOnceAsync 只推进一章，排水整个 run 需要循环调用。
+    // 最后一轮通常返回 false（无章可认领且无晋升）；此处只要中途没抛异常即视为排空成功。
+    private static async Task DrainRunAsync(
+        ReferenceMaterializationWorker worker,
+        string runId,
+        int maxPumps = 20)
+    {
+        for (var pump = 0; pump < maxPumps; pump++)
+        {
+            if (!await worker.ProcessRunOnceAsync(runId, CancellationToken.None))
+            {
+                return;
+            }
+        }
+    }
+
+    private static ReferenceMaterializationRunSeed CreateSeed(long anchorId, string profileId)
     {
         return new ReferenceMaterializationRunSeed(
             RunId: Guid.NewGuid().ToString("N"),
@@ -1286,7 +1316,6 @@ public sealed class ReferenceMaterializationRunStoreTests : IDisposable
             QualifierVersion: ReferenceMaterializationChatCompletionQualifier.SchemaVersion,
             Llm: new ReferenceMaterializationModelIdentityPayload("provider", "model"),
             Embedding: new ReferenceMaterializationModelIdentityPayload("embedding-provider", "embedding-model", 8),
-            ChapterBatchSize: chapterBatchSize,
             StartedAt: DateTimeOffset.UtcNow);
     }
 

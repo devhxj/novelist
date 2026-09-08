@@ -22,18 +22,10 @@ public static class ReferenceChapterSplitProfileStates
 
 public static class ReferenceMaterializationBatchSizes
 {
-    // 挨章处理：默认每批 1 章，一章失败只影响自身，不连坐其他章节。
+    // 批次概念已废除：材料化始终逐章处理（一次一章、失败只挂一章）。
+    // 状态表保留 chapter_batch_size 列以兼容旧库（恒写 1），对外契约不再接受入参。
     public const int ChapterWise = 1;
     public const int Default = ChapterWise;
-    public static IReadOnlyList<int> All { get; } = [ChapterWise, 5, 10];
-
-    public static void Validate(int value)
-    {
-        if (!All.Contains(value))
-        {
-            throw new ArgumentOutOfRangeException(nameof(value), value, "Chapter batch size must be 1, 5, or 10.");
-        }
-    }
 }
 
 public static class ReferenceMaterializationRunStates
@@ -154,8 +146,7 @@ public sealed record ConfirmReferenceChapterSplitPayload(
 public sealed record EnqueueReferenceMaterializationPayload(
     [property: JsonPropertyName("novel_id")] long NovelId,
     [property: JsonPropertyName("anchor_id")] long AnchorId,
-    [property: JsonPropertyName("split_profile_id")] string SplitProfileId,
-    [property: JsonPropertyName("chapter_batch_size")] int ChapterBatchSize = ReferenceMaterializationBatchSizes.Default);
+    [property: JsonPropertyName("split_profile_id")] string SplitProfileId);
 
 public sealed record GetReferenceMaterializationStatusPayload(
     [property: JsonPropertyName("novel_id")] long NovelId,
