@@ -26,6 +26,10 @@ public interface IReferenceCorpusAnalysisRetryRandom
  double NextUnitInterval();
 }
 
+// 重试原则按场景判断：默认不自动重试（交互场景快速失败，由用户决定重试）。
+// 此策略仅服务无人值守的语料分析批处理管线——单次作业有成千上万次模型调用，
+// 瞬时供应商错误按有界预算重排（每项最多 5 次、全抖动退避、尊重 Retry-After），
+// 耗尽预算即永久失败；有界性保证重试不会放大服务商的频率保护。
 public sealed class ReferenceCorpusAnalysisRetryPolicy
 {
  private const int ValidationMaximumAttemptCount = 4;

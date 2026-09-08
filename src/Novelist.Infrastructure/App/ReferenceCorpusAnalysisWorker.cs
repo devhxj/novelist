@@ -369,6 +369,7 @@ using var cleanup = new CancellationTokenSource(TimeSpan.FromSeconds(5));
  }
  catch (HttpRequestException exception)
  {
+ // 无人值守批处理：瞬时供应商错误按预算重排而非终止整个作业；预算耗尽转永久失败。
  var failedAt = DateTimeOffset.UtcNow;
  var decision = _retryPolicy.Decide(new(
 ReferenceCorpusAnalysisRetryCategories.ProviderTransient,

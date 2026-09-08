@@ -154,6 +154,9 @@ public sealed class StandardEmbeddingClient : IEmbeddingClient
         return request;
     }
 
+    // 重试原则按场景判断：嵌入调用运行在无人值守管线（材料化嵌入、RAG 索引）内部，
+    // 幂等且廉价，也没有对应的单独重试按钮，瞬时 429/5xx 值得有界重试自行吸收；
+    // 交互式聊天与材料化章节提取则快速失败，由用户决定重试。
     private async ValueTask<HttpResponseMessage> SendWithRetryAsync(
         HttpRequestMessage originalRequest,
         string apiKey,
