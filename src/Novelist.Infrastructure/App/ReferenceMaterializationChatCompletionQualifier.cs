@@ -225,6 +225,31 @@ public sealed class ReferenceMaterializationChatCompletionQualifier : IReference
             : ParseChapterExtraction(toolCall.ArgumentsJson).Materials;
     }
 
+    // 供应商的突发保护按"流量增长"判定：材料化分页把每章放大成多次大请求，
+    // 全局 2 秒启动间隔仍会触发冷却窗口（DeepSeek/Ark 风控：System protection
+    // triggered by request burst），且冷却期内重试会延长窗口。无人值守的批处理
+    // 用节奏换稳定：相邻材料化请求保持 MinRequestGap 间隔；交互聊天不受影响。
+    internal static TimeSpan MinRequestGap { get; set; } = TimeSpan.FromSeconds(30);
+    private static readonly SemaphoreSlim PaceGate = new(1, 1);
+    private static DateTimeOffset _lastRequestCompletedAt = DateTimeOffset.MinValue;
+
+    private static async ValueTask PaceBeforeRequestAsync(CancellationToken cancellationToken)
+    {
+        await PaceGate.WaitAsync(cancellationToken);
+        try
+        {
+            var waitUntil = _lastRequestCompletedAt.Add(MinRequestGap);
+            if (waitUntil > DateTimeOffset.UtcNow)
+            {
+                await Task.Delay(waitUntil - DateTimeOffset.UtcNow, cancellationToken);
+            }
+        }
+        finally
+        {
+            PaceGate.Release();
+        }
+    }
+
     // 流式消费共用于打分与提取：正文/思考增量一律忽略，结果只认工具调用实参。
     // 单个请求设总时限：材料化无人值守，活着但极慢的流（如 max 推理力度下
     // 65K 输出预算的长生成）不允许无限占用批次；超时报错由用户重试，而不是整夜挂在 running。
@@ -240,6 +265,7 @@ public sealed class ReferenceMaterializationChatCompletionQualifier : IReference
         deadline.CancelAfter(RequestDeadline);
         try
         {
+            await PaceBeforeRequestAsync(cancellationToken);
             await foreach (var item in _completion.StreamChatAsync(request, deadline.Token))
             {
                 if (item.Kind != ChatCompletionStreamEventKind.ToolCall)
@@ -263,6 +289,11 @@ public sealed class ReferenceMaterializationChatCompletionQualifier : IReference
             throw new ReferenceMaterializationException(
                 ReferenceMaterializationErrorCodes.LlmRequestFailed,
                 $"单个模型请求超过 {(int)RequestDeadline.TotalMinutes} 分钟未完成，已中止；请重试或降低推理力度。");
+        }
+        finally
+        {
+            // 间隔从上一次请求"完成"起算：长流式响应期间供应商仍在承压。
+            _lastRequestCompletedAt = DateTimeOffset.UtcNow;
         }
 
         return toolCall

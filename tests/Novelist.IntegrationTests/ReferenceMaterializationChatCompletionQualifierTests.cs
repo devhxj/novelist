@@ -7,6 +7,12 @@ namespace Novelist.IntegrationTests;
 
 public sealed class ReferenceMaterializationChatCompletionQualifierTests
 {
+    static ReferenceMaterializationChatCompletionQualifierTests()
+    {
+        // 测试不等待材料化的 30 秒请求间隔（静态共享，全部测试统一写 0）。
+        ReferenceMaterializationChatCompletionQualifier.MinRequestGap = TimeSpan.Zero;
+    }
+
     [Fact]
     public async Task QualifyAsyncUsesFrozenModelAndReturnsOneValidatedDecisionForEveryCandidate()
     {
