@@ -297,7 +297,7 @@ public sealed class ReferenceMaterializationRunStoreTests : IDisposable
     }
 
     [Fact]
-    public async Task WorkerProcessesAllChaptersInTheFrozenBatchConcurrentlyBeforeAdvancing()
+    public async Task WorkerProcessesChaptersInTheFrozenBatchSequentiallyBeforeAdvancing()
     {
         var options = CreateOptions();
         var anchor = await CreateAnchorAsync(options, chapterCount: 2);
@@ -311,7 +311,7 @@ public sealed class ReferenceMaterializationRunStoreTests : IDisposable
         var resolver = new ReferenceCorpusDatabasePathResolver(options);
         var store = new SqliteReferenceMaterializationRunStore(resolver);
         var run = await store.CreateAsync(CreateSeed(anchor.AnchorId, profile.SplitProfileId, chapterBatchSize: 5), CancellationToken.None);
-        var qualifier = new ConcurrentAcceptingQualifier();
+        var qualifier = new RecordingAcceptingQualifier();
         var indexer = new ReferenceMaterializationVectorIndexer(resolver, new RecordingVecProvisioner());
         var worker = new ReferenceMaterializationWorker(
             resolver,
@@ -330,7 +330,8 @@ public sealed class ReferenceMaterializationRunStoreTests : IDisposable
 
         Assert.True(processed);
         Assert.Equal(2, qualifier.InvocationCount);
-        Assert.True(qualifier.MaximumConcurrency >= 2);
+        // 批内章节依次调用模型：任一时刻最多一个打分调用在途，避免触发服务商限流。
+        Assert.Equal(1, qualifier.MaximumConcurrency);
         Assert.All(progress.Items, item => Assert.Equal(ReferenceMaterializationChapterStates.Completed, item.Status));
         Assert.Equal(2, status?.ProcessedChapters);
         Assert.Equal(1, status?.CompletedChapterBatches);
@@ -478,7 +479,7 @@ public sealed class ReferenceMaterializationRunStoreTests : IDisposable
 
         var resumedWorker = new ReferenceMaterializationWorker(
             resolver,
-            new ConcurrentAcceptingQualifier(),
+            new RecordingAcceptingQualifier(),
             new AcceptingEmbedder(),
             new ReferenceMaterializationVectorIndexer(resolver, provisioner),
             workerId: "test-review-resumed-worker");
@@ -708,7 +709,7 @@ public sealed class ReferenceMaterializationRunStoreTests : IDisposable
         var run = await store.CreateAsync(CreateSeed(anchor.AnchorId, profile.SplitProfileId, chapterBatchSize: 5), CancellationToken.None);
         var worker = new ReferenceMaterializationWorker(
             resolver,
-            new ConcurrentAcceptingQualifier(),
+            new RecordingAcceptingQualifier(),
             new AcceptingEmbedder(),
             new ReferenceMaterializationVectorIndexer(resolver, new RecordingVecProvisioner()),
             workerId: "test-materialization-overlong-candidate-worker");
@@ -878,7 +879,7 @@ public sealed class ReferenceMaterializationRunStoreTests : IDisposable
         var resolver = new ReferenceCorpusDatabasePathResolver(options);
         var store = new SqliteReferenceMaterializationRunStore(resolver);
         var run = await store.CreateAsync(CreateSeed(anchor.AnchorId, profile.SplitProfileId, chapterBatchSize: 5), CancellationToken.None);
-        var qualifier = new ConcurrentAcceptingQualifier();
+        var qualifier = new RecordingAcceptingQualifier();
         var worker = new ReferenceMaterializationWorker(
             resolver,
             qualifier,
@@ -1189,7 +1190,7 @@ public sealed class ReferenceMaterializationRunStoreTests : IDisposable
         var vec = new SearchableVecProvisioner();
         var worker = new ReferenceMaterializationWorker(
             resolver,
-            new ConcurrentAcceptingQualifier(),
+            new RecordingAcceptingQualifier(),
             new AcceptingEmbedder(),
             new ReferenceMaterializationVectorIndexer(resolver, vec),
             workerId: "test-materialization-semantic-search-worker");
@@ -1557,7 +1558,7 @@ public sealed class ReferenceMaterializationRunStoreTests : IDisposable
         }
     }
 
-    private sealed class ConcurrentAcceptingQualifier : IReferenceMaterializationQualifier
+    private sealed class RecordingAcceptingQualifier : IReferenceMaterializationQualifier
     {
         private int _active;
         private int _maximumConcurrency;

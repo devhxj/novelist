@@ -142,48 +142,34 @@ public sealed class ReferenceMaterializationWorker : IAsyncDisposable
         try
         {
             using var batchCancellation = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, leaseLost.Token);
-            Task[] tasks = [];
-            try
+            // legacy 窗口管线需要先落候选（SQLite 写短但串行），预构建结果直接传入章节处理；
+            // 章节级提取路径自带文本，无需预构建。
+            var legacyBuilds = new Dictionary<int, ReferenceCandidateBuildResult>(claim.ChapterIndexes.Count);
+            foreach (var chapterIndex in claim.ChapterIndexes)
             {
-                // legacy 窗口管线需要先落候选（SQLite 写短但串行），预构建结果直接传入任务；
-                // 章节级提取路径自带文本，无需预构建。两类章节按各自管线并发处理。
-                var legacyBuilds = new Dictionary<int, ReferenceCandidateBuildResult>(claim.ChapterIndexes.Count);
-                foreach (var chapterIndex in claim.ChapterIndexes)
+                if (_chapterMaterialExtractor is not null &&
+                    await store.HasChapterSourceSegmentAsync(claim.RunId, chapterIndex, batchCancellation.Token))
                 {
-                    if (_chapterMaterialExtractor is not null &&
-                        await store.HasChapterSourceSegmentAsync(claim.RunId, chapterIndex, batchCancellation.Token))
-                    {
-                        continue;
-                    }
-
-                    legacyBuilds[chapterIndex] = await store.BuildCandidatesForChapterAsync(
-                        claim.RunId,
-                        chapterIndex,
-                        batchCancellation.Token);
+                    continue;
                 }
 
-                tasks = claim.ChapterIndexes
-                    .Select(chapterIndex => ProcessChapterAsync(
-                        store,
-                        claim.RunId,
-                        chapterIndex,
-                        legacyBuilds.GetValueOrDefault(chapterIndex),
-                        batchCancellation.Token))
-                    .ToArray();
-                await Task.WhenAll(tasks);
+                legacyBuilds[chapterIndex] = await store.BuildCandidatesForChapterAsync(
+                    claim.RunId,
+                    chapterIndex,
+                    batchCancellation.Token);
             }
-            catch
-            {
-                batchCancellation.Cancel();
-                try
-                {
-                    await Task.WhenAll(tasks);
-                }
-                catch
-                {
-                }
 
-                throw;
+            // 批内章节依次调用模型：并发整章请求会直接触发服务商限流（429），
+            // 且先失败的一章会取消其余章节的在途请求；串行让请求节奏跟随服务商限额。
+            foreach (var chapterIndex in claim.ChapterIndexes)
+            {
+                ThrowIfLeaseLost(leaseLost);
+                await ProcessChapterAsync(
+                    store,
+                    claim.RunId,
+                    chapterIndex,
+                    legacyBuilds.GetValueOrDefault(chapterIndex),
+                    batchCancellation.Token);
             }
 
             ThrowIfLeaseLost(leaseLost);
