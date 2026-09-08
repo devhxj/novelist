@@ -1,5 +1,6 @@
 using System.Runtime.CompilerServices;
 using System.Text.Json;
+using Novelist.Contracts.App;
 using Novelist.Core.App;
 using Novelist.Infrastructure.App;
 
@@ -121,6 +122,36 @@ public sealed class ReferenceChapterMaterialExtractorTests
         Assert.Equal(24, result.Materials.Count);
     }
 
+    [Fact]
+    public async Task HungModelStreamFailsAtRequestDeadlineInsteadOfHangingForever()
+    {
+        // 无人值守的材料化：活着但永不完成的模型流必须在请求总时限处失败，
+        // 而不是把整批章节永久挂在 llm_qualifying。
+        var chat = new HangingChatCompletionClient();
+        var extractor = new ReferenceMaterializationChatCompletionQualifier(chat);
+        var original = ReferenceMaterializationChatCompletionQualifier.RequestDeadline;
+        ReferenceMaterializationChatCompletionQualifier.RequestDeadline = TimeSpan.FromMilliseconds(200);
+        try
+        {
+            var exception = await Assert.ThrowsAsync<ReferenceMaterializationException>(async () =>
+                await extractor.ExtractChapterMaterialsAsync(
+                    new ReferenceChapterExtractionRequest(
+                        1,
+                        1,
+                        "第一章",
+                        new string('文', 2_000),
+                        new ReferenceMaterializationLlmSelection("deepseek", "deepseek-v4-flash", "high")),
+                    CancellationToken.None));
+
+            Assert.Equal(ReferenceMaterializationErrorCodes.LlmRequestFailed, exception.ErrorCode);
+            Assert.Contains("未完成，已中止", exception.Message, StringComparison.Ordinal);
+        }
+        finally
+        {
+            ReferenceMaterializationChatCompletionQualifier.RequestDeadline = original;
+        }
+    }
+
     private static string BuildBatchMaterialsJson(int count)
     {
         var materials = string.Join(',', Enumerable.Range(0, count).Select(i => MaterialJson($"材料摘录编号{i:D4}")));
@@ -139,6 +170,21 @@ public sealed class ReferenceChapterMaterialExtractorTests
         """;
 
     // 脚本化假客户端：外层列表的每一项是一次请求的响应事件序列，按调用次序消费。
+    // 永不产出的模型流：只在取消令牌触发时结束，模拟活着但永不完成的生成。
+    private sealed class HangingChatCompletionClient : IChatCompletionClient
+    {
+        public ValueTask<string> GenerateTextAsync(ChatCompletionRequest request, CancellationToken cancellationToken) =>
+            throw new NotSupportedException();
+
+        public async IAsyncEnumerable<ChatCompletionStreamEvent> StreamChatAsync(
+            ChatCompletionRequest request,
+            [EnumeratorCancellation] CancellationToken cancellationToken)
+        {
+            await Task.Delay(Timeout.Infinite, cancellationToken);
+            yield break;
+        }
+    }
+
     private sealed class ScriptedChatCompletionClient(
         IReadOnlyList<IReadOnlyList<ChatCompletionStreamEvent>> responsesPerCall) : IChatCompletionClient
     {

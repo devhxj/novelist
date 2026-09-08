@@ -226,28 +226,43 @@ public sealed class ReferenceMaterializationChatCompletionQualifier : IReference
     }
 
     // 流式消费共用于打分与提取：正文/思考增量一律忽略，结果只认工具调用实参。
+    // 单个请求设总时限：材料化无人值守，活着但极慢的流（如 max 推理力度下
+    // 65K 输出预算的长生成）不允许无限占用批次；超时报错由用户重试，而不是整夜挂在 running。
+    internal static TimeSpan RequestDeadline { get; set; } = TimeSpan.FromMinutes(20);
+
     private async ValueTask<ChatToolCall> ReceiveRequiredToolCallAsync(
         ChatCompletionRequest request,
         string expectedToolName,
         CancellationToken cancellationToken)
     {
         ChatToolCall? toolCall = null;
-        await foreach (var item in _completion.StreamChatAsync(request, cancellationToken))
+        using var deadline = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        deadline.CancelAfter(RequestDeadline);
+        try
         {
-            if (item.Kind != ChatCompletionStreamEventKind.ToolCall)
+            await foreach (var item in _completion.StreamChatAsync(request, deadline.Token))
             {
-                continue;
-            }
+                if (item.Kind != ChatCompletionStreamEventKind.ToolCall)
+                {
+                    continue;
+                }
 
-            if (item.ToolCall is null ||
-                !string.Equals(item.ToolCall.Name, expectedToolName, StringComparison.Ordinal) ||
-                toolCall is not null ||
-                item.ToolCall.ArgumentsJson.Length > MaxOutputChars)
-            {
-                throw InvalidOutput($"Material qualification returned an invalid tool call for {expectedToolName}.");
-            }
+                if (item.ToolCall is null ||
+                    !string.Equals(item.ToolCall.Name, expectedToolName, StringComparison.Ordinal) ||
+                    toolCall is not null ||
+                    item.ToolCall.ArgumentsJson.Length > MaxOutputChars)
+                {
+                    throw InvalidOutput($"Material qualification returned an invalid tool call for {expectedToolName}.");
+                }
 
-            toolCall = item.ToolCall;
+                toolCall = item.ToolCall;
+            }
+        }
+        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+        {
+            throw new ReferenceMaterializationException(
+                ReferenceMaterializationErrorCodes.LlmRequestFailed,
+                $"单个模型请求超过 {(int)RequestDeadline.TotalMinutes} 分钟未完成，已中止；请重试或降低推理力度。");
         }
 
         return toolCall

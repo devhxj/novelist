@@ -330,6 +330,62 @@ public sealed class StandardChatCompletionClientTokenLimitTests
  throw new NotSupportedException();
     }
 
+    [Fact]
+    public async Task StreamChatAsyncFailsWhenStreamGoesSilent()
+    {
+        // 静默断连：连接保持"存活"但永不产出数据，也不关闭——空闲看门狗必须快速失败，
+        // 否则无人值守的材料化会整夜挂在 running。
+        var handler = new SilentStreamHandler();
+        var client = CreateClient(responsesEndpoint: false, 2048, handler);
+        var original = StandardChatCompletionClient.StreamIdleTimeout;
+        StandardChatCompletionClient.StreamIdleTimeout = TimeSpan.FromMilliseconds(200);
+        try
+        {
+            var exception = await Assert.ThrowsAsync<BridgeRequestException>(async () =>
+                await DrainAsync(client.StreamChatAsync(CreateRequest(640), CancellationToken.None)));
+
+            Assert.True(exception.Retryable);
+            Assert.Contains("没有任何数据", exception.Message, StringComparison.Ordinal);
+        }
+        finally
+        {
+            StandardChatCompletionClient.StreamIdleTimeout = original;
+        }
+    }
+
+    private sealed class SilentStreamHandler : HttpMessageHandler
+    {
+        protected override Task<HttpResponseMessage> SendAsync(
+            HttpRequestMessage request,
+            CancellationToken cancellationToken) => Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
+        {
+            Content = new StreamContent(new NeverEndingStream())
+        });
+
+        private sealed class NeverEndingStream : Stream
+        {
+            public override bool CanRead => true;
+            public override bool CanSeek => false;
+            public override bool CanWrite => false;
+            public override long Length => throw new NotSupportedException();
+            public override long Position { get => 0; set => throw new NotSupportedException(); }
+
+            public override void Flush() { }
+            public override int Read(byte[] buffer, int offset, int count) => throw new NotSupportedException();
+            public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
+            public override void SetLength(long value) { }
+            public override void Write(byte[] buffer, int offset, int count) { }
+
+            public override Task<int> ReadAsync(byte[] buffer, int offset, int count, CancellationToken cancellationToken)
+            {
+                // 永不返回数据；只有取消令牌触发才结束，模拟被静默掐断的连接。
+                var completion = new TaskCompletionSource<int>(TaskCreationOptions.RunContinuationsAsynchronously);
+                cancellationToken.Register(static state => ((TaskCompletionSource<int>)state!).SetCanceled(), completion);
+                return completion.Task;
+            }
+        }
+    }
+
     private sealed class ScriptedResponseHandler(params (HttpStatusCode status, string body, string contentType)[] responses)
  : HttpMessageHandler
     {

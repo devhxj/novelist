@@ -105,7 +105,7 @@ public sealed class StandardChatCompletionClient : IChatCompletionClient
             using var reader = new StreamReader(stream, Encoding.UTF8, detectEncodingFromByteOrderMarks: false, bufferSize: 8192);
             while (true)
             {
-                var line = await reader.ReadLineAsync(cancellationToken);
+                var line = await ReadLineOrFailOnIdleAsync(reader, cancellationToken);
                 if (line is null)
                 {
                     break;
@@ -148,6 +148,32 @@ public sealed class StandardChatCompletionClient : IChatCompletionClient
                     ToolCall: call));
             }
         }
+    }
+
+    // 流空闲看门狗：HTTP 客户端为流式设了无限超时，但静默断连（代理/NAT 掐断后
+    // 既无数据也不关连接）会让 ReadLineAsync 永久阻塞——无人值守的材料化会整夜
+    // 挂在 running。连续 StreamIdleTimeout 无任何字节即判定死连并快速失败。
+    internal static TimeSpan StreamIdleTimeout { get; set; } = TimeSpan.FromSeconds(120);
+
+    private static async Task<string?> ReadLineOrFailOnIdleAsync(
+        StreamReader reader,
+        CancellationToken cancellationToken)
+    {
+        using var idle = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        var read = reader.ReadLineAsync(idle.Token).AsTask();
+        var timer = Task.Delay(StreamIdleTimeout, CancellationToken.None);
+        var completed = await Task.WhenAny(read, timer);
+        if (completed != read)
+        {
+            idle.Cancel();
+            throw ProviderError(
+                $"模型服务连接已超过 {(int)StreamIdleTimeout.TotalSeconds} 秒没有任何数据（连接可能被静默断开），请重试。",
+                retryable: true);
+        }
+
+        // 读取已完成（正常行、流结束或外部取消）；idle.Cancel 只用于释放计时关联。
+        idle.Cancel();
+        return await read;
     }
 
     private static async Task PaceProviderStartAsync(string providerKey, CancellationToken cancellationToken)
@@ -696,7 +722,7 @@ public sealed class StandardChatCompletionClient : IChatCompletionClient
         using var reader = new StreamReader(stream, Encoding.UTF8, detectEncodingFromByteOrderMarks: false, bufferSize: 8192);
         while (true)
         {
-            var line = await reader.ReadLineAsync(cancellationToken);
+            var line = await ReadLineOrFailOnIdleAsync(reader, cancellationToken);
             if (line is null)
             {
                 break;
