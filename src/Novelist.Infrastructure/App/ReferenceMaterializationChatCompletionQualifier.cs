@@ -228,25 +228,48 @@ public sealed class ReferenceMaterializationChatCompletionQualifier : IReference
     // 供应商的突发保护按"流量增长"判定：材料化分页把每章放大成多次大请求，
     // 全局 2 秒启动间隔仍会触发冷却窗口（DeepSeek/Ark 风控：System protection
     // triggered by request burst），且冷却期内重试会延长窗口。无人值守的批处理
-    // 用节奏换稳定：相邻材料化请求保持 MinRequestGap 间隔；交互聊天不受影响。
+    // 用节奏换稳定：相邻材料化请求保持间隔；交互聊天不受影响。
+    // 间隔自适应（AIMD，保守向）：连续成功逐步收缩（×0.8、下限 10 秒），
+    // 任何供应商失败立即回到 MinRequestGap 保守档；外部取消不调整。
     internal static TimeSpan MinRequestGap { get; set; } = TimeSpan.FromSeconds(30);
-    private static readonly SemaphoreSlim PaceGate = new(1, 1);
+    private static readonly object PaceGate = new();
+    // 惰性初始化：首次使用时取当时的 MinRequestGap（运行期可被调小，如测试），
+    // 避免静态字段快照把旧值固化。
+    private static TimeSpan? _adaptiveRequestGap;
     private static DateTimeOffset _lastRequestCompletedAt = DateTimeOffset.MinValue;
 
     private static async ValueTask PaceBeforeRequestAsync(CancellationToken cancellationToken)
     {
-        await PaceGate.WaitAsync(cancellationToken);
-        try
+        DateTimeOffset waitUntil;
+        lock (PaceGate)
         {
-            var waitUntil = _lastRequestCompletedAt.Add(MinRequestGap);
-            if (waitUntil > DateTimeOffset.UtcNow)
-            {
-                await Task.Delay(waitUntil - DateTimeOffset.UtcNow, cancellationToken);
-            }
+            waitUntil = _lastRequestCompletedAt.Add(_adaptiveRequestGap ?? MinRequestGap);
         }
-        finally
+
+        var now = DateTimeOffset.UtcNow;
+        if (waitUntil > now)
         {
-            PaceGate.Release();
+            await Task.Delay(waitUntil - now, cancellationToken);
+        }
+    }
+
+    private static void RecordCompletedRequest(bool succeeded)
+    {
+        lock (PaceGate)
+        {
+            _lastRequestCompletedAt = DateTimeOffset.UtcNow;
+            if (!succeeded)
+            {
+                // 供应商失败（含限流）：回到保守档。run 已失败，用户冷却后重试时
+                // 从安全间隔重新起步，而不是带着已收缩的激进间隔撞回冷却窗口。
+                _adaptiveRequestGap = MinRequestGap;
+                return;
+            }
+
+            var current = _adaptiveRequestGap ?? MinRequestGap;
+            var floor = TimeSpan.FromSeconds(Math.Min(10, MinRequestGap.TotalSeconds));
+            var next = TimeSpan.FromSeconds(current.TotalSeconds * 0.8);
+            _adaptiveRequestGap = next < floor ? floor : next;
         }
     }
 
@@ -286,11 +309,11 @@ public sealed class ReferenceMaterializationChatCompletionQualifier : IReference
 
             // 间隔从上一次供应商交互"结束"起算：长流式响应期间供应商仍在承压。
             // 只在真实交互后记账（含失败）；外部取消/停机不算完成，不占用下一个间隔。
-            _lastRequestCompletedAt = DateTimeOffset.UtcNow;
+            RecordCompletedRequest(succeeded: true);
         }
         catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
         {
-            _lastRequestCompletedAt = DateTimeOffset.UtcNow;
+            RecordCompletedRequest(succeeded: false);
             throw new ReferenceMaterializationException(
                 ReferenceMaterializationErrorCodes.LlmRequestFailed,
                 $"单个模型请求超过 {(int)RequestDeadline.TotalMinutes} 分钟未完成，已中止；请重试或降低推理力度。");
@@ -299,7 +322,7 @@ public sealed class ReferenceMaterializationChatCompletionQualifier : IReference
         {
             // 供应商已经收到并拒绝了这次请求（含限流）：按已承压记账，
             // 避免失败后立即重试撞进冷却窗口。包装为材料化错误继续上抛。
-            _lastRequestCompletedAt = DateTimeOffset.UtcNow;
+            RecordCompletedRequest(succeeded: false);
             throw new ReferenceMaterializationException(
                 ReferenceMaterializationErrorCodes.LlmRequestFailed,
                 $"模型请求失败: {exception.Message}");

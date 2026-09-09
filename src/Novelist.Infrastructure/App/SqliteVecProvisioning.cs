@@ -101,18 +101,46 @@ public sealed class SqliteVecTableProvisioner : ISqliteVecTableProvisioner, ISql
             await delete.ExecuteNonQueryAsync(cancellationToken);
         }
 
-        foreach (var vector in request.Vectors)
+        // 多行 VALUES 批量插入：逐行命令在逐章重建（每次携带整代向量）时是
+        // O(N) 次往返，百章量级的书会放大到十万级语句；128 行/语句（256 参数）
+        // 在 SQLite 默认变量上限内，把语句数砍两个数量级。
+        const int rowsPerStatement = 128;
+        var serialized = new string[request.Vectors.Count];
+        for (var i = 0; i < request.Vectors.Count; i++)
         {
-            if (vector.Vector.Count != request.Dimensions)
+            if (request.Vectors[i].Vector.Count != request.Dimensions)
             {
                 throw new InvalidOperationException("Vector dimensions do not match the sqlite-vec table definition.");
             }
 
+            serialized[i] = JsonSerializer.Serialize(request.Vectors[i].Vector);
+        }
+
+        var sql = new StringBuilder();
+        for (var offset = 0; offset < request.Vectors.Count; offset += rowsPerStatement)
+        {
+            var rows = Math.Min(rowsPerStatement, request.Vectors.Count - offset);
+            sql.Clear();
+            sql.Append("INSERT INTO ").Append(QuoteIdentifier(request.TableName)).Append("(rowid, embedding) VALUES ");
             await using var insert = connection.CreateCommand();
             insert.Transaction = transaction;
-            insert.CommandText = $"INSERT INTO {QuoteIdentifier(request.TableName)}(rowid, embedding) VALUES ($rowid, vec_f32($embedding));";
-            insert.Parameters.AddWithValue("$rowid", vector.RowId);
-            insert.Parameters.AddWithValue("$embedding", JsonSerializer.Serialize(vector.Vector));
+            for (var i = 0; i < rows; i++)
+            {
+                if (i > 0)
+                {
+                    sql.Append(',');
+                }
+
+                sql.Append($"($r{offset + i}, vec_f32($e{offset + i}))");
+            }
+
+            insert.CommandText = sql.ToString();
+            for (var i = 0; i < rows; i++)
+            {
+                insert.Parameters.AddWithValue($"$r{offset + i}", request.Vectors[offset + i].RowId);
+                insert.Parameters.AddWithValue($"$e{offset + i}", serialized[offset + i]);
+            }
+
             await insert.ExecuteNonQueryAsync(cancellationToken);
         }
 
