@@ -274,6 +274,23 @@ public sealed class ReferenceMaterializationWorker : IAsyncDisposable
 
     // 章节处理分派：有章节级文本分段（材料化入队补建）走"整章直接提取"，
     // 否则回退 legacy 窗口切分 + 逐个打分管线。
+    // 章内活性心跳：每完成一页提取就累加 model_call_count（UI 的"模型调用 N 次"
+    // 在长提取期间可见增长）。尽力而为——心跳失败不打断提取本身。
+    private static async ValueTask PageHeartbeatAsync(
+        SqliteReferenceMaterializationRunStore store,
+        string runId,
+        int chapterIndex,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            await store.RecordExtractionPageAsync(runId, chapterIndex, cancellationToken);
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException)
+        {
+        }
+    }
+
     private async Task ProcessChapterAsync(
         SqliteReferenceMaterializationRunStore store,
         string runId,
@@ -294,7 +311,8 @@ public sealed class ReferenceMaterializationWorker : IAsyncDisposable
                         work.ChapterTitle,
                         work.ChapterText,
                         work.Model),
-                    cancellationToken);
+                    cancellationToken,
+                    ct => PageHeartbeatAsync(store, runId, chapterIndex, ct));
                 var persisted = await store.PersistChapterExtractionAsync(
                     runId,
                     chapterIndex,

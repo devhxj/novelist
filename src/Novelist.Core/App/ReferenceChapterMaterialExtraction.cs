@@ -6,7 +6,8 @@ public interface IReferenceChapterMaterialExtractor
 {
     ValueTask<ReferenceChapterExtractionResult> ExtractChapterMaterialsAsync(
         ReferenceChapterExtractionRequest request,
-        CancellationToken cancellationToken);
+        CancellationToken cancellationToken,
+        Func<CancellationToken, ValueTask>? pageCompleted = null);
 }
 
 public sealed record ReferenceChapterExtractionRequest(

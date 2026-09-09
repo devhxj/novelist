@@ -135,7 +135,8 @@ public sealed class ReferenceMaterializationChatCompletionQualifier : IReference
 
     public async ValueTask<ReferenceChapterExtractionResult> ExtractChapterMaterialsAsync(
         ReferenceChapterExtractionRequest input,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        Func<CancellationToken, ValueTask>? pageCompleted = null)
     {
         ArgumentNullException.ThrowIfNull(input);
         if (string.IsNullOrWhiteSpace(input.ChapterText))
@@ -165,6 +166,12 @@ public sealed class ReferenceMaterializationChatCompletionQualifier : IReference
                     extracted.Add(material);
                     added++;
                 }
+            }
+
+            // 每页完成即回调：调用方借 model_call_count 递增向轮询中的 UI 发出活性信号。
+            if (pageCompleted is not null)
+            {
+                await pageCompleted(cancellationToken);
             }
 
             if (added == 0 || batch.Count < MaxMaterialsPerRequest)

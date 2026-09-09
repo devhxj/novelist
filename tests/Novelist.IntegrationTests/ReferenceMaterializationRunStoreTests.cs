@@ -1292,10 +1292,25 @@ public sealed class ReferenceMaterializationRunStoreTests : IDisposable
 
         public ValueTask<ReferenceChapterExtractionResult> ExtractChapterMaterialsAsync(
             ReferenceChapterExtractionRequest request,
-            CancellationToken cancellationToken)
+            CancellationToken cancellationToken,
+            Func<CancellationToken, ValueTask>? pageCompleted = null)
         {
             Requests.Add(request);
+            if (pageCompleted is not null)
+            {
+                // 模拟单页提取：调用一次心跳后返回全部材料。
+                return CallHeartbeatAndReturnAsync(pageCompleted, cancellationToken);
+            }
+
             return ValueTask.FromResult(new ReferenceChapterExtractionResult(materials));
+        }
+
+        private async ValueTask<ReferenceChapterExtractionResult> CallHeartbeatAndReturnAsync(
+            Func<CancellationToken, ValueTask> pageCompleted,
+            CancellationToken cancellationToken)
+        {
+            await pageCompleted(cancellationToken);
+            return new ReferenceChapterExtractionResult(materials);
         }
     }
 

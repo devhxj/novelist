@@ -163,6 +163,34 @@ internal sealed partial class SqliteReferenceMaterializationRunStore
         return Convert.ToInt32(await command.ExecuteScalarAsync(cancellationToken), System.Globalization.CultureInfo.InvariantCulture);
     }
 
+    // 分页提取的活性心跳：每完成一页就累加 model_call_count，让轮询中的 UI
+    // 在数分钟的长提取期间看到"模型调用"在增长。PersistChapterExtractionAsync
+    // 用 MAX(model_call_count, 页数) 合并，页内递增与最终计数天然一致。
+    public async ValueTask RecordExtractionPageAsync(
+        string runId,
+        int chapterIndex,
+        CancellationToken cancellationToken)
+    {
+        var normalizedRunId = NormalizeRunId(runId);
+        if (chapterIndex <= 0)
+        {
+            throw new ArgumentOutOfRangeException(nameof(chapterIndex), "Chapter index must be positive.");
+        }
+
+        var databasePath = await EnsureSchemaAsync(cancellationToken);
+        await using var connection = await OpenConnectionAsync(databasePath, cancellationToken);
+        await using var command = connection.CreateCommand();
+        command.CommandText = """
+            UPDATE reference_materialization_chapter_progress
+            SET model_call_count = model_call_count + 1,
+                row_version = row_version + 1
+            WHERE run_id = $run_id AND chapter_index = $chapter_index;
+            """;
+        command.Parameters.AddWithValue("$run_id", normalizedRunId);
+        command.Parameters.AddWithValue("$chapter_index", chapterIndex);
+        await command.ExecuteNonQueryAsync(cancellationToken);
+    }
+
     public async ValueTask<ReferenceChapterExtractionPersistenceResult> PersistChapterExtractionAsync(
         string runId,
         int chapterIndex,

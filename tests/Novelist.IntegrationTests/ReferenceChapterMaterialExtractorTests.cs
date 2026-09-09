@@ -58,6 +58,7 @@ public sealed class ReferenceChapterMaterialExtractorTests
         var chapterText = new string('文', 5_000);
         var chat = new PaginatingChatCompletionClient(poolSize: 30, perBatch: 24);
         var extractor = new ReferenceMaterializationChatCompletionQualifier(chat);
+        var heartbeatCount = 0;
 
         var result = await extractor.ExtractChapterMaterialsAsync(
             new ReferenceChapterExtractionRequest(
@@ -66,9 +67,12 @@ public sealed class ReferenceChapterMaterialExtractorTests
                 "第一章",
                 chapterText,
                 new ReferenceMaterializationLlmSelection("deepseek", "deepseek-v4-flash", "high")),
-            CancellationToken.None);
+            CancellationToken.None,
+            _ => { heartbeatCount++; return ValueTask.CompletedTask; });
 
         Assert.Equal(2, chat.Requests.Count);
+        // 每完成一页触发一次活性心跳。
+        Assert.Equal(chat.Requests.Count, heartbeatCount);
         Assert.Equal(30, result.Materials.Count);
         for (var i = 0; i < chat.Requests.Count; i++)
         {
