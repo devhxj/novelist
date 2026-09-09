@@ -92,7 +92,7 @@ public sealed class ReferenceMaterializationWorker : IAsyncDisposable
             processId > 0;
     }
 
-    private async ValueTask ExpireLeasesOfDeadWorkersAsync(CancellationToken cancellationToken)
+    internal async ValueTask ExpireLeasesOfDeadWorkersAsync(CancellationToken cancellationToken)
     {
         try
         {

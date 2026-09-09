@@ -841,13 +841,14 @@ public sealed class ReferenceMaterializationRunStoreTests : IDisposable
             CancellationToken.None);
         Assert.NotNull(deadClaim);
 
+        // 直接调用清扫（不启动泵循环）：StartAsync 会随即开跑真实处理，
+        // 与测试的目录清理赛跑。
         var sweepTest = new ReferenceMaterializationWorker(
             resolver,
             new FailingQualifier(),
             new AcceptingEmbedder(),
             new ReferenceMaterializationVectorIndexer(resolver, new RecordingVecProvisioner()));
-        await sweepTest.StartAsync();
-        await sweepTest.StopAsync();
+        await sweepTest.ExpireLeasesOfDeadWorkersAsync(CancellationToken.None);
         await sweepTest.DisposeAsync();
 
         // 死进程租约被启动清扫立即过期：无需等 30 分钟自然过期即可回收。

@@ -24,11 +24,11 @@ public sealed class ReferenceMaterializationChatCompletionQualifier : IReference
     // 返回空批次、不足额批次或全部与已提取重复时视为提取完毕。全局仍以
     // MaxExtractedMaterialsPerChapter（40 条）为上限。最坏一批 24×1200 字摘录约 24K token，
     // 叠加 max 力度推理后仍在预算内。
-    private const int MaxMaterialsPerRequest = 24;
+    private const int MaxMaterialsPerRequest = 16;
     private const int MaxExtractedMaterialsPerChapter = 40;
     private const int MaxExtractionExcerptChars = 1_200;
     // 思考模型在 high/max 推理力度下的推理 token 计入输出预算，8192 会被纯推理耗尽导致无声结束。
-    private const int MaxOutputTokens = 65_536;
+    private const int MaxOutputTokens = 40_960;
     private const int MaxCandidateTextChars = 1_200;
     private const int MaxSourceNodeTextChars = 1_200;
     private const int MaxIdentifierLength = 256;
@@ -188,6 +188,33 @@ public sealed class ReferenceMaterializationChatCompletionQualifier : IReference
         IReadOnlyList<ReferenceChapterExtractedMaterial> extracted,
         CancellationToken cancellationToken)
     {
+        // 传输中断（供应商掐流 ResponseEnded / 连接重置）是间歇性网络层错误：
+        // 重试无害且大概率救回，属于"有必要才重试"的例外；重试同样经过节流间隔。
+        // 供应商侧拒绝（限流/突发保护）仍立即失败——重试会延长冷却窗口。
+        try
+        {
+            return await ExtractBatchCoreAsync(input, extracted, cancellationToken);
+        }
+        catch (ReferenceMaterializationException exception) when (IsTransportInterruption(exception))
+        {
+            await Task.Delay(TimeSpan.FromSeconds(10), cancellationToken);
+            return await ExtractBatchCoreAsync(input, extracted, cancellationToken);
+        }
+    }
+
+    private static bool IsTransportInterruption(ReferenceMaterializationException exception)
+    {
+        // 原始异常类型挂在 InnerException；消息兜底匹配掐流签名。
+        return exception.InnerException is HttpRequestException ||
+            exception.Message.Contains("response ended prematurely", StringComparison.OrdinalIgnoreCase) ||
+            exception.Message.Contains("响应过早结束", StringComparison.Ordinal);
+    }
+
+    private async ValueTask<IReadOnlyList<ReferenceChapterExtractedMaterial>> ExtractBatchCoreAsync(
+        ReferenceChapterExtractionRequest input,
+        IReadOnlyList<ReferenceChapterExtractedMaterial> extracted,
+        CancellationToken cancellationToken)
+    {
         ChatToolCall? toolCall = null;
         try
         {
@@ -332,7 +359,8 @@ public sealed class ReferenceMaterializationChatCompletionQualifier : IReference
             RecordCompletedRequest(succeeded: false);
             throw new ReferenceMaterializationException(
                 ReferenceMaterializationErrorCodes.LlmRequestFailed,
-                $"模型请求失败: {exception.Message}");
+                $"模型请求失败: {exception.Message}",
+                exception);
         }
 
         return toolCall
@@ -459,15 +487,17 @@ public sealed class ReferenceMaterializationChatCompletionQualifier : IReference
               and never rephrase or partially repeat them. Continue the ranking from where the
               previous batches left off.
             - If no new material remains, return an empty materials array.
-              If fewer than 24 new materials remain, return only those; a batch of fewer than
-              24 tells the caller that the chapter is exhausted, so do not hold back.
+              If fewer than 16 new materials remain, return only those; a batch of fewer than
+              16 tells the caller that the chapter is exhausted, so do not hold back.
             - excerpt must be copied character-for-character from the chapter text. Never paraphrase,
               translate, merge non-adjacent parts, trim into the middle of a sentence, or add quotation marks.
             - Only include fragments genuinely reusable as reference material for other authors:
               vivid dialogue exchanges, emotional beats, hooks, payoffs, sensory or technique passages.
               Skip plain plot-advancing filler and scene transitions.
-            - At most 24 materials per batch; each excerpt between 8 and 1200 characters.
+            - At most 16 materials per batch; each excerpt between 8 and 1200 characters.
               Order the batch from strongest to weakest.
+            - Extraction is selection, not analysis: decide quickly, keep reasoning brief,
+              and never deliberate over individual excerpts.
             - material_type is one of: passage, dialogue_exchange, action_reaction, emotion, hook, payoff.
             - Tag and reason values must be copied verbatim from the allowed lists (exact English tokens);
               never translate them or invent new values; unknown values are dropped.

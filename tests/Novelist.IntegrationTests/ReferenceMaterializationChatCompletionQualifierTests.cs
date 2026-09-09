@@ -49,7 +49,7 @@ public sealed class ReferenceMaterializationChatCompletionQualifierTests
         Assert.Equal("qwen-plus", chat.LastRequest?.ModelId);
         Assert.Equal("high", chat.LastRequest?.ReasoningEffort);
         Assert.Equal(0, chat.LastRequest?.TemperatureOverride);
-        Assert.Equal(65_536, chat.LastRequest?.MaxOutputTokens);
+        Assert.Equal(40_960, chat.LastRequest?.MaxOutputTokens);
         Assert.True(chat.LastRequest?.RequireToolCall);
         var tool = Assert.Single(chat.LastRequest!.Tools!);
         Assert.Equal("submit_materialization_qualification", tool.Name);
