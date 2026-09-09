@@ -1179,7 +1179,8 @@ public sealed class ReferenceMaterializationRunStoreTests : IDisposable
         var accepted = Assert.Single(candidates.Items);
         Assert.Equal("他推门而入，屋里安静得能听见雨声。", accepted.TextPreview);
         Assert.Equal("chapter_extraction", accepted.DecisionOrigin);
-        Assert.Equal(2, extractor.Requests.Count);
+        // 计划分轮：每章一轮（桩计划为整章单轮），逐轮提取而非一次性提取。
+        Assert.Equal(2, extractor.RoundRequests.Count);
     }
 
     [Fact]
@@ -1247,9 +1248,10 @@ public sealed class ReferenceMaterializationRunStoreTests : IDisposable
         Assert.True(
             status.Status == ReferenceMaterializationRunStates.Completed,
             $"run status={status.Status}, error={status.LastErrorCode}:{status.LastErrorMessage}");
-        // 第 1 章停在 embedding 中断后不重新提取，只提取仍处于 pending 的第 2 章。
-        var request = Assert.Single(extractor.Requests);
-        Assert.Equal(2, request.ChapterIndex);
+        // 第 1 章停在 embedding 中断后不重新提取（无任何轮请求），只提取第 2 章。
+        Assert.DoesNotContain(extractor.RoundRequests, request => request.ChapterIndex == 1);
+        var round = Assert.Single(extractor.RoundRequests);
+        Assert.Equal(2, round.ChapterIndex);
         Assert.True(status.VectorCount >= 1);
     }
 
@@ -1340,27 +1342,42 @@ public sealed class ReferenceMaterializationRunStoreTests : IDisposable
     {
         public List<ReferenceChapterExtractionRequest> Requests { get; } = [];
 
-        public ValueTask<ReferenceChapterExtractionResult> ExtractChapterMaterialsAsync(
+        public ValueTask<IReadOnlyList<ReferenceChapterExtractionRound>> PlanChapterExtractionAsync(
             ReferenceChapterExtractionRequest request,
-            CancellationToken cancellationToken,
-            Func<CancellationToken, ValueTask>? pageCompleted = null)
-        {
-            Requests.Add(request);
-            if (pageCompleted is not null)
-            {
-                // 模拟单页提取：调用一次心跳后返回全部材料。
-                return CallHeartbeatAndReturnAsync(pageCompleted, cancellationToken);
-            }
-
-            return ValueTask.FromResult(new ReferenceChapterExtractionResult(materials));
-        }
-
-        private async ValueTask<ReferenceChapterExtractionResult> CallHeartbeatAndReturnAsync(
-            Func<CancellationToken, ValueTask> pageCompleted,
             CancellationToken cancellationToken)
         {
-            await pageCompleted(cancellationToken);
-            return new ReferenceChapterExtractionResult(materials);
+            // 桩计划：整章一轮（材料一次性返回，模拟短章场景）。
+            return ValueTask.FromResult<IReadOnlyList<ReferenceChapterExtractionRound>>(
+            [
+                new ReferenceChapterExtractionRound(0, request.ChapterText.Length, "whole chapter"),
+            ]);
+        }
+
+        public ValueTask<ReferenceChapterExtractionResult> ExtractChapterRoundAsync(
+            ReferenceChapterExtractionRequest request,
+            ReferenceChapterExtractionRound round,
+            CancellationToken cancellationToken)
+        {
+            RoundRequests.Add((request.ChapterIndex, round.Start, round.End));
+            return ValueTask.FromResult(new ReferenceChapterExtractionResult(materials, 1));
+        }
+
+        public List<(int ChapterIndex, int Start, int End)> RoundRequests { get; } = [];
+
+        public async ValueTask<ReferenceChapterExtractionResult> ExtractChapterMaterialsAsync(
+            ReferenceChapterExtractionRequest request,
+            IReadOnlyList<string> alreadyExtractedExcerpts,
+            Func<IReadOnlyList<ReferenceChapterExtractedMaterial>, CancellationToken, ValueTask<IReadOnlyList<string>>>? persistPageAsync,
+            CancellationToken cancellationToken)
+        {
+            Requests.Add(request);
+            if (persistPageAsync is not null)
+            {
+                // 模拟单轮提取：材料立即落库后返回。
+                await persistPageAsync(materials, cancellationToken);
+            }
+
+            return new ReferenceChapterExtractionResult(materials, 1);
         }
     }
 

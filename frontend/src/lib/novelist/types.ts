@@ -1017,6 +1017,8 @@ has_more: boolean
     last_error_code?: string | null
     last_error_message?: string | null
     row_version: number
+    extraction_round_index?: number | null
+    extraction_round_count?: number | null
   }
 
   export interface MaterializationStatus {

@@ -331,23 +331,6 @@ public sealed class ReferenceMaterializationWorker : IAsyncDisposable
 
     // 章节处理分派：有章节级文本分段（材料化入队补建）走"整章直接提取"，
     // 否则回退 legacy 窗口切分 + 逐个打分管线。
-    // 章内活性心跳：每完成一页提取就累加 model_call_count（UI 的"模型调用 N 次"
-    // 在长提取期间可见增长）。尽力而为——心跳失败不打断提取本身。
-    private static async ValueTask PageHeartbeatAsync(
-        SqliteReferenceMaterializationRunStore store,
-        string runId,
-        int chapterIndex,
-        CancellationToken cancellationToken)
-    {
-        try
-        {
-            await store.RecordExtractionPageAsync(runId, chapterIndex, cancellationToken);
-        }
-        catch (Exception exception) when (exception is not OperationCanceledException)
-        {
-        }
-    }
-
     private async Task ProcessChapterAsync(
         SqliteReferenceMaterializationRunStore store,
         string runId,
@@ -361,21 +344,48 @@ public sealed class ReferenceMaterializationWorker : IAsyncDisposable
             var work = await store.BeginChapterExtractionAsync(runId, chapterIndex, cancellationToken);
             if (work is not null)
             {
-                var extraction = await _chapterMaterialExtractor.ExtractChapterMaterialsAsync(
-                    new ReferenceChapterExtractionRequest(
-                        work.AnchorId,
-                        work.ChapterIndex,
-                        work.ChapterTitle,
-                        work.ChapterText,
-                        work.Model),
-                    cancellationToken,
-                    ct => PageHeartbeatAsync(store, runId, chapterIndex, ct));
-                var persisted = await store.PersistChapterExtractionAsync(
+                // 计划分轮提取：先让模型把整章切成若干连续区间（计划落库，进度有
+                // 分母"第 X/N 轮"），再逐轮提取——每轮材料到达即落库（候选+计数
+                // 立即可见），失败从已完成的轮继续，不重复已付的模型费。
+                var request = new ReferenceChapterExtractionRequest(
+                    work.AnchorId,
+                    work.ChapterIndex,
+                    work.ChapterTitle,
+                    work.ChapterText,
+                    work.Model);
+                var plan = await store.ReadExtractionPlanAsync(runId, chapterIndex, cancellationToken);
+                if (plan is null)
+                {
+                    var rounds = await _chapterMaterialExtractor.PlanChapterExtractionAsync(request, cancellationToken);
+                    await store.SaveExtractionPlanAsync(runId, chapterIndex, rounds, cancellationToken);
+                    plan = new SqliteReferenceMaterializationRunStore.ExtractionPlanState(rounds, 0);
+                }
+
+                var requestCount = 0;
+                var alreadyExtracted = new List<string>(
+                    await store.ListPersistedExtractionExcerptsAsync(runId, chapterIndex, cancellationToken));
+                for (; plan.RoundIndex < plan.Rounds.Count; plan = plan with { RoundIndex = plan.RoundIndex + 1 })
+                {
+                    if (alreadyExtracted.Count >= ReferenceMaterializationChatCompletionQualifier.MaxExtractedMaterialsPerChapter)
+                    {
+                        break;
+                    }
+
+                    var round = plan.Rounds[plan.RoundIndex];
+                    var roundResult = await _chapterMaterialExtractor.ExtractChapterRoundAsync(request, round, cancellationToken);
+                    requestCount++;
+                    var persisted = await store.PersistExtractionRoundAsync(
+                        runId, chapterIndex, roundResult.Materials, cancellationToken);
+                    await store.AdvanceExtractionRoundAsync(runId, chapterIndex, cancellationToken);
+                    alreadyExtracted.AddRange(persisted.PersistedExcerpts);
+                }
+
+                var completed = await store.CompleteExtractionAsync(
                     runId,
                     chapterIndex,
-                    extraction,
+                    requestCount,
                     cancellationToken);
-                if (persisted.AcceptedCount == 0)
+                if (completed.AcceptedCount == 0)
                 {
                     await store.CompleteEmptyEmbeddingAsync(runId, chapterIndex, cancellationToken);
                     return;

@@ -758,6 +758,12 @@ await command.ExecuteNonQueryAsync(cancellationToken);
 
  await EnsureColumnAsync(connection, "reference_materialization_vector_indexes", "created_at", "TEXT", cancellationToken);
  await EnsureColumnAsync(connection, "reference_materialization_vector_indexes", "updated_at", "TEXT", cancellationToken);
+
+ // v8 计划分轮提取：章节进度记录提取计划（整章字符区间划分）与已完成轮次，
+ // 断点续轮与"第 X/N 轮"进度展示都依赖它。
+ await EnsureColumnAsync(connection, "reference_materialization_chapter_progress", "extraction_plan_json", "TEXT", cancellationToken);
+ await EnsureColumnAsync(connection, "reference_materialization_chapter_progress", "extraction_round_count", "INTEGER", cancellationToken);
+ await EnsureColumnAsync(connection, "reference_materialization_chapter_progress", "extraction_round_index", "INTEGER NOT NULL DEFAULT 0", cancellationToken);
  }
 
  // v6 批处理拆分前的 runs 表无法追加升级：既缺 batch 列，又带着 INSERT 不再提供、且无默认值的

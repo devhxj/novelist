@@ -35,6 +35,8 @@ public sealed class ReferenceChapterMaterialExtractorTests
                 "第一章",
                 "他推门而入，屋里安静得能听见雨声。",
                 new ReferenceMaterializationLlmSelection("deepseek", "deepseek-v4-flash", "high")),
+            [],
+            null,
             CancellationToken.None);
 
         // 首批不足额（2 < 12）即视为章节提取完毕：只发一次请求。
@@ -67,11 +69,17 @@ public sealed class ReferenceChapterMaterialExtractorTests
                 "第一章",
                 chapterText,
                 new ReferenceMaterializationLlmSelection("deepseek", "deepseek-v4-flash", "high")),
-            CancellationToken.None,
-            _ => { heartbeatCount++; return ValueTask.CompletedTask; });
+            [],
+            async (materials, ct) =>
+            {
+                heartbeatCount++;
+                await Task.Delay(1, ct);
+                return materials.Select(material => material.Excerpt).ToArray();
+            },
+            CancellationToken.None);
 
         Assert.Equal(2, chat.Requests.Count);
-        // 每完成一页触发一次活性心跳。
+        // 每完成一轮触发一次持久化回调（材料即落库）。
         Assert.Equal(chat.Requests.Count, heartbeatCount);
         Assert.Equal(30, result.Materials.Count);
         for (var i = 0; i < chat.Requests.Count; i++)
@@ -103,6 +111,8 @@ public sealed class ReferenceChapterMaterialExtractorTests
                 "第一章",
                 new string('文', 2_000),
                 new ReferenceMaterializationLlmSelection("deepseek", "deepseek-v4-flash", "high")),
+            [],
+            null,
             CancellationToken.None);
 
         Assert.Equal(2, chat.Requests.Count);
@@ -123,9 +133,11 @@ public sealed class ReferenceChapterMaterialExtractorTests
                 "第一章",
                 chapterText,
                 new ReferenceMaterializationLlmSelection("deepseek", "deepseek-v4-flash", "high")),
+            [],
+            null,
             CancellationToken.None);
 
-        // 达到全局 40 条上限后停止继续分页。
+        // 达到全局 40 条上限后停止继续分轮。
         Assert.Equal(3, chat.Requests.Count);
         Assert.Equal(40, result.Materials.Count);
     }
@@ -147,9 +159,11 @@ public sealed class ReferenceChapterMaterialExtractorTests
                 "第一章",
                 new string('文', 2_000),
                 new ReferenceMaterializationLlmSelection("deepseek", "deepseek-v4-flash", "high")),
+            [],
+            null,
             CancellationToken.None);
 
-        // 第二批全部与已提取重复：立即终止，不会无限分页。
+        // 第二批全部与已提取重复：立即终止，不会无限分轮。
         Assert.Equal(2, chat.Requests.Count);
         Assert.Equal(16, result.Materials.Count);
     }
@@ -173,6 +187,8 @@ public sealed class ReferenceChapterMaterialExtractorTests
                         "第一章",
                         new string('文', 2_000),
                         new ReferenceMaterializationLlmSelection("deepseek", "deepseek-v4-flash", "high")),
+                    [],
+                    null,
                     CancellationToken.None));
 
             Assert.Equal(ReferenceMaterializationErrorCodes.LlmRequestFailed, exception.ErrorCode);

@@ -261,7 +261,13 @@ public sealed record ReferenceMaterializationChapterProgressPayload(
     [property: JsonPropertyName("last_error_message")]
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     string? LastErrorMessage,
-    [property: JsonPropertyName("row_version")] long RowVersion);
+    [property: JsonPropertyName("row_version")] long RowVersion,
+    [property: JsonPropertyName("extraction_round_index")]
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    int? ExtractionRoundIndex = null,
+    [property: JsonPropertyName("extraction_round_count")]
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    int? ExtractionRoundCount = null);
 
 public sealed record ReferenceMaterializationStatusPayload(
     [property: JsonPropertyName("run_id")] string RunId,

@@ -144,7 +144,8 @@ internal sealed partial class SqliteReferenceMaterializationRunStore
         command.CommandText = """
             SELECT chapter_index, batch_index, status, current_stage,
                    candidate_count, decided_count, accepted_count, rejected_count, review_count, vector_count,
-                   model_call_count, started_at, completed_at, last_error_code, last_error_message, row_version
+                   model_call_count, started_at, completed_at, last_error_code, last_error_message, row_version,
+                   extraction_round_count, extraction_round_index
             FROM reference_materialization_chapter_progress
             WHERE run_id = $run_id
             ORDER BY chapter_index ASC
@@ -173,7 +174,11 @@ internal sealed partial class SqliteReferenceMaterializationRunStore
                 reader.IsDBNull(12) ? null : ParseTimestamp(reader.GetString(12)),
                 reader.IsDBNull(13) ? null : reader.GetString(13),
                 reader.IsDBNull(14) ? null : reader.GetString(14),
-                reader.GetInt64(15)));
+                reader.GetInt64(15))
+            {
+                ExtractionRoundIndex = reader.IsDBNull(17) ? null : reader.GetInt32(17),
+                ExtractionRoundCount = reader.IsDBNull(16) ? null : reader.GetInt32(16),
+            });
         }
 
         var totalPages = total == 0 ? 0 : (int)Math.Ceiling(total / (double)size);

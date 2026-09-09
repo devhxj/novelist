@@ -25,7 +25,7 @@ public sealed class ReferenceMaterializationChatCompletionQualifier : IReference
     // MaxExtractedMaterialsPerChapter（40 条）为上限。最坏一批 24×1200 字摘录约 24K token，
     // 叠加 max 力度推理后仍在预算内。
     private const int MaxMaterialsPerRequest = 16;
-    private const int MaxExtractedMaterialsPerChapter = 40;
+    public const int MaxExtractedMaterialsPerChapter = 40;
     private const int MaxExtractionExcerptChars = 1_200;
     // 思考模型在 high/max 推理力度下的推理 token 计入输出预算，8192 会被纯推理耗尽导致无声结束。
     private const int MaxOutputTokens = 40_960;
@@ -133,10 +133,14 @@ public sealed class ReferenceMaterializationChatCompletionQualifier : IReference
             : ParseToolArguments(toolCall.ArgumentsJson, input);
     }
 
-    public async ValueTask<ReferenceChapterExtractionResult> ExtractChapterMaterialsAsync(
+    private const string PlanningToolName = "plan_chapter_extraction";
+
+    // 计划阶段：一次小输出请求让模型通读整章、按材料密度切分为若干连续区间。
+    // 区间经代码校验（无缝、无叠、覆盖 [0, length)），不合法即重问一次，仍不合法
+    // 则按固定切片回退——计划是确定性分片，不依赖模型自觉。
+    public async ValueTask<IReadOnlyList<ReferenceChapterExtractionRound>> PlanChapterExtractionAsync(
         ReferenceChapterExtractionRequest input,
-        CancellationToken cancellationToken,
-        Func<CancellationToken, ValueTask>? pageCompleted = null)
+        CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(input);
         if (string.IsNullOrWhiteSpace(input.ChapterText))
@@ -144,75 +148,206 @@ public sealed class ReferenceMaterializationChatCompletionQualifier : IReference
             throw new ArgumentException("Chapter extraction requires non-empty chapter text.", nameof(input));
         }
 
-        // 输出分页：逐轮请求"下一批"材料，批次依次覆盖不同的输出内容；
-        // 空批次、不足额批次（模型声明剩余不足）或全与已提取重复时终止。
-        var extracted = new List<ReferenceChapterExtractedMaterial>();
-        var seenExcerpts = new HashSet<string>(StringComparer.Ordinal);
-        var requestCount = 0;
-        while (extracted.Count < MaxExtractedMaterialsPerChapter)
+        for (var attempt = 1; ; attempt++)
         {
-            var batch = await ExtractBatchAsync(input, extracted, cancellationToken);
-            requestCount++;
-            var added = 0;
-            foreach (var material in batch)
+            ChatToolCall? toolCall;
+            try
             {
-                if (extracted.Count >= MaxExtractedMaterialsPerChapter)
-                {
-                    break;
-                }
-
-                if (seenExcerpts.Add(material.Excerpt))
-                {
-                    extracted.Add(material);
-                    added++;
-                }
+                var request = new ChatCompletionRequest(
+                    input.Model.ProviderName,
+                    input.Model.ModelId,
+                    input.Model.ReasoningEffort,
+                    [
+                        new ChatCompletionMessage("system", BuildPlanningSystemPrompt()),
+                        new ChatCompletionMessage("user", JsonSerializer.Serialize(new
+                        {
+                            chapter_index = input.ChapterIndex,
+                            chapter_title = input.ChapterTitle,
+                            chapter_text = input.ChapterText
+                        }))
+                    ],
+                    [new ChatToolDefinition(
+                        PlanningToolName,
+                        "Submit the extraction plan for this chapter.",
+                        PlanningToolSchema,
+                        Strict: true)],
+                    MaxOutputTokens: MaxOutputTokens,
+                    TemperatureOverride: 0,
+                    RequireToolCall: true);
+                toolCall = await ReceiveRequiredToolCallAsync(request, PlanningToolName, cancellationToken);
+            }
+            catch (ReferenceMaterializationException)
+            {
+                throw;
+            }
+            catch (Exception exception) when (exception is not OperationCanceledException)
+            {
+                throw new ReferenceMaterializationException(
+                    ReferenceMaterializationErrorCodes.LlmRequestFailed,
+                    $"Chapter extraction planning failed: {exception.Message}",
+                    exception);
             }
 
-            // 每页完成即回调：调用方借 model_call_count 递增向轮询中的 UI 发出活性信号。
-            if (pageCompleted is not null)
+            if (toolCall is not null &&
+                TryParsePlanningRounds(toolCall.ArgumentsJson, input.ChapterText.Length, out var rounds))
             {
-                await pageCompleted(cancellationToken);
+                return rounds;
             }
 
-            if (added == 0 || batch.Count < MaxMaterialsPerRequest)
+            if (attempt >= 2)
             {
-                break;
+                // 两次计划都不合格：按固定切片兜底，提取不因此失败。
+                return BuildFallbackRounds(input.ChapterText.Length);
             }
         }
-
-        return new ReferenceChapterExtractionResult(extracted, requestCount);
     }
 
-    private async ValueTask<IReadOnlyList<ReferenceChapterExtractedMaterial>> ExtractBatchAsync(
-        ReferenceChapterExtractionRequest input,
-        IReadOnlyList<ReferenceChapterExtractedMaterial> extracted,
-        CancellationToken cancellationToken)
+    private static string BuildPlanningSystemPrompt()
     {
-        // 传输中断（供应商掐流 ResponseEnded / 连接重置）是间歇性网络层错误：
-        // 重试无害且大概率救回，属于"有必要才重试"的例外；重试同样经过节流间隔。
-        // 供应商侧拒绝（限流/突发保护）仍立即失败——重试会延长冷却窗口。
+        return """
+            You plan the extraction of reusable fiction-writing materials from one chapter.
+            One response cannot hold all materials, so the chapter is processed round by round:
+            your job is ONLY to split the chapter into consecutive character ranges (rounds),
+            ordered from chapter start to end, that together cover the whole chapter exactly
+            once with no overlap and no gap.
+
+            Call plan_chapter_extraction exactly once with a rounds array.
+            Each item: {"start":0,"end":1500,"focus":"one short phrase describing this part"}
+
+            Rules:
+            - start/end are zero-based character offsets into chapter_text;
+              the first round starts at 0, the last round ends at the chapter length,
+              and each round's start equals the previous round's end.
+            - Split by narrative structure (scene shifts, dialogue blocks, turning points),
+              not mechanically: dense passages deserve smaller ranges, transitions can be larger.
+              Aim for 3 to 8 rounds for a typical chapter.
+            - focus is a short English phrase (max 80 chars) naming what happens in the range.
+            - Do not extract materials in this call. Planning only. Decide quickly.
+            """;
+    }
+
+    private static JsonElement PlanningToolSchema => planningToolSchema ??= CreatePlanningToolSchema();
+
+    private static JsonElement? planningToolSchema;
+
+    private static JsonElement CreatePlanningToolSchema()
+    {
+        return JsonSerializer.SerializeToElement(new Dictionary<string, object?>
+        {
+            ["type"] = "object",
+            ["additionalProperties"] = false,
+            ["required"] = new[] { "rounds" },
+            ["properties"] = new Dictionary<string, object?>
+            {
+                ["rounds"] = new Dictionary<string, object?>
+                {
+                    ["type"] = "array",
+                    ["minItems"] = 1,
+                    ["maxItems"] = 12,
+                    ["items"] = new Dictionary<string, object?>
+                    {
+                        ["type"] = "object",
+                        ["additionalProperties"] = false,
+                        ["required"] = new[] { "start", "end", "focus" },
+                        ["properties"] = new Dictionary<string, object?>
+                        {
+                            ["start"] = new Dictionary<string, object?> { ["type"] = "integer", ["minimum"] = 0 },
+                            ["end"] = new Dictionary<string, object?> { ["type"] = "integer", ["minimum"] = 1 },
+                            ["focus"] = new Dictionary<string, object?> { ["type"] = "string", ["minLength"] = 1, ["maxLength"] = 80 }
+                        }
+                    }
+                }
+            }
+        }, JsonOptions);
+    }
+
+    private static bool TryParsePlanningRounds(string argumentsJson, int chapterLength, out IReadOnlyList<ReferenceChapterExtractionRound> rounds)
+    {
+        rounds = [];
         try
         {
-            return await ExtractBatchCoreAsync(input, extracted, cancellationToken);
+            using var document = JsonDocument.Parse(argumentsJson);
+            var root = document.RootElement;
+            if (root.ValueKind != JsonValueKind.Object ||
+                !root.TryGetProperty("rounds", out var roundsElement) ||
+                roundsElement.ValueKind != JsonValueKind.Array ||
+                roundsElement.GetArrayLength() is 0 or > 12)
+            {
+                return false;
+            }
+
+            var parsed = new List<ReferenceChapterExtractionRound>();
+            var expectedStart = 0;
+            foreach (var item in roundsElement.EnumerateArray())
+            {
+                if (item.ValueKind != JsonValueKind.Object ||
+                    !item.TryGetProperty("start", out var startElement) ||
+                    !item.TryGetProperty("end", out var endElement) ||
+                    !item.TryGetProperty("focus", out var focusElement) ||
+                    startElement.ValueKind != JsonValueKind.Number ||
+                    endElement.ValueKind != JsonValueKind.Number ||
+                    !startElement.TryGetInt32(out var start) ||
+                    !endElement.TryGetInt32(out var end) ||
+                    focusElement.ValueKind != JsonValueKind.String)
+                {
+                    return false;
+                }
+
+                // 无缝无叠：本轮 start 必须接上前轮 end，末轮收在章长。
+                if (start != expectedStart || end <= start || end > chapterLength)
+                {
+                    return false;
+                }
+
+                var focus = focusElement.GetString() ?? string.Empty;
+                parsed.Add(new ReferenceChapterExtractionRound(start, end, focus.Length > 80 ? focus[..80] : focus));
+                expectedStart = end;
+            }
+
+            if (expectedStart != chapterLength)
+            {
+                return false;
+            }
+
+            rounds = parsed;
+            return true;
         }
-        catch (ReferenceMaterializationException exception) when (IsTransportInterruption(exception))
+        catch (JsonException)
         {
-            await Task.Delay(TimeSpan.FromSeconds(10), cancellationToken);
-            return await ExtractBatchCoreAsync(input, extracted, cancellationToken);
+            return false;
         }
     }
 
-    private static bool IsTransportInterruption(ReferenceMaterializationException exception)
+    private static IReadOnlyList<ReferenceChapterExtractionRound> BuildFallbackRounds(int chapterLength)
     {
-        // 原始异常类型挂在 InnerException；消息兜底匹配掐流签名。
-        return exception.InnerException is HttpRequestException ||
-            exception.Message.Contains("response ended prematurely", StringComparison.OrdinalIgnoreCase) ||
-            exception.Message.Contains("响应过早结束", StringComparison.Ordinal);
+        // 固定切片兜底：计划两次不合格时按 ~1500 字等分，保证提取能继续。
+        const int fallbackSliceChars = 1_500;
+        var rounds = new List<ReferenceChapterExtractionRound>();
+        for (var start = 0; start < chapterLength; start += fallbackSliceChars)
+        {
+            var end = Math.Min(start + fallbackSliceChars, chapterLength);
+            rounds.Add(new ReferenceChapterExtractionRound(start, end, "chapter segment"));
+        }
+
+        return rounds.Count > 0 ? rounds : [new ReferenceChapterExtractionRound(0, chapterLength, "chapter")];
     }
 
-    private async ValueTask<IReadOnlyList<ReferenceChapterExtractedMaterial>> ExtractBatchCoreAsync(
+    // 按计划区间执行一轮：整章文本照常全量输入，但本轮只产出完全落在区间内的摘录
+    //（代码强制丢弃越界摘录）。区间互不重叠，去重载荷不再需要随轮膨胀。
+    public async ValueTask<ReferenceChapterExtractionResult> ExtractChapterRoundAsync(
         ReferenceChapterExtractionRequest input,
-        IReadOnlyList<ReferenceChapterExtractedMaterial> extracted,
+        ReferenceChapterExtractionRound round,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(input);
+        ArgumentNullException.ThrowIfNull(round);
+        var batch = await ExtractRoundBatchAsync(input, round, cancellationToken);
+        return new ReferenceChapterExtractionResult(batch, 1);
+    }
+
+    private async ValueTask<IReadOnlyList<ReferenceChapterExtractedMaterial>> ExtractRoundBatchAsync(
+        ReferenceChapterExtractionRequest input,
+        ReferenceChapterExtractionRound round,
         CancellationToken cancellationToken)
     {
         ChatToolCall? toolCall = null;
@@ -229,8 +364,160 @@ public sealed class ReferenceMaterializationChatCompletionQualifier : IReference
                         chapter_index = input.ChapterIndex,
                         chapter_title = input.ChapterTitle,
                         chapter_text = input.ChapterText,
-                        material_offset = extracted.Count,
-                        extracted_excerpts = extracted.Select(material => material.Excerpt).ToArray()
+                        round_start = round.Start,
+                        round_end = round.End,
+                        round_focus = round.Focus
+                    }))
+                ],
+                [new ChatToolDefinition(
+                    ExtractionToolName,
+                    "Submit the chapter materials extracted from this round's range.",
+                    ExtractionToolSchema,
+                    Strict: true)],
+                MaxOutputTokens: MaxOutputTokens,
+                TemperatureOverride: 0,
+                RequireToolCall: true);
+            toolCall = await ReceiveRequiredToolCallAsync(request, ExtractionToolName, cancellationToken);
+        }
+        catch (ReferenceMaterializationException)
+        {
+            throw;
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException)
+        {
+            throw new ReferenceMaterializationException(
+                ReferenceMaterializationErrorCodes.LlmRequestFailed,
+                $"Chapter extraction request failed: {exception.Message}",
+                exception);
+        }
+
+        if (toolCall is null)
+        {
+            throw InvalidOutput("Chapter extraction did not return the required tool call.");
+        }
+
+        // 区间强制：只保留完全落在本轮区间内的摘录（相对章文本偏移）。
+        return ParseChapterExtraction(toolCall.ArgumentsJson).Materials
+            .Where(material =>
+            {
+                var index = input.ChapterText.IndexOf(material.Excerpt, StringComparison.Ordinal);
+                return index >= round.Start && index + material.Excerpt.Length <= round.End;
+            })
+            .ToArray();
+    }
+
+    public async ValueTask<ReferenceChapterExtractionResult> ExtractChapterMaterialsAsync(
+        ReferenceChapterExtractionRequest input,
+        IReadOnlyList<string> alreadyExtractedExcerpts,
+        Func<IReadOnlyList<ReferenceChapterExtractedMaterial>, CancellationToken, ValueTask<IReadOnlyList<string>>>? persistPageAsync,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(input);
+        ArgumentNullException.ThrowIfNull(alreadyExtractedExcerpts);
+        if (string.IsNullOrWhiteSpace(input.ChapterText))
+        {
+            throw new ArgumentException("Chapter extraction requires non-empty chapter text.", nameof(input));
+        }
+
+        // 输出上下文有限（128K），一章的素材必须分多次处理产出：逐轮请求"下一批"
+        // 新材料，每页到达即交调用方落库——进度可见、失败可从已完成的页继续。
+        // 空批次、不足额批次（模型声明剩余不足）或全与已提取重复时终止。
+        var extracted = new List<ReferenceChapterExtractedMaterial>();
+        var seenExcerpts = new HashSet<string>(alreadyExtractedExcerpts, StringComparer.Ordinal);
+        var requestCount = 0;
+        while (seenExcerpts.Count < MaxExtractedMaterialsPerChapter)
+        {
+            var batch = await ExtractBatchAsync(input, [.. seenExcerpts], cancellationToken);
+            requestCount++;
+            var newMaterials = new List<ReferenceChapterExtractedMaterial>();
+            foreach (var material in batch)
+            {
+                if (seenExcerpts.Count >= MaxExtractedMaterialsPerChapter)
+                {
+                    break;
+                }
+
+                if (seenExcerpts.Add(material.Excerpt))
+                {
+                    newMaterials.Add(material);
+                }
+            }
+
+            // 每页立即持久化：调用方逐字校验后返回实际落库的摘录，
+            // 计数与去重上下文都以落库结果为准（幻觉摘录不占用配额）。
+            IReadOnlyList<string> persistedExcerpts = newMaterials.Select(material => material.Excerpt).ToArray();
+            if (persistPageAsync is not null && newMaterials.Count > 0)
+            {
+                persistedExcerpts = await persistPageAsync(newMaterials, cancellationToken);
+                foreach (var excerpt in persistedExcerpts)
+                {
+                    extracted.Add(newMaterials.First(material =>
+                        string.Equals(material.Excerpt, excerpt, StringComparison.Ordinal)));
+                }
+            }
+            else
+            {
+                extracted.AddRange(newMaterials);
+            }
+
+            var added = persistedExcerpts.Count;
+            if (added == 0 || batch.Count < MaxMaterialsPerRequest)
+            {
+                break;
+            }
+        }
+
+        return new ReferenceChapterExtractionResult(extracted, requestCount);
+    }
+
+    private async ValueTask<IReadOnlyList<ReferenceChapterExtractedMaterial>> ExtractBatchAsync(
+        ReferenceChapterExtractionRequest input,
+        IReadOnlyList<string> extractedExcerpts,
+        CancellationToken cancellationToken)
+    {
+        // 传输中断（供应商掐流 ResponseEnded / 连接重置）是间歇性网络层错误：
+        // 重试无害且大概率救回，属于"有必要才重试"的例外；重试同样经过节流间隔。
+        // 供应商侧拒绝（限流/突发保护）仍立即失败——重试会延长冷却窗口。
+        try
+        {
+            return await ExtractBatchCoreAsync(input, extractedExcerpts, cancellationToken);
+        }
+        catch (ReferenceMaterializationException exception) when (IsTransportInterruption(exception))
+        {
+            await Task.Delay(TimeSpan.FromSeconds(10), cancellationToken);
+            return await ExtractBatchCoreAsync(input, extractedExcerpts, cancellationToken);
+        }
+    }
+
+    private static bool IsTransportInterruption(ReferenceMaterializationException exception)
+    {
+        // 原始异常类型挂在 InnerException；消息兜底匹配掐流签名。
+        return exception.InnerException is HttpRequestException ||
+            exception.Message.Contains("response ended prematurely", StringComparison.OrdinalIgnoreCase) ||
+            exception.Message.Contains("响应过早结束", StringComparison.Ordinal);
+    }
+
+    private async ValueTask<IReadOnlyList<ReferenceChapterExtractedMaterial>> ExtractBatchCoreAsync(
+        ReferenceChapterExtractionRequest input,
+        IReadOnlyList<string> extractedExcerpts,
+        CancellationToken cancellationToken)
+    {
+        ChatToolCall? toolCall = null;
+        try
+        {
+            var request = new ChatCompletionRequest(
+                input.Model.ProviderName,
+                input.Model.ModelId,
+                input.Model.ReasoningEffort,
+                [
+                    new ChatCompletionMessage("system", BuildExtractionSystemPrompt()),
+                    new ChatCompletionMessage("user", JsonSerializer.Serialize(new
+                    {
+                        chapter_index = input.ChapterIndex,
+                        chapter_title = input.ChapterTitle,
+                        chapter_text = input.ChapterText,
+                        material_offset = extractedExcerpts.Count,
+                        extracted_excerpts = extractedExcerpts
                     }))
                 ],
                 [new ChatToolDefinition(
