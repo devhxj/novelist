@@ -102,6 +102,60 @@ internal sealed partial class SqliteReferenceMaterializationRunStore
         await transaction.CommitAsync(cancellationToken);
     }
 
+    // 未过期租约清单：worker 启动时用它识别"持锁进程已死"的孤儿租约。
+    public async ValueTask<IReadOnlyList<(string RunId, string WorkerId)>> ListActiveLeasesAsync(
+        CancellationToken cancellationToken)
+    {
+        var databasePath = await EnsureSchemaAsync(cancellationToken);
+        await using var connection = await OpenConnectionAsync(databasePath, cancellationToken);
+        await using var command = connection.CreateCommand();
+        command.CommandText = """
+            SELECT run_id, worker_id
+            FROM reference_materialization_run_leases
+            WHERE lease_expires_at > $now;
+            """;
+        command.Parameters.AddWithValue("$now", FormatTimestamp(DateTimeOffset.UtcNow));
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        var leases = new List<(string, string)>();
+        while (await reader.ReadAsync(cancellationToken))
+        {
+            leases.Add((reader.GetString(0), reader.GetString(1)));
+        }
+
+        return leases;
+    }
+
+    // 立即过期指定 worker 的租约（启动清扫：持锁进程已死时使用）。
+    // 只作用于该 worker 自己的行，不误伤并发存活实例。
+    public async ValueTask<bool> ExpireLeaseForWorkerAsync(
+        string runId,
+        string workerId,
+        CancellationToken cancellationToken)
+    {
+        var normalizedRunId = NormalizeRunId(runId);
+        if (string.IsNullOrWhiteSpace(workerId))
+        {
+            throw new ArgumentException("Worker id is required.", nameof(workerId));
+        }
+
+        var databasePath = await EnsureSchemaAsync(cancellationToken);
+        await using var connection = await OpenConnectionAsync(databasePath, cancellationToken);
+        await using var command = connection.CreateCommand();
+        command.CommandText = """
+            UPDATE reference_materialization_run_leases
+            SET lease_expires_at = $expired_at,
+                updated_at = $updated_at
+            WHERE run_id = $run_id
+              AND worker_id = $worker_id
+              AND lease_expires_at > $expired_at;
+            """;
+        command.Parameters.AddWithValue("$expired_at", FormatTimestamp(DateTimeOffset.UtcNow - TimeSpan.FromSeconds(1)));
+        command.Parameters.AddWithValue("$updated_at", FormatTimestamp(DateTimeOffset.UtcNow));
+        command.Parameters.AddWithValue("$run_id", normalizedRunId);
+        command.Parameters.AddWithValue("$worker_id", workerId);
+        return await command.ExecuteNonQueryAsync(cancellationToken) == 1;
+    }
+
     public async ValueTask<bool> RenewBatchLeaseAsync(
         ReferenceMaterializationBatchClaim claim,
         TimeSpan leaseDuration,

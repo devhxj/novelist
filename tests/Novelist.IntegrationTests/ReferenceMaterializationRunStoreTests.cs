@@ -818,6 +818,55 @@ public sealed class ReferenceMaterializationRunStoreTests : IDisposable
     }
 
     [Fact]
+    public async Task WorkerStartupSweepExpiresOnlyLeasesOfDeadProcesses()
+    {
+        var options = CreateOptions();
+        var anchor = await CreateAnchorAsync(options, chapterCount: 2);
+        var splitService = new SqliteReferenceMaterializationService(options, new EmptyChapterSplitAnalyzer());
+        var profile = await splitService.PreviewChapterSplitAsync(
+            new PreviewReferenceChapterSplitPayload(anchor.NovelId, anchor.AnchorId, "# {title}"),
+            CancellationToken.None);
+        await splitService.ConfirmChapterSplitAsync(
+            new ConfirmReferenceChapterSplitPayload(anchor.NovelId, anchor.AnchorId, profile.SplitProfileId),
+            CancellationToken.None);
+        var resolver = new ReferenceCorpusDatabasePathResolver(options);
+        var store = new SqliteReferenceMaterializationRunStore(resolver);
+        var run = await store.CreateAsync(CreateSeed(anchor.AnchorId, profile.SplitProfileId), CancellationToken.None);
+
+        // 模拟崩溃残留：死进程 PID 持有未过期租约；活进程（本测试进程）持有一份对照。
+        var deadClaim = await store.ClaimCurrentBatchAsync(
+            run.RunId,
+            $"materialization-worker:99999999:{Guid.NewGuid():N}",
+            TimeSpan.FromMinutes(30),
+            CancellationToken.None);
+        Assert.NotNull(deadClaim);
+
+        var sweepTest = new ReferenceMaterializationWorker(
+            resolver,
+            new FailingQualifier(),
+            new AcceptingEmbedder(),
+            new ReferenceMaterializationVectorIndexer(resolver, new RecordingVecProvisioner()));
+        await sweepTest.StartAsync();
+        await sweepTest.StopAsync();
+        await sweepTest.DisposeAsync();
+
+        // 死进程租约被启动清扫立即过期：无需等 30 分钟自然过期即可回收。
+        var reclaimed = await store.ClaimCurrentBatchAsync(
+            run.RunId,
+            $"materialization-worker:{Environment.ProcessId}:{Guid.NewGuid():N}",
+            TimeSpan.FromMinutes(1),
+            CancellationToken.None);
+        Assert.NotNull(reclaimed);
+        await store.ReleaseBatchLeaseAsync(reclaimed, CancellationToken.None);
+
+        // workerId 解析：标准格式可解析，自定义格式不判定。
+        Assert.True(ReferenceMaterializationWorker.TryParseWorkerProcessId(
+            $"materialization-worker:123:abc", out var parsed));
+        Assert.Equal(123, parsed);
+        Assert.False(ReferenceMaterializationWorker.TryParseWorkerProcessId("custom-worker", out _));
+    }
+
+    [Fact]
     public async Task ClaimReclaimsAnExpiredLeaseAndResetsOnlyTheCurrentIncompleteBatch()
     {
         var options = CreateOptions();

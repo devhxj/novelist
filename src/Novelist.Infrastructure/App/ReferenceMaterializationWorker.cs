@@ -65,6 +65,12 @@ public sealed class ReferenceMaterializationWorker : IAsyncDisposable
                 return;
             }
 
+            // 启动清扫：应用崩溃/退出后遗留的租约要等自然过期（最长一个租约期），
+            // 这段时间 run 显示 running 却零进展——表象与挂起无异。workerId 内嵌
+            // 持锁进程 PID：进程已死的租约立即过期，重启后可马上回收续跑；
+            // 存活进程（如并行实例）的租约不动。
+            await ExpireLeasesOfDeadWorkersAsync(cancellationToken);
+
             _loopCancellation?.Dispose();
             _loopCancellation = new CancellationTokenSource();
             _loopTask = RunLoopAsync(_loopCancellation.Token);
@@ -72,6 +78,57 @@ public sealed class ReferenceMaterializationWorker : IAsyncDisposable
         finally
         {
             _lifecycleGate.Release();
+        }
+    }
+
+    internal static bool TryParseWorkerProcessId(string workerId, out int processId)
+    {
+        // workerId 形如 materialization-worker:{pid}:{guid}；非本格式（自定义 id）不判定。
+        processId = 0;
+        var segments = workerId.Split(':');
+        return segments.Length == 3 &&
+            string.Equals(segments[0], "materialization-worker", StringComparison.Ordinal) &&
+            int.TryParse(segments[1], out processId) &&
+            processId > 0;
+    }
+
+    private async ValueTask ExpireLeasesOfDeadWorkersAsync(CancellationToken cancellationToken)
+    {
+        try
+        {
+            var store = new SqliteReferenceMaterializationRunStore(_databasePathResolver);
+            foreach (var (runId, workerId) in await store.ListActiveLeasesAsync(cancellationToken))
+            {
+                if (string.Equals(workerId, _workerId, StringComparison.Ordinal) ||
+                    !TryParseWorkerProcessId(workerId, out var pid) ||
+                    IsProcessAlive(pid))
+                {
+                    continue;
+                }
+
+                await store.ExpireLeaseForWorkerAsync(runId, workerId, cancellationToken);
+            }
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException)
+        {
+            // 清扫尽力而为：失败时退回自然过期语义，不影响启动。
+        }
+    }
+
+    private static bool IsProcessAlive(int processId)
+    {
+        try
+        {
+            using var process = System.Diagnostics.Process.GetProcessById(processId);
+            return !process.HasExited;
+        }
+        catch (ArgumentException)
+        {
+            return false;
+        }
+        catch (InvalidOperationException)
+        {
+            return false;
         }
     }
 
