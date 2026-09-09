@@ -120,6 +120,55 @@ public sealed class ReferenceChapterMaterialExtractorTests
     }
 
     [Fact]
+    public async Task PlanningParsesTypePartitionAndRejectsBrokenCoverage()
+    {
+        var chat = new ScriptedChatCompletionClient(
+        [
+            // 首次：遗漏 emotion 类型 → 拒绝；二次：完整划分 → 通过。
+            [ReferenceChapterMaterialExtractorTests.PlanningToolCall("""{"passes":[{"material_types":["passage"],"focus":"descriptive"},{"material_types":["hook","payoff"],"focus":"structural"}]}""")],
+            [ReferenceChapterMaterialExtractorTests.PlanningToolCall("""{"passes":[{"material_types":["dialogue_exchange","action_reaction"],"focus":"interactive"},{"material_types":["emotion"],"focus":"feelings"},{"material_types":["hook","payoff"],"focus":"structural"},{"material_types":["passage"],"focus":"descriptive"}]}""")],
+        ]);
+        var extractor = new ReferenceMaterializationChatCompletionQualifier(chat);
+
+        var plan = await extractor.PlanChapterExtractionAsync(
+            new ReferenceChapterExtractionRequest(1, 1, "第一章", new string('文', 2_000),
+                new ReferenceMaterializationLlmSelection("deepseek", "deepseek-v4-flash", "high")),
+            CancellationToken.None);
+
+        Assert.Equal(2, chat.Requests.Count);
+        Assert.Equal(4, plan.Count);
+        // 类型划分不重不漏，趟顺序保留模型给的顺序。
+        Assert.Equal(["dialogue_exchange", "action_reaction"], plan[0].MaterialTypes);
+        Assert.Equal(["emotion"], plan[1].MaterialTypes);
+        Assert.Equal(["hook", "payoff"], plan[2].MaterialTypes);
+        Assert.Equal(["passage"], plan[3].MaterialTypes);
+    }
+
+    [Fact]
+    public async Task RoundExtractionDropsMaterialsOutsideThePassTypes()
+    {
+        // 模型越界返回非本趟类型：代码强制丢弃，只剩本趟类型。
+        var materialsJson = """
+            {"materials":[
+              {"excerpt":"他推门而入，屋里安静得能听见雨声。","material_type":"dialogue_exchange","tags":{"narrative_functions":[],"emotion_mechanics":[],"pov":[],"techniques":[],"scene_beat_roles":[],"character_relations":[],"causal_information_roles":[]},"scores":{"semantic_completeness":0.9,"information_density":0.7,"narrative_value":0.8,"transferability":0.6,"context_independence":0.7,"technique_distinctiveness":0.6},"confidence":0.9,"reason_codes":[]},
+              {"excerpt":"雨声压住窗沿，他想起昨夜的电话。","material_type":"passage","tags":{"narrative_functions":[],"emotion_mechanics":[],"pov":[],"techniques":[],"scene_beat_roles":[],"character_relations":[],"causal_information_roles":[]},"scores":{"semantic_completeness":0.5,"information_density":0.5,"narrative_value":0.5,"transferability":0.5,"context_independence":0.5,"technique_distinctiveness":0.5},"confidence":0.5,"reason_codes":[]}
+            ]}
+            """;
+        var chat = new ScriptedChatCompletionClient([[ReferenceChapterMaterialExtractorTests.ToolCall(materialsJson)]]);
+        var extractor = new ReferenceMaterializationChatCompletionQualifier(chat);
+        var chapterText = "他推门而入，屋里安静得能听见雨声。雨声压住窗沿，他想起昨夜的电话。";
+
+        var result = await extractor.ExtractChapterRoundAsync(
+            new ReferenceChapterExtractionRequest(1, 1, "第一章", chapterText,
+                new ReferenceMaterializationLlmSelection("deepseek", "deepseek-v4-flash", "high")),
+            new ReferenceChapterExtractionRound(["dialogue_exchange"], "interactive beats"),
+            CancellationToken.None);
+
+        var material = Assert.Single(result.Materials);
+        Assert.Equal("dialogue_exchange", material.MaterialType);
+    }
+
+    [Fact]
     public async Task MergedMaterialsAreCappedAtTheChapterLimit()
     {
         var chapterText = new string('文', 5_000);
@@ -234,6 +283,13 @@ public sealed class ReferenceChapterMaterialExtractorTests
         ToolCall: new ChatToolCall(
             "call-extraction",
             "submit_chapter_materials",
+            argumentsJson));
+
+    private static ChatCompletionStreamEvent PlanningToolCall(string argumentsJson) => new(
+        ChatCompletionStreamEventKind.ToolCall,
+        ToolCall: new ChatToolCall(
+            "call-planning",
+            "plan_chapter_extraction",
             argumentsJson));
 
     private static string MaterialJson(string excerpt) => $$"""

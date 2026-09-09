@@ -135,9 +135,10 @@ public sealed class ReferenceMaterializationChatCompletionQualifier : IReference
 
     private const string PlanningToolName = "plan_chapter_extraction";
 
-    // 计划阶段：一次小输出请求让模型通读整章、按材料密度切分为若干连续区间。
-    // 区间经代码校验（无缝、无叠、覆盖 [0, length)），不合法即重问一次，仍不合法
-    // 则按固定切片回退——计划是确定性分片，不依赖模型自觉。
+    // 计划阶段：一次小输出请求让模型决定"分几趟、每趟收集哪些类型的素材"。
+    // 划分的是输出（素材种类），不是输入（章节文本）——每趟都会通读全章，
+    // 只是戴不同的镜头。类型划分经代码校验（6 种类型恰好各属一趟），
+    // 不合格重问一次，仍不合格按固定分组兜底，计划永不失败。
     public async ValueTask<IReadOnlyList<ReferenceChapterExtractionRound>> PlanChapterExtractionAsync(
         ReferenceChapterExtractionRequest input,
         CancellationToken cancellationToken)
@@ -168,7 +169,7 @@ public sealed class ReferenceMaterializationChatCompletionQualifier : IReference
                     ],
                     [new ChatToolDefinition(
                         PlanningToolName,
-                        "Submit the extraction plan for this chapter.",
+                        "Submit the multi-pass extraction plan for this chapter.",
                         PlanningToolSchema,
                         Strict: true)],
                     MaxOutputTokens: MaxOutputTokens,
@@ -189,15 +190,15 @@ public sealed class ReferenceMaterializationChatCompletionQualifier : IReference
             }
 
             if (toolCall is not null &&
-                TryParsePlanningRounds(toolCall.ArgumentsJson, input.ChapterText.Length, out var rounds))
+                TryParsePlanningRounds(toolCall.ArgumentsJson, out var rounds))
             {
                 return rounds;
             }
 
             if (attempt >= 2)
             {
-                // 两次计划都不合格：按固定切片兜底，提取不因此失败。
-                return BuildFallbackRounds(input.ChapterText.Length);
+                // 两次计划都不合格：固定分组兜底，提取不因此失败。
+                return BuildFallbackRounds();
             }
         }
     }
@@ -205,23 +206,22 @@ public sealed class ReferenceMaterializationChatCompletionQualifier : IReference
     private static string BuildPlanningSystemPrompt()
     {
         return """
-            You plan the extraction of reusable fiction-writing materials from one chapter.
-            One response cannot hold all materials, so the chapter is processed round by round:
-            your job is ONLY to split the chapter into consecutive character ranges (rounds),
-            ordered from chapter start to end, that together cover the whole chapter exactly
-            once with no overlap and no gap.
+            You curate reusable fiction-writing materials from one chapter, and one response
+            cannot hold every material. The chapter is processed pass by pass: every pass
+            scans the WHOLE chapter but collects only one group of material kinds.
 
-            Call plan_chapter_extraction exactly once with a rounds array.
-            Each item: {"start":0,"end":1500,"focus":"one short phrase describing this part"}
+            Your job in this call is ONLY to plan those passes. Call
+            plan_chapter_extraction exactly once with a passes array.
+            Each item: {"material_types":["dialogue_exchange","action_reaction"],"focus":"one short phrase"}
 
             Rules:
-            - start/end are zero-based character offsets into chapter_text;
-              the first round starts at 0, the last round ends at the chapter length,
-              and each round's start equals the previous round's end.
-            - Split by narrative structure (scene shifts, dialogue blocks, turning points),
-              not mechanically: dense passages deserve smaller ranges, transitions can be larger.
-              Aim for 3 to 8 rounds for a typical chapter.
-            - focus is a short English phrase (max 80 chars) naming what happens in the range.
+            - material_types items must come from the six kinds: passage, dialogue_exchange,
+              action_reaction, emotion, hook, payoff.
+            - The passes together must cover all six kinds exactly once: every kind belongs
+              to exactly one pass. No kind may appear twice; no kind may be missing.
+            - Group kinds that you would hunt for with the same eye: e.g. dialogue_exchange
+              with action_reaction, hook with payoff. Aim for 2 to 5 passes.
+            - focus is a short English phrase (max 80 chars) describing what this pass hunts.
             - Do not extract materials in this call. Planning only. Decide quickly.
             """;
     }
@@ -232,36 +232,47 @@ public sealed class ReferenceMaterializationChatCompletionQualifier : IReference
 
     private static JsonElement CreatePlanningToolSchema()
     {
+        var passSchema = new Dictionary<string, object?>
+        {
+            ["type"] = "object",
+            ["additionalProperties"] = false,
+            ["required"] = new[] { "material_types", "focus" },
+            ["properties"] = new Dictionary<string, object?>
+            {
+                ["material_types"] = new Dictionary<string, object?>
+                {
+                    ["type"] = "array",
+                    ["minItems"] = 1,
+                    ["maxItems"] = 6,
+                    ["items"] = new Dictionary<string, object?>
+                    {
+                        ["type"] = "string",
+                        ["enum"] = AllowedMaterialTypes.Order(StringComparer.Ordinal).ToArray()
+                    }
+                },
+                ["focus"] = new Dictionary<string, object?> { ["type"] = "string", ["minLength"] = 1, ["maxLength"] = 80 }
+            }
+        };
+
         return JsonSerializer.SerializeToElement(new Dictionary<string, object?>
         {
             ["type"] = "object",
             ["additionalProperties"] = false,
-            ["required"] = new[] { "rounds" },
+            ["required"] = new[] { "passes" },
             ["properties"] = new Dictionary<string, object?>
             {
-                ["rounds"] = new Dictionary<string, object?>
+                ["passes"] = new Dictionary<string, object?>
                 {
                     ["type"] = "array",
                     ["minItems"] = 1,
-                    ["maxItems"] = 12,
-                    ["items"] = new Dictionary<string, object?>
-                    {
-                        ["type"] = "object",
-                        ["additionalProperties"] = false,
-                        ["required"] = new[] { "start", "end", "focus" },
-                        ["properties"] = new Dictionary<string, object?>
-                        {
-                            ["start"] = new Dictionary<string, object?> { ["type"] = "integer", ["minimum"] = 0 },
-                            ["end"] = new Dictionary<string, object?> { ["type"] = "integer", ["minimum"] = 1 },
-                            ["focus"] = new Dictionary<string, object?> { ["type"] = "string", ["minLength"] = 1, ["maxLength"] = 80 }
-                        }
-                    }
+                    ["maxItems"] = 6,
+                    ["items"] = passSchema
                 }
             }
         }, JsonOptions);
     }
 
-    private static bool TryParsePlanningRounds(string argumentsJson, int chapterLength, out IReadOnlyList<ReferenceChapterExtractionRound> rounds)
+    private static bool TryParsePlanningRounds(string argumentsJson, out IReadOnlyList<ReferenceChapterExtractionRound> rounds)
     {
         rounds = [];
         try
@@ -269,42 +280,51 @@ public sealed class ReferenceMaterializationChatCompletionQualifier : IReference
             using var document = JsonDocument.Parse(argumentsJson);
             var root = document.RootElement;
             if (root.ValueKind != JsonValueKind.Object ||
-                !root.TryGetProperty("rounds", out var roundsElement) ||
-                roundsElement.ValueKind != JsonValueKind.Array ||
-                roundsElement.GetArrayLength() is 0 or > 12)
+                !root.TryGetProperty("passes", out var passesElement) ||
+                passesElement.ValueKind != JsonValueKind.Array ||
+                passesElement.GetArrayLength() is 0 or > 6)
             {
                 return false;
             }
 
             var parsed = new List<ReferenceChapterExtractionRound>();
-            var expectedStart = 0;
-            foreach (var item in roundsElement.EnumerateArray())
+            var coveredTypes = new HashSet<string>(StringComparer.Ordinal);
+            foreach (var item in passesElement.EnumerateArray())
             {
                 if (item.ValueKind != JsonValueKind.Object ||
-                    !item.TryGetProperty("start", out var startElement) ||
-                    !item.TryGetProperty("end", out var endElement) ||
+                    !item.TryGetProperty("material_types", out var typesElement) ||
                     !item.TryGetProperty("focus", out var focusElement) ||
-                    startElement.ValueKind != JsonValueKind.Number ||
-                    endElement.ValueKind != JsonValueKind.Number ||
-                    !startElement.TryGetInt32(out var start) ||
-                    !endElement.TryGetInt32(out var end) ||
+                    typesElement.ValueKind != JsonValueKind.Array ||
                     focusElement.ValueKind != JsonValueKind.String)
                 {
                     return false;
                 }
 
-                // 无缝无叠：本轮 start 必须接上前轮 end，末轮收在章长。
-                if (start != expectedStart || end <= start || end > chapterLength)
+                var types = new List<string>();
+                foreach (var typeElement in typesElement.EnumerateArray())
+                {
+                    if (typeElement.ValueKind != JsonValueKind.String ||
+                        typeElement.GetString() is not { } type ||
+                        !AllowedMaterialTypes.Contains(type) ||
+                        !coveredTypes.Add(type))
+                    {
+                        return false;
+                    }
+
+                    types.Add(type);
+                }
+
+                if (types.Count == 0)
                 {
                     return false;
                 }
 
                 var focus = focusElement.GetString() ?? string.Empty;
-                parsed.Add(new ReferenceChapterExtractionRound(start, end, focus.Length > 80 ? focus[..80] : focus));
-                expectedStart = end;
+                parsed.Add(new ReferenceChapterExtractionRound(types, focus.Length > 80 ? focus[..80] : focus));
             }
 
-            if (expectedStart != chapterLength)
+            // 六种类型恰好各属一趟：不重不漏。
+            if (coveredTypes.Count != AllowedMaterialTypes.Count)
             {
                 return false;
             }
@@ -318,22 +338,27 @@ public sealed class ReferenceMaterializationChatCompletionQualifier : IReference
         }
     }
 
-    private static IReadOnlyList<ReferenceChapterExtractionRound> BuildFallbackRounds(int chapterLength)
+    private static IReadOnlyList<ReferenceChapterExtractionRound> BuildFallbackRounds()
     {
-        // 固定切片兜底：计划两次不合格时按 ~1500 字等分，保证提取能继续。
-        const int fallbackSliceChars = 1_500;
-        var rounds = new List<ReferenceChapterExtractionRound>();
-        for (var start = 0; start < chapterLength; start += fallbackSliceChars)
-        {
-            var end = Math.Min(start + fallbackSliceChars, chapterLength);
-            rounds.Add(new ReferenceChapterExtractionRound(start, end, "chapter segment"));
-        }
-
-        return rounds.Count > 0 ? rounds : [new ReferenceChapterExtractionRound(0, chapterLength, "chapter")];
+        // 固定分组兜底：按"同一种眼光"分组，覆盖全部六种类型。
+        return
+        [
+            new ReferenceChapterExtractionRound(
+                [ReferenceMaterializationCandidateTypes.DialogueExchange, ReferenceMaterializationCandidateTypes.ActionReaction],
+                "interactive beats"),
+            new ReferenceChapterExtractionRound(
+                [ReferenceMaterializationCandidateTypes.Emotion],
+                "emotion beats"),
+            new ReferenceChapterExtractionRound(
+                [ReferenceMaterializationCandidateTypes.Hook, ReferenceMaterializationCandidateTypes.Payoff],
+                "structural beats"),
+            new ReferenceChapterExtractionRound(
+                [ReferenceMaterializationCandidateTypes.Passage],
+                "descriptive and technique passages"),
+        ];
     }
 
-    // 按计划区间执行一轮：整章文本照常全量输入，但本轮只产出完全落在区间内的摘录
-    //（代码强制丢弃越界摘录）。区间互不重叠，去重载荷不再需要随轮膨胀。
+    // 执行一趟：全章照常输入，本趟只收集计划类型的素材（代码强制过滤类型）。
     public async ValueTask<ReferenceChapterExtractionResult> ExtractChapterRoundAsync(
         ReferenceChapterExtractionRequest input,
         ReferenceChapterExtractionRound round,
@@ -350,6 +375,7 @@ public sealed class ReferenceMaterializationChatCompletionQualifier : IReference
         ReferenceChapterExtractionRound round,
         CancellationToken cancellationToken)
     {
+        var allowedThisRound = new HashSet<string>(round.MaterialTypes, StringComparer.Ordinal);
         ChatToolCall? toolCall = null;
         try
         {
@@ -364,14 +390,13 @@ public sealed class ReferenceMaterializationChatCompletionQualifier : IReference
                         chapter_index = input.ChapterIndex,
                         chapter_title = input.ChapterTitle,
                         chapter_text = input.ChapterText,
-                        round_start = round.Start,
-                        round_end = round.End,
-                        round_focus = round.Focus
+                        pass_material_types = round.MaterialTypes,
+                        pass_focus = round.Focus
                     }))
                 ],
                 [new ChatToolDefinition(
                     ExtractionToolName,
-                    "Submit the chapter materials extracted from this round's range.",
+                    "Submit the chapter materials collected by this pass.",
                     ExtractionToolSchema,
                     Strict: true)],
                 MaxOutputTokens: MaxOutputTokens,
@@ -396,13 +421,9 @@ public sealed class ReferenceMaterializationChatCompletionQualifier : IReference
             throw InvalidOutput("Chapter extraction did not return the required tool call.");
         }
 
-        // 区间强制：只保留完全落在本轮区间内的摘录（相对章文本偏移）。
+        // 类型强制：只保留本趟计划类型内的材料，越界类型一律丢弃。
         return ParseChapterExtraction(toolCall.ArgumentsJson).Materials
-            .Where(material =>
-            {
-                var index = input.ChapterText.IndexOf(material.Excerpt, StringComparison.Ordinal);
-                return index >= round.Start && index + material.Excerpt.Length <= round.End;
-            })
+            .Where(material => allowedThisRound.Contains(material.MaterialType))
             .ToArray();
     }
 
@@ -762,8 +783,9 @@ public sealed class ReferenceMaterializationChatCompletionQualifier : IReference
     {
         return """
             You curate reusable fiction-writing materials from one chapter of a Chinese novel.
-            One response cannot hold every material in the chapter, so extraction is paginated:
-            each request asks for the NEXT batch of materials after the ones already extracted.
+            One response cannot hold every material in the chapter, so extraction runs pass by
+            pass: every pass reads the WHOLE chapter but collects ONLY the material kinds named
+            in this request's pass_material_types. Ignore every other kind this pass.
             Call submit_chapter_materials exactly once with a materials array.
             Each item: {"excerpt":"verbatim contiguous excerpt copied from the chapter","material_type":"...","tags":{...},"scores":{...},"confidence":0.0,"reason_codes":["..."]}
 

@@ -207,8 +207,7 @@ internal sealed partial class SqliteReferenceMaterializationRunStore
 
         var planJson = JsonSerializer.Serialize(rounds.Select(round => new
         {
-            start = round.Start,
-            end = round.End,
+            material_types = round.MaterialTypes,
             focus = round.Focus,
         }));
         var databasePath = await EnsureSchemaAsync(cancellationToken);
@@ -264,13 +263,26 @@ internal sealed partial class SqliteReferenceMaterializationRunStore
         var planJson = reader.GetString(0);
         var roundIndex = reader.GetInt32(1);
         var rounds = new List<ReferenceChapterExtractionRound>();
-        using var document = JsonDocument.Parse(planJson);
-        foreach (var item in document.RootElement.EnumerateArray())
+        using (var document = JsonDocument.Parse(planJson))
         {
-            rounds.Add(new ReferenceChapterExtractionRound(
-                item.GetProperty("start").GetInt32(),
-                item.GetProperty("end").GetInt32(),
-                item.GetProperty("focus").GetString() ?? string.Empty));
+            // 旧格式（字符区间计划）检测到即作废：返回 null 让 worker 按类型
+            // 分组格式重新规划，已完成轮的候选凭 upsert 幂等不重复计数。
+            if (document.RootElement.ValueKind != JsonValueKind.Array ||
+                (document.RootElement.GetArrayLength() > 0 &&
+                 document.RootElement[0].TryGetProperty("start", out _)))
+            {
+                return null;
+            }
+
+            foreach (var item in document.RootElement.EnumerateArray())
+            {
+                var types = item.GetProperty("material_types").EnumerateArray()
+                    .Select(type => type.GetString() ?? string.Empty)
+                    .ToArray();
+                rounds.Add(new ReferenceChapterExtractionRound(
+                    types,
+                    item.GetProperty("focus").GetString() ?? string.Empty));
+            }
         }
 
         return new ExtractionPlanState(rounds, roundIndex);

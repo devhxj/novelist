@@ -1346,10 +1346,12 @@ public sealed class ReferenceMaterializationRunStoreTests : IDisposable
             ReferenceChapterExtractionRequest request,
             CancellationToken cancellationToken)
         {
-            // 桩计划：整章一轮（材料一次性返回，模拟短章场景）。
+            // 桩计划：单趟全类型（材料一次性返回，模拟短章场景）。
             return ValueTask.FromResult<IReadOnlyList<ReferenceChapterExtractionRound>>(
             [
-                new ReferenceChapterExtractionRound(0, request.ChapterText.Length, "whole chapter"),
+                new ReferenceChapterExtractionRound(
+                    ReferenceMaterializationCandidateTypes.All,
+                    "all kinds"),
             ]);
         }
 
@@ -1358,11 +1360,11 @@ public sealed class ReferenceMaterializationRunStoreTests : IDisposable
             ReferenceChapterExtractionRound round,
             CancellationToken cancellationToken)
         {
-            RoundRequests.Add((request.ChapterIndex, round.Start, round.End));
+            RoundRequests.Add((request.ChapterIndex, string.Join(',', round.MaterialTypes)));
             return ValueTask.FromResult(new ReferenceChapterExtractionResult(materials, 1));
         }
 
-        public List<(int ChapterIndex, int Start, int End)> RoundRequests { get; } = [];
+        public List<(int ChapterIndex, string PassTypes)> RoundRequests { get; } = [];
 
         public async ValueTask<ReferenceChapterExtractionResult> ExtractChapterMaterialsAsync(
             ReferenceChapterExtractionRequest request,
