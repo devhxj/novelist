@@ -16,7 +16,7 @@ public sealed partial class SqliteReferenceAnchorService
  EmbeddingRequestOptions embeddingOptions,
  CancellationToken cancellationToken)
  {
- var dimensions = embeddingOptions.Dimensions ?? BuiltinOnnxEmbeddingModel.Dimensions;
+ var dimensions = await EmbeddingWidth.ResolveAsync(_embeddings, embeddingOptions, cancellationToken);
  await using var connection = await OpenConnectionAsync(databasePath, cancellationToken);
  await EnsureMaterialEmbeddingSchemaAsync(connection, cancellationToken);
  var novelId = await ReadMaterialAnchorNovelIdAsync(connection, anchorId, cancellationToken);
@@ -68,11 +68,7 @@ public sealed partial class SqliteReferenceAnchorService
 
  var embeddingOptions = await _embeddingConfiguration.GetActiveEmbeddingOptionsAsync(cancellationToken)
  ?? throw new InvalidOperationException("Reference material embedding configuration is not available.");
- var dimensions = embeddingOptions.Dimensions ?? BuiltinOnnxEmbeddingModel.Dimensions;
- if (dimensions <= 0)
- {
- throw new InvalidOperationException("Reference material embedding dimensions must be positive.");
- }
+ var dimensions = await EmbeddingWidth.ResolveAsync(_embeddings, embeddingOptions, cancellationToken);
 
  var databasePath = await DatabasePathAsync(cancellationToken);
  await _mutex.WaitAsync(cancellationToken);
@@ -372,7 +368,7 @@ AddMaterialScopeParameters(command, novelId);
  var batch = materials.Skip(offset).Take(EmbeddingBatchSize).ToArray();
  var response = await _embeddings.EmbedAsync(
  batch.Select(material => material.Text).ToArray(),
- options with { Dimensions = dimensions, InputKind = BuiltinOnnxEmbeddingModel.DocumentInputKind },
+ options with { InputKind = BuiltinOnnxEmbeddingModel.DocumentInputKind },
  cancellationToken);
  if (response.Items.Count != batch.Length || response.Dimensions != dimensions)
  {

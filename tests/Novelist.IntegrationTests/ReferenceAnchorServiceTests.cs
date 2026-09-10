@@ -5884,6 +5884,67 @@ var requestCount = embeddings.Requests.Count;
  }
 
  [Fact]
+ public async Task BackfillMaterialEmbeddingsUsesMeasuredWidthWhenConfigLeavesDimensionsBlank()
+ {
+ var options = CreateOptions();
+ await InitializeAsync(options);
+ var novels = new FileSystemNovelService(options, new FileSystemAppSettingsService(options));
+ var novel = await novels.CreateNovelAsync(new CreateNovelPayload("材料向量实测宽度测试", "", ""), CancellationToken.None);
+ var sourcePath = CreateSourceFile(
+ "material-embedding-measured-width.md",
+ "# 第一章\n\n雨声压低了门口。\n\n他在门口停住。");
+ // 在线 API 允许维度留空：供应商实际返回 1024 时，写入侧不能再按内置 ONNX 的 512 建表。
+ var embeddings = new DeterministicEmbeddingClient(dimensions: 1024);
+ var vec = new RecordingSqliteVecTableProvisioner();
+ var service = new SqliteReferenceAnchorService(
+ options,
+ novels,
+ new StaticEmbeddingConfigurationService(new EmbeddingRequestOptions(
+ "custom", "https://api.example.com/v1/embeddings", "test-key", "embed-v1", null, null)),
+ embeddings,
+ vec);
+ var anchor = await service.CreateAnchorAsync(
+ new CreateReferenceAnchorPayload(novel.Id, "实测宽度参考", null, sourcePath, "markdown", "user_provided"),
+ CancellationToken.None);
+ // 构建阶段已经按实测宽度写好向量行，这里先清掉，才能覆盖回填的批量向量化分支。
+ var databasePath = Path.Combine(options.DefaultDataDirectory, "reference-anchor", "index.sqlite");
+ await using (var connection = new SqliteConnection(
+ new SqliteConnectionStringBuilder { DataSource = databasePath, Pooling = false }.ToString()))
+ {
+ await connection.OpenAsync();
+ await using var clear = connection.CreateCommand();
+ clear.CommandText = "DELETE FROM reference_material_embeddings WHERE anchor_id = $anchor_id;";
+ clear.Parameters.AddWithValue("$anchor_id", anchor.AnchorId);
+ await clear.ExecuteNonQueryAsync();
+ }
+ embeddings.Requests.Clear();
+ embeddings.Options.Clear();
+ vec.Provisions.Clear();
+
+ var result = await service.BackfillMaterialEmbeddingsAsync(
+ new BackfillReferenceMaterialEmbeddingsPayload(novel.Id),
+ CancellationToken.None);
+
+ Assert.True(result.MaterialCount > 0);
+ Assert.Equal(1024, result.Dimensions);
+ Assert.Equal(result.MaterialCount, result.BuiltCount);
+ Assert.Equal(result.MaterialCount, result.ProjectionCount);
+ Assert.All(result.Items, item => Assert.Equal(1024, item.Dimensions));
+ // 宽度来自探测响应本身：探测和批量请求都不能带 dimensions 入参，
+ // 否则不支持该参数的供应商会在健康检查通过后才失败。
+ Assert.All(embeddings.Options, sent => Assert.Null(sent.Dimensions));
+ Assert.Contains(vec.Provisions, provision => provision.TableName == $"vec_reference_anchor_{anchor.AnchorId}_1024");
+ Assert.All(vec.Provisions, provision => Assert.Equal(1024, provision.Dimensions));
+
+ var second = await service.BackfillMaterialEmbeddingsAsync(
+ new BackfillReferenceMaterialEmbeddingsPayload(novel.Id),
+ CancellationToken.None);
+
+ Assert.Equal(0, second.BuiltCount);
+ Assert.Equal(result.MaterialCount, second.ReusedCount);
+ }
+
+ [Fact]
  public async Task BackfillMaterialEmbeddingsRebuildsOnlyChangedRequestedAnchor()
  {
  var options = CreateOptions();
