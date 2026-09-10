@@ -33,13 +33,11 @@ public sealed class ReferenceMaterializationEmbeddingProcessor : IReferenceMater
         EmbeddingBatchResult response;
         try
         {
+            // 请求形状与启动时的健康检查保持一致：冻结维度只用于校验响应，
+            // 不回灌成请求参数，否则不支持 dimensions 入参的供应商会在正式跑时才发现被拒。
             response = await _embeddings.EmbedAsync(
                 input.Items.Select(item => item.Text).ToArray(),
-                options with
-                {
-                    Dimensions = input.Model.Dimensions,
-                    InputKind = BuiltinOnnxEmbeddingModel.DocumentInputKind
-                },
+                options with { InputKind = BuiltinOnnxEmbeddingModel.DocumentInputKind },
                 cancellationToken);
         }
         catch (ReferenceMaterializationException)
@@ -86,10 +84,13 @@ public sealed class ReferenceMaterializationEmbeddingProcessor : IReferenceMater
         ReferenceMaterializationEmbeddingModel model,
         EmbeddingRequestOptions options)
     {
-        var dimensions = options.Dimensions ?? BuiltinOnnxEmbeddingModel.Dimensions;
+        // 只有配置显式声明的维度才有比对资格：在线 API 允许留空维度，此时冻结值来自
+        // 启动时健康检查的实测响应，拿内置 ONNX 的 512 去比会让每个此类 run 永久判为配置漂移。
+        // 供应商真的换了向量宽度时，仍由 ValidateResponse 按响应长度拦下。
+        var declaredDimensionsDrift = options.Dimensions is int declared && declared != model.Dimensions;
         if (!string.Equals(model.Provider, options.ProviderKey, StringComparison.Ordinal) ||
             !string.Equals(model.ModelId, options.ModelId, StringComparison.Ordinal) ||
-            dimensions != model.Dimensions)
+            declaredDimensionsDrift)
         {
             // 配置漂移与"启动后模型变了"同类：旧 run 无法续跑，归入 retry_requires_new_run，
             // 前端会引导（或自动）用当前配置新建 run，而不是让作者对着 health check 报错发呆。

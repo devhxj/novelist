@@ -40,7 +40,7 @@ public sealed class ReferenceChapterMaterialExtractorTests
                 "all six kinds"),
             CancellationToken.None);
 
-        Assert.Equal(1, chat.Requests.Count);
+        Assert.Single(chat.Requests);
         Assert.Equal(2, result.Materials.Count);
         Assert.Equal("dialogue_exchange", result.Materials[0].MaterialType);
         Assert.Equal("他推门而入，屋里安静得能听见雨声。", result.Materials[0].Excerpt);

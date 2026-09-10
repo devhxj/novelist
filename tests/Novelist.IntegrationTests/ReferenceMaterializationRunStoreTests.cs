@@ -247,6 +247,83 @@ public sealed class ReferenceMaterializationRunStoreTests : IDisposable
     }
 
     [Fact]
+    public async Task EmbeddingAcceptsFrozenWidthWhenTheActiveConfigLeavesDimensionsBlank()
+    {
+        // 在线 API 允许维度留空，冻结值来自启动时健康检查的实测宽度；
+        // 曾经这里拿内置 ONNX 的 512 去比，导致此类配置每次续跑都判配置漂移并无限新建 run。
+        var client = new FixedEmbeddingClient(dimensions: 1024);
+        var embedder = new ReferenceMaterializationEmbeddingProcessor(
+            new FixedEmbeddingConfigurationService(new EmbeddingRequestOptions(
+                "siliconflow", "https://example.invalid", "key", "BAAI/bge-m3", null, null)),
+            client);
+
+        var result = await embedder.EmbedAsync(
+            new ReferenceMaterializationEmbeddingRequest(
+                new ReferenceMaterializationEmbeddingModel("siliconflow", "BAAI/bge-m3", 1024),
+                [new ReferenceMaterializationEmbeddingItem("candidate-1", "完整的证据文本。")]),
+            CancellationToken.None);
+
+        Assert.Equal(1024, Assert.Single(result.Embeddings).Vector.Count);
+        // 冻结维度只用于校验响应，不回灌成请求参数，否则不支持 dimensions 入参的供应商会在正式跑时被拒。
+        Assert.Null(client.LastOptions?.Dimensions);
+        Assert.Equal(BuiltinOnnxEmbeddingModel.DocumentInputKind, client.LastOptions?.InputKind);
+    }
+
+    [Fact]
+    public async Task EmbeddingStillRejectsDimensionsDeclaredDifferentlyFromTheFrozenModel()
+    {
+        var embedder = new ReferenceMaterializationEmbeddingProcessor(
+            new FixedEmbeddingConfigurationService(new EmbeddingRequestOptions(
+                "embedding-provider", "https://example.invalid", "key", "embedding-model", 7, null)),
+            new FixedEmbeddingClient(dimensions: 7));
+
+        var exception = await Assert.ThrowsAsync<ReferenceMaterializationException>(async () =>
+            await embedder.EmbedAsync(
+                new ReferenceMaterializationEmbeddingRequest(
+                    new ReferenceMaterializationEmbeddingModel("embedding-provider", "embedding-model", 8),
+                    [new ReferenceMaterializationEmbeddingItem("candidate-1", "完整的证据文本。")]),
+                CancellationToken.None));
+
+        Assert.Equal(ReferenceMaterializationErrorCodes.RetryRequiresNewRun, exception.ErrorCode);
+    }
+
+    [Fact]
+    public async Task EmbeddingStagePersistsVectorsFromTheRunFrozenDimensionsWhenConfigOmitsThem()
+    {
+        var options = CreateOptions();
+        var anchor = await CreateAnchorAsync(options, chapterCount: 2);
+        var splitService = new SqliteReferenceMaterializationService(options, new EmptyChapterSplitAnalyzer());
+        var profile = await splitService.PreviewChapterSplitAsync(
+            new PreviewReferenceChapterSplitPayload(anchor.NovelId, anchor.AnchorId, "# {title}"),
+            CancellationToken.None);
+        await splitService.ConfirmChapterSplitAsync(
+            new ConfirmReferenceChapterSplitPayload(anchor.NovelId, anchor.AnchorId, profile.SplitProfileId),
+            CancellationToken.None);
+        var store = new SqliteReferenceMaterializationRunStore(new ReferenceCorpusDatabasePathResolver(options));
+        // run 行里冻结的是实测维度 8，而当前配置没有声明维度——这正是用户环境里卡住的组合。
+        var run = await store.CreateAsync(CreateSeed(anchor.AnchorId, profile.SplitProfileId), CancellationToken.None);
+        await store.BuildCandidatesForChapterAsync(run.RunId, chapterIndex: 1, CancellationToken.None);
+        var qualificationWork = await store.ReadQualificationWorkItemAsync(run.RunId, chapterIndex: 1, CancellationToken.None);
+        await store.PersistQualificationAsync(
+            run.RunId,
+            chapterIndex: 1,
+            new ReferenceMaterializationQualificationResult(
+                qualificationWork.Request.Candidates.Select(candidate => AcceptedDecision(candidate)).ToArray()),
+            CancellationToken.None);
+
+        var embeddingWork = await store.ReadEmbeddingWorkItemAsync(run.RunId, chapterIndex: 1, CancellationToken.None);
+        var embedder = new ReferenceMaterializationEmbeddingProcessor(
+            new FixedEmbeddingConfigurationService(new EmbeddingRequestOptions(
+                "embedding-provider", "https://example.invalid", "key", "embedding-model", null, null)),
+            new FixedEmbeddingClient(dimensions: 8));
+        var result = await embedder.EmbedAsync(embeddingWork.Request, CancellationToken.None);
+        var persisted = await store.PersistEmbeddingsAsync(run.RunId, chapterIndex: 1, result, CancellationToken.None);
+
+        Assert.Equal(embeddingWork.Request.Items.Count, persisted.VectorCount);
+        Assert.Equal(embeddingWork.Request.Items.Count, await CountEmbeddingsForChapterAsync(options, run.RunId, chapterIndex: 1));
+    }
+
+    [Fact]
     public async Task GenerationVectorIndexCompletesOnlyWhenTheWholeCurrentBatchHasCompleteVectors()
     {
         var options = CreateOptions();
@@ -1997,12 +2074,15 @@ public sealed class ReferenceMaterializationRunStoreTests : IDisposable
 
     private sealed class FixedEmbeddingClient(int dimensions) : IEmbeddingClient
     {
+        public EmbeddingRequestOptions? LastOptions { get; private set; }
+
         public ValueTask<EmbeddingBatchResult> EmbedAsync(
             IReadOnlyList<string> inputs,
             EmbeddingRequestOptions options,
             CancellationToken cancellationToken)
         {
             cancellationToken.ThrowIfCancellationRequested();
+            LastOptions = options;
             var items = inputs.Select((_, index) => new EmbeddingItemResult(
                 index,
                 Enumerable.Range(0, dimensions).Select(value => (float)(index + value + 1)).ToArray())).ToArray();
