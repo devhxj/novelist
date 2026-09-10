@@ -213,7 +213,8 @@ internal sealed partial class SqliteReferenceMaterializationRunStore
         IReadOnlyList<ReferenceChapterExtractionRound> Rounds,
         int RoundIndex);
 
-    // 每章候选计数（判 40 条上限用）：只数行数，不拼证据文本。
+    // 每章候选计数（判 40 条上限用）：只数已判定的行，不拼证据文本。pending 行
+    // 是判定丢失的行，算进进度会让达到上限的损坏章节被上限直接跳过、永远修不好。
     public async ValueTask<int> CountChapterExtractionCandidatesAsync(
         string runId,
         int chapterIndex,
@@ -231,14 +232,17 @@ internal sealed partial class SqliteReferenceMaterializationRunStore
         command.CommandText = """
             SELECT COUNT(*) FROM reference_material_candidates
             WHERE run_id = $run_id
+              AND decision <> $pending
               AND candidate_key LIKE 'chapter-extract:' || $chapter_index || ':%';
             """;
         command.Parameters.AddWithValue("$run_id", normalizedRunId);
+        command.Parameters.AddWithValue("$pending", ReferenceMaterializationCandidateDecisions.Pending);
         command.Parameters.AddWithValue("$chapter_index", chapterIndex);
         return Convert.ToInt32(await command.ExecuteScalarAsync(cancellationToken), System.Globalization.CultureInfo.InvariantCulture);
     }
 
-    // 读取计划与已完成趟次：无计划或旧格式返回 null（worker 重新规划再分趟执行）。
+    // 读取计划与已完成趟次：无计划或旧格式返回 null（worker 重新规划再分趟执行）；
+    // 本章仍有 pending 的提取候选（判定丢失）时把游标回卷到 0，交回趟循环重跑补判定。
     public async ValueTask<ExtractionPlanState?> ReadExtractionPlanAsync(
         string runId,
         int chapterIndex,
@@ -275,6 +279,29 @@ internal sealed partial class SqliteReferenceMaterializationRunStore
         if (!TryParseExtractionPlan(planJson, roundIndex, rounds))
         {
             return null;
+        }
+
+        // 判定丢失自愈：chapter-extract 候选停在 pending 说明它们的判定被抹过
+        //（老版本租约回收会把它们打回 pending，混版本写入同理），而分趟路径不会再跑
+        // qualifier 重算判定——按游标续跑只会让章节以"0 接纳 0 向量"完成。回卷游标
+        // 重跑趟：upsert 按 confidence 重新判定，pending 行原地复活。
+        if (roundIndex > 0)
+        {
+            await using var undecided = connection.CreateCommand();
+            undecided.CommandText = """
+                SELECT EXISTS(
+                  SELECT 1 FROM reference_material_candidates
+                  WHERE run_id = $run_id
+                    AND decision = $pending
+                    AND candidate_key LIKE 'chapter-extract:' || $chapter_index || ':%');
+                """;
+            undecided.Parameters.AddWithValue("$run_id", normalizedRunId);
+            undecided.Parameters.AddWithValue("$pending", ReferenceMaterializationCandidateDecisions.Pending);
+            undecided.Parameters.AddWithValue("$chapter_index", chapterIndex);
+            if (Convert.ToInt64(await undecided.ExecuteScalarAsync(cancellationToken), System.Globalization.CultureInfo.InvariantCulture) != 0)
+            {
+                roundIndex = 0;
+            }
         }
 
         return new ExtractionPlanState(rounds, roundIndex);
@@ -569,6 +596,7 @@ internal sealed partial class SqliteReferenceMaterializationRunStore
                                       AND candidate.candidate_key LIKE 'chapter-extract:' || $chapter_index || ':%'),
                     decided_count = (SELECT COUNT(*) FROM reference_material_candidates candidate
                                      WHERE candidate.run_id = $run_id
+                                       AND candidate.decision <> $pending
                                        AND candidate.candidate_key LIKE 'chapter-extract:' || $chapter_index || ':%'),
                     rejected_count = 0,
                     model_call_count = MAX(model_call_count, $model_call_count),
@@ -580,6 +608,7 @@ internal sealed partial class SqliteReferenceMaterializationRunStore
             counts.Parameters.AddWithValue("$current_stage", ReferenceMaterializationChapterStates.Embedding);
             counts.Parameters.AddWithValue("$accepted", ReferenceMaterializationCandidateDecisions.Accepted);
             counts.Parameters.AddWithValue("$review", ReferenceMaterializationCandidateDecisions.ReviewRequired);
+            counts.Parameters.AddWithValue("$pending", ReferenceMaterializationCandidateDecisions.Pending);
             counts.Parameters.AddWithValue("$model_call_count", modelCallCount);
             counts.Parameters.AddWithValue("$started_at", FormatTimestamp(DateTimeOffset.UtcNow));
             counts.Parameters.AddWithValue("$run_id", normalizedRunId);

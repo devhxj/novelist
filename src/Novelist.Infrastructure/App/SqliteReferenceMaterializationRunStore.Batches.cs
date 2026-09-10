@@ -459,6 +459,11 @@ internal sealed partial class SqliteReferenceMaterializationRunStore
         await using (var candidates = connection.CreateCommand())
         {
             candidates.Transaction = transaction;
+            // chapter-extract 候选的判定是落库时就算完的（分趟提取按 confidence 门槛定
+            // accepted/review_required），本批恢复不会再跑 qualifier：打回 pending 等于
+            // 永久丢失判定——章节会以"0 接纳 0 向量"完成，已付的模型费也回不来。
+            // 这里只重置窗口管线的候选（其判定由 qualifier 重算），提取候选原样保留；
+            // 它们的向量行仍要被上面的 DELETE 清掉，由嵌入阶段重新写入。
             candidates.CommandText = """
                 UPDATE reference_material_candidates
                 SET decision = $pending,
@@ -472,6 +477,7 @@ internal sealed partial class SqliteReferenceMaterializationRunStore
                     row_version = row_version + 1
                 WHERE run_id = $run_id
                   AND decision_origin <> $deterministic_triage
+                  AND candidate_key NOT LIKE 'chapter-extract:%'
                   AND candidate_id IN (
                 """ + CurrentBatchCandidateIdsSql + ");";
             candidates.Parameters.AddWithValue("$pending", ReferenceMaterializationCandidateDecisions.Pending);
