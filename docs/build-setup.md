@@ -1,6 +1,6 @@
 # Novelist 构建环境搭建
 
-本文档记录当前 Novelist 桌面应用的构建、测试和发布路径。桌面宿主为 .NET 10 + Photino.NET，前端为 React/Vite，语义检索使用标准 Embeddings API 或本地 ONNX embedding + sqlite-vec。
+本文档记录当前 Novelist 桌面应用的构建、测试和发布路径。桌面宿主为 .NET 11 + Photino.NET，前端为 React/Vite，语义检索使用标准 Embeddings API 或本地 ONNX embedding + sqlite-vec。
 
 当前发版路径先只维护 Windows 安装包。Linux/macOS 打包脚本可以作为后续恢复跨平台分发时的参考，但不进入当前 GitHub Release workflow。
 
@@ -8,7 +8,7 @@
 
 | 依赖 | 推荐版本 | 用途 |
 | --- | --- | --- |
-| .NET SDK | `global.json` 固定的 `10.0.301` | 编译和发布 `Novelist.App` |
+| .NET SDK | `global.json` 固定的 `11.0.100-rc.1`（RC，需 `allowPrerelease`） | 编译和发布 `Novelist.App` |
 | Node.js | 24.x | 安装前端依赖并运行 Vite 构建 |
 | npm | 随 Node.js | 前端依赖锁定安装 |
 | Git Bash | Git for Windows 自带 | 运行 `scripts/*.sh` |
@@ -116,7 +116,7 @@ VERSION=1.0.0 bash scripts/novelist-package-windows.sh
 
 `.github/workflows/test.yml` 执行：
 
-1. 安装 .NET SDK；
+1. 按 `global.json` 安装 .NET SDK；
 2. 安装 Node.js；
 3. `dotnet restore Novelist.slnx`；
 4. `npm --prefix frontend ci`；
@@ -124,6 +124,8 @@ VERSION=1.0.0 bash scripts/novelist-package-windows.sh
 6. `dotnet test Novelist.slnx --no-restore -v minimal`。
 
 `.github/workflows/release.yml` 只构建 Windows 安装器。workflow 使用完整 Git history/tag 运行 MinVer，校验 `v*` release tag 与 MinVer 解析结果一致，然后上传 `.exe` 和 `sha256sums.txt` 到 GitHub Release。安装包不内置 Git 可执行文件；应用内版本历史通过 `LibGit2Sharp` 和 NuGet 发布的 native libgit2 运行时资产工作，不要求用户系统安装 Git。
+
+两个 workflow 的 `actions/setup-dotnet` 都同时使用 `global-json-file: global.json` 和 `include-prerelease: true`，因为 `global.json` 目前固定的是 RC SDK；runner 基础镜像只带正式版 SDK，不开这个开关会解析失败。`.NET 11` 转正式后应把 `global.json` 的 `version` 改成正式版，并可删掉 `include-prerelease` 与 `allowPrerelease`。
 
 ## 清理
 

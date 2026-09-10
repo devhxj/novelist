@@ -40,6 +40,8 @@ jobs:
       - uses: actions/setup-dotnet@v4
         with:
           global-json-file: global.json
+          # global.json 目前固定 .NET 11 RC SDK，需要允许解析预发布通道。
+          include-prerelease: true
 
       - uses: actions/setup-node@v4
         with:
