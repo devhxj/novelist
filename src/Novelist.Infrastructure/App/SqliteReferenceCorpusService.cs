@@ -80,11 +80,18 @@ cancellationToken.ThrowIfCancellationRequested();
                 BuildQueryEmbeddingText(input.QueryContext),
                 embeddingOptions with { InputKind = BuiltinOnnxEmbeddingModel.QueryInputKind },
                 cancellationToken);
+            // 向量宽度属于 (provider, model)，未声明时只能实测。查询向量刚由同一个客户端
+            // 产出，它的长度就是真实宽度，直接采信可省掉每次检索一次的探测开销；没有查询
+            // 文本时才补探测。后面所有读写都按这个宽度对齐，才不会建出读不到的向量表。
+            var dimensions = queryEmbedding is { Count: > 0 }
+                ? queryEmbedding.Count
+                : await EmbeddingWidth.ResolveAsync(_embeddings, embeddingOptions, cancellationToken);
 var nativeTechniqueRecall = await TryRecallNativeTechniqueNodesAsync(
                 databasePath,
                 connection,
                 input.QueryContext,
                 embeddingOptions,
+                dimensions,
                 queryEmbedding,
 page,
 cancellationToken);
@@ -128,16 +135,19 @@ chapterContextRecall,
                 connection,
                 candidates,
                 embeddingOptions,
+                dimensions,
                 cancellationToken);
             var chapterEmbedding = await GetOrCreateCurrentChapterEmbeddingAsync(
                 connection,
                 input.QueryContext.ChapterContext,
                 embeddingOptions,
+                dimensions,
                 cancellationToken);
 var techniqueVectors = await EnsureTechniqueVectorsAsync(
                 connection,
                 candidates,
                 embeddingOptions,
+                dimensions,
 cancellationToken);
 var hasTechniqueVectors = techniqueVectors.Count > 0;
  if (nativeTechniqueRecall is null)
@@ -332,7 +342,6 @@ public async ValueTask<ReferenceCorpusTechniqueVectorIndexBackfillPayload> Backf
 
         var requestedNodeType = NormalizeRequestedNodeType(input.NodeType);
         var embeddingOptions = await _embeddingConfiguration.GetActiveEmbeddingOptionsAsync(cancellationToken);
-        var dimensions = embeddingOptions?.Dimensions ?? BuiltinOnnxEmbeddingModel.Dimensions;
         if (embeddingOptions is null)
         {
             return new ReferenceCorpusTechniqueVectorIndexBackfillPayload(
@@ -341,7 +350,9 @@ public async ValueTask<ReferenceCorpusTechniqueVectorIndexBackfillPayload> Backf
                 TableName: null,
                 ProviderKey: null,
                 ModelId: null,
-                Dimensions: dimensions,
+                // 诊断字段：0 表示"既未声明也未实测"。没有配置就没有宽度可报，
+                // 也不该在这里假设内置模型的 512。
+                Dimensions: 0,
                 SourceCount: 0,
                 VectorCount: 0,
                 SkippedVectorCount: 0,
@@ -357,7 +368,7 @@ public async ValueTask<ReferenceCorpusTechniqueVectorIndexBackfillPayload> Backf
                 TableName: null,
                 ProviderKey: embeddingOptions.ProviderKey,
                 ModelId: embeddingOptions.ModelId,
-                Dimensions: dimensions,
+                Dimensions: embeddingOptions.Dimensions ?? 0,
                 SourceCount: 0,
                 VectorCount: 0,
                 SkippedVectorCount: 0,
@@ -371,11 +382,13 @@ public async ValueTask<ReferenceCorpusTechniqueVectorIndexBackfillPayload> Backf
             var databasePath = await DatabasePathAsync(cancellationToken);
             await EnsureSchemaAsync(databasePath, cancellationToken);
             await using var connection = await OpenConnectionAsync(databasePath, cancellationToken);
+            var dimensions = await EmbeddingWidth.ResolveAsync(_embeddings, embeddingOptions, cancellationToken);
             var result = await EnsureNativeTechniqueIndexAsync(
                 databasePath,
                 connection,
                 input.QueryContext,
                 embeddingOptions,
+                dimensions,
                 requestedNodeType,
                 cancellationToken);
             return ToBackfillPayload(result);
@@ -392,7 +405,7 @@ public async ValueTask<ReferenceCorpusTechniqueVectorIndexBackfillPayload> Backf
                 TableName: null,
                 ProviderKey: embeddingOptions.ProviderKey,
                 ModelId: embeddingOptions.ModelId,
-                Dimensions: dimensions,
+                Dimensions: embeddingOptions.Dimensions ?? 0,
                 SourceCount: 0,
                 VectorCount: 0,
                 SkippedVectorCount: 0,
@@ -424,12 +437,15 @@ public async ValueTask<ReferenceCorpusTechniqueVectorIndexBackfillPayload> Backf
  ?? throw new InvalidOperationException("Embedding configuration is required for technique vector maintenance.");
  var databasePath = await DatabasePathAsync(cancellationToken);
  await EnsureSchemaAsync(databasePath, cancellationToken);
+ // 任务的向量宽度是索引身份的一部分：pump 阶段按它清原生索引元数据、按它建表，
+ // 之后不会再有第二次机会纠正。未声明时必须在这里实测，付一次探测费用换任务身份可信。
+ var dimensions = await EmbeddingWidth.ResolveAsync(_embeddings, embeddingOptions, cancellationToken);
  var scheduler = new SqliteReferenceCorpusTechniqueVectorMaintenanceScheduler(databasePath);
  return await scheduler.EnqueueAsync(
  input,
  embeddingOptions.ProviderKey,
  embeddingOptions.ModelId,
- embeddingOptions.Dimensions ?? BuiltinOnnxEmbeddingModel.Dimensions,
+ dimensions,
  DateTimeOffset.UtcNow,
  cancellationToken);
  }
@@ -501,7 +517,9 @@ public async ValueTask<ReferenceCorpusTechniqueVectorIndexBackfillPayload> Backf
  var diagnostics = new List<string>();
  if (embeddingOptions is not null && !string.Equals(providerKey, embeddingOptions.ProviderKey, StringComparison.Ordinal)) diagnostics.Add("stale_provider");
  if (embeddingOptions is not null && !string.Equals(modelId, embeddingOptions.ModelId, StringComparison.Ordinal)) diagnostics.Add("stale_model");
- if (embeddingOptions is not null && dimensions != embeddingOptions.Dimensions) diagnostics.Add("stale_dimensions");
+ // 只有显式声明的宽度才是可信基准：未声明时拿任何默认值比较都会把健康的索引判成过期，
+ // 而体检是只读诊断，不该为它付一次实测的探测费用。
+ if (embeddingOptions?.Dimensions is int activeDimensions && dimensions != activeDimensions) diagnostics.Add("stale_dimensions");
  if (sourceCount != rowCount) diagnostics.Add("row_count_mismatch");
  indexes.Add(new(
  reader.GetString(0), reader.GetString(1), providerKey, modelId, dimensions,
@@ -512,6 +530,7 @@ public async ValueTask<ReferenceCorpusTechniqueVectorIndexBackfillPayload> Backf
  return new(
  embeddingOptions?.ProviderKey,
  embeddingOptions?.ModelId,
+ // 0 = 未声明：真实宽度以各索引行自带的 dimensions 为准，这里不猜默认值。
  embeddingOptions?.Dimensions ?? 0,
  indexes,
  jobs,
@@ -1258,7 +1277,8 @@ return builder.ToString();
  if (reusePolicies.Count == 0) reusePolicies = [ReferenceCorpusReusePolicies.VerbatimOk, ReferenceCorpusReusePolicies.AdaptedOnly];
  var includeAnchorIds = NormalizePositiveLongSet(queryContext.Scope.IncludeAnchorIds);
  var excludeAnchorIds = NormalizePositiveLongSet(queryContext.Scope.ExcludeAnchorIds);
- var dimensions = embeddingOptions.Dimensions ?? BuiltinOnnxEmbeddingModel.Dimensions;
+ // 查询向量的长度就是该 (provider, model) 的实测宽度：缓存按它检索才能命中写入侧的行。
+ var dimensions = queryEmbedding.Count;
  var parameters = new List<(string Name, object Value)>
  {
  ("$node_type", requestedNodeType),
@@ -2490,9 +2510,9 @@ sceneNodeId = await scene.ExecuteScalarAsync(cancellationToken) as string;
         SqliteConnection connection,
         IReadOnlyList<CorpusCandidateNode> candidates,
         EmbeddingRequestOptions embeddingOptions,
+        int dimensions,
         CancellationToken cancellationToken)
     {
-        var dimensions = embeddingOptions.Dimensions ?? BuiltinOnnxEmbeddingModel.Dimensions;
         var existing = await ReadNodeEmbeddingsAsync(connection, candidates, embeddingOptions, dimensions, cancellationToken);
         var missing = candidates
             .Where(candidate => !existing.ContainsKey(candidate.NodeId))
@@ -2636,6 +2656,7 @@ sceneNodeId = await scene.ExecuteScalarAsync(cancellationToken) as string;
         SqliteConnection connection,
         ReferenceCorpusQueryContextPayload queryContext,
         EmbeddingRequestOptions embeddingOptions,
+        int dimensions,
         IReadOnlyList<float>? queryEmbedding,
         NormalizedPageRequest page,
         CancellationToken cancellationToken)
@@ -2650,18 +2671,13 @@ sceneNodeId = await scene.ExecuteScalarAsync(cancellationToken) as string;
 
         try
         {
-            var dimensions = embeddingOptions.Dimensions ?? BuiltinOnnxEmbeddingModel.Dimensions;
-            if (queryEmbedding.Count != dimensions)
-            {
-                return null;
-            }
-
             var requestedNodeType = RequestedNodeType(page.Filters);
             var index = await EnsureNativeTechniqueIndexAsync(
                 databasePath,
                 connection,
                 queryContext,
                 embeddingOptions,
+                dimensions,
                 requestedNodeType,
                 cancellationToken);
             if (index.Status == ReferenceCorpusTechniqueVectorIndexBackfillStatuses.Empty)
@@ -2706,10 +2722,12 @@ sceneNodeId = await scene.ExecuteScalarAsync(cancellationToken) as string;
         SqliteConnection connection,
         ReferenceCorpusQueryContextPayload queryContext,
         EmbeddingRequestOptions embeddingOptions,
+        int dimensions,
         string requestedNodeType,
         CancellationToken cancellationToken)
     {
-        var dimensions = embeddingOptions.Dimensions ?? BuiltinOnnxEmbeddingModel.Dimensions;
+        // 宽度参与索引 scope key 与表名：猜错会建出一张读不到已存向量的空表，
+        // 因此只接受调用方实测后的宽度。
         var indexScopeKey = BuildNativeTechniqueIndexScopeKey(queryContext, embeddingOptions, dimensions, requestedNodeType);
         var tableName = SqliteVecTableProvisioner.BuildReferenceTechniqueVectorTableName(indexScopeKey, dimensions);
         if (_techniqueVectorProvisioner is null)
@@ -2916,6 +2934,7 @@ sceneNodeId = await scene.ExecuteScalarAsync(cancellationToken) as string;
         SqliteConnection connection,
         IReadOnlyList<CorpusCandidateNode> candidates,
         EmbeddingRequestOptions embeddingOptions,
+        int dimensions,
         CancellationToken cancellationToken)
     {
         var sources = await ReadActiveTechniqueSpecimensAsync(connection, candidates, cancellationToken);
@@ -2924,7 +2943,6 @@ sceneNodeId = await scene.ExecuteScalarAsync(cancellationToken) as string;
             return new Dictionary<string, IReadOnlyList<IReadOnlyList<float>>>(StringComparer.Ordinal);
         }
 
-        var dimensions = embeddingOptions.Dimensions ?? BuiltinOnnxEmbeddingModel.Dimensions;
         var merged = await EnsureTechniqueVectorCacheAsync(
             connection,
             sources,
@@ -3634,6 +3652,7 @@ sceneNodeId = await scene.ExecuteScalarAsync(cancellationToken) as string;
         SqliteConnection connection,
         CurrentChapterContextPayload chapterContext,
         EmbeddingRequestOptions embeddingOptions,
+        int dimensions,
         CancellationToken cancellationToken)
     {
         var draftText = chapterContext.CurrentDraftText ?? string.Empty;
@@ -3642,7 +3661,6 @@ sceneNodeId = await scene.ExecuteScalarAsync(cancellationToken) as string;
             return null;
         }
 
-        var dimensions = embeddingOptions.Dimensions ?? BuiltinOnnxEmbeddingModel.Dimensions;
         var draftHash = StableHash("current_chapter_draft", draftText);
         await using (var read = connection.CreateCommand())
         {

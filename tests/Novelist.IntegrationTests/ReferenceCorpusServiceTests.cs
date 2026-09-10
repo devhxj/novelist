@@ -604,6 +604,62 @@ Assert.Equal(1, await ReadTechniqueVectorIndexStateCountAsync(options));
  }
 
  [Fact]
+ public async Task UndeclaredFixedWidthProviderSearchStoresMeasuredWidthVectors()
+ {
+ var options = CreateOptions();
+ await InitializeAsync(options);
+ await SeedCorpusFixtureAsync(options);
+ var embeddings = new FixedWidthEmbeddingClient(width: 8);
+ var service = new SqliteReferenceCorpusService(
+ options,
+ new StaticEmbeddingConfigurationService(CreateEmbeddingOptions() with { ModelId = "fixed-width-model", Dimensions = null }),
+ embeddings);
+
+ var result = await service.SearchCandidatesAsync(BuildSearchPayload(), CancellationToken.None);
+
+ Assert.NotEmpty(result.Items);
+ // 配置没声明宽度时按内置模型的 512 兜底，会让写入侧建出读取侧永远查不到的行
+ // （固定宽度服务商只会返回自己的宽度，结果要么落库不一致要么直接失败）。
+ Assert.Equal(new[] { 8 }, await ReadDistinctEmbeddingWidthsAsync(options, "reference_text_node_embeddings"));
+ Assert.Equal(new[] { 8 }, await ReadDistinctEmbeddingWidthsAsync(options, "reference_current_chapter_embedding_cache"));
+ Assert.DoesNotContain(embeddings.Calls, call => call.Options.Dimensions is int width && width != 8);
+ }
+
+ [Fact]
+ public async Task UndeclaredFixedWidthProviderMaintenanceAndInspectionUseMeasuredWidth()
+ {
+ var options = CreateOptions();
+ await InitializeAsync(options);
+ await SeedCorpusFixtureAsync(options);
+ await SeedFarTechniqueSpecimenFixtureAsync(options);
+ var nativeProvider = new FakeSqliteVecTechniqueProvider(_ => true);
+ var service = new SqliteReferenceCorpusService(
+ options,
+ new StaticEmbeddingConfigurationService(CreateEmbeddingOptions() with { ModelId = "fixed-width-model", Dimensions = null }),
+ new FixedWidthEmbeddingClient(width: 8),
+ nativeProvider,
+ nativeProvider);
+
+ // 任务的向量宽度是索引身份：兜底成 512 会让整条维护流水线建出一张读不到向量的表。
+ var job = await service.ScheduleTechniqueVectorMaintenanceAsync(new(
+ BuildTechniqueSearchPayload().QueryContext,
+ ReferenceCorpusNodeTypes.Sentence,
+ ReferenceCorpusTechniqueVectorMaintenanceModes.Incremental,
+ 3), CancellationToken.None);
+ Assert.Equal(8, job.Dimensions);
+
+ var pumped = await service.PumpTechniqueVectorMaintenanceAsync(new("m3-measured-width", 60), CancellationToken.None);
+ Assert.Equal(ReferenceCorpusTechniqueVectorIndexBackfillStatuses.Ready, pumped.Backfill!.Status);
+ Assert.Equal(8, pumped.Backfill.Dimensions);
+ Assert.Equal(1, pumped.Backfill.VectorCount);
+
+ // 体检是只读的：未声明宽度时没有可信基准，不能拿默认值比较把健康的索引判成过期。
+ var inspection = await service.InspectTechniqueVectorIndexesAsync(new(true), CancellationToken.None);
+ Assert.Equal(1, inspection.HealthyCount);
+ Assert.Equal(0, inspection.StaleCount);
+ }
+
+ [Fact]
  public async Task TechniqueVectorMaintenanceRetriesAndEndsFailedAtAttemptLimit()
  {
  var options = CreateOptions();
@@ -2439,6 +2495,23 @@ Assert.True(
         await using var command = connection.CreateCommand();
         command.CommandText = "SELECT COUNT(*) FROM " + tableName + ";";
         return Convert.ToInt32(await command.ExecuteScalarAsync());
+    }
+
+    private static async ValueTask<int[]> ReadDistinctEmbeddingWidthsAsync(
+        AppInitializationOptions options,
+        string tableName)
+    {
+        await using var connection = await OpenReferenceConnectionAsync(options);
+        await using var command = connection.CreateCommand();
+        command.CommandText = "SELECT DISTINCT dimensions FROM " + tableName + " ORDER BY dimensions;";
+        var widths = new List<int>();
+        await using var reader = await command.ExecuteReaderAsync();
+        while (await reader.ReadAsync())
+        {
+            widths.Add(reader.GetInt32(0));
+        }
+
+        return widths.ToArray();
     }
 
     private static string ReferenceDatabasePath(AppInitializationOptions options)
