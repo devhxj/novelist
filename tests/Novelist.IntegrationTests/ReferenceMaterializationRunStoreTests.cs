@@ -1422,6 +1422,60 @@ public sealed class ReferenceMaterializationRunStoreTests : IDisposable
             "replanned plan must group material kinds, not character ranges");
     }
 
+    [Theory]
+    [InlineData("""[{"start":0,"end":20,"focus":"legacy"}]""")]                                     // 旧格式（字符区间）
+    [InlineData("""[{"material_types":["emotion"],"focus":"feelings"}]""")]                          // 遗漏五种类型
+    [InlineData("""[{"material_types":["passage","passage"],"focus":"dup"}]""")]                     // 重复类型
+    [InlineData("""[{"material_types":["transition"],"focus":"legacy kind"}]""")]                    // legacy 窗口类型
+    [InlineData("""[{"material_types":[""],"focus":"empty kind"}]""")]                              // 空类型名
+    [InlineData("""[{"focus":"missing types"}]""")]                                                  // 缺 material_types
+    [InlineData("""[{"material_types":"not-array","focus":"wrong kind"}]""")]                       // 类型非数组
+    [InlineData("[]")]                                                                               // 空计划
+    public async Task CorruptPersistedPlanIsDiscardedInsteadOfThrowing(string planJson)
+    {
+        var options = CreateOptions();
+        var anchor = await CreateRegisteredSourceAnchorAsync(options);
+        var splitService = new SqliteReferenceMaterializationService(options, new EmptyChapterSplitAnalyzer());
+        var profile = await splitService.PreviewChapterSplitAsync(
+            new PreviewReferenceChapterSplitPayload(anchor.NovelId, anchor.AnchorId, "第{number}章 {title}"),
+            CancellationToken.None);
+        await splitService.ConfirmChapterSplitAsync(
+            new ConfirmReferenceChapterSplitPayload(anchor.NovelId, anchor.AnchorId, profile.SplitProfileId),
+            CancellationToken.None);
+        var resolver = new ReferenceCorpusDatabasePathResolver(options);
+        var store = new SqliteReferenceMaterializationRunStore(resolver);
+        var preflight = new RecordingPreflight(new ReferenceMaterializationModelPreflightResult(
+            new ReferenceMaterializationModelIdentityPayload("llm", "model"),
+            new ReferenceMaterializationModelIdentityPayload("embedding", "model", 8)));
+        var service = new SqliteReferenceMaterializationService(options, new EmptyChapterSplitAnalyzer(), modelPreflight: preflight);
+        var run = await service.EnqueueMaterializationAsync(
+            new EnqueueReferenceMaterializationPayload(anchor.NovelId, anchor.AnchorId, profile.SplitProfileId),
+            CancellationToken.None);
+
+        var claim = await store.ClaimCurrentBatchAsync(run.RunId, "corrupt-plan-worker", TimeSpan.FromMinutes(1), CancellationToken.None);
+        Assert.NotNull(claim);
+        var work = await store.BeginChapterExtractionAsync(run.RunId, 1, CancellationToken.None);
+        Assert.NotNull(work);
+        // 损坏 JSON 直写：读取侧必须吞掉（返回 null），而不是抛异常炸掉整批。
+        await UpdateExtractionPlanRawAsync(options, run.RunId, 1, planJson, roundCount: 6, roundIndex: 3);
+        await store.ReleaseBatchLeaseAsync(claim, CancellationToken.None);
+
+        var plan = await store.ReadExtractionPlanAsync(run.RunId, 1, CancellationToken.None);
+        Assert.Null(plan);
+    }
+
+    [Theory]
+    [InlineData("""{"broken json""", 0)]      // 损坏 JSON
+    [InlineData("not-json-at-all", 0)]        // 非 JSON
+    [InlineData("""[]""", 1)]                 // 空计划 + round_index 越界
+    [InlineData("null", 0)]                   // JSON null 根
+    public void TryParseExtractionPlanRejectsStructuralGarbageWithoutThrowing(string planJson, int roundIndex)
+    {
+        var rounds = new List<ReferenceChapterExtractionRound>();
+        Assert.False(SqliteReferenceMaterializationRunStore.TryParseExtractionPlan(planJson, roundIndex, rounds));
+        Assert.Empty(rounds);
+    }
+
     // 直写提取计划原始 JSON（迁移测试用：模拟 alpha.13 旧格式落库）。
     private static async Task UpdateExtractionPlanRawAsync(
         AppInitializationOptions options,
@@ -1448,6 +1502,71 @@ public sealed class ReferenceMaterializationRunStoreTests : IDisposable
         await command.ExecuteNonQueryAsync(CancellationToken.None);
     }
 
+    [Fact]
+    public async Task BlankChapterTextCompletesAsEmptyChapterInsteadOfFailingTheBatch()
+    {
+        var options = CreateOptions();
+        var anchor = await CreateRegisteredSourceAnchorAsync(options);
+        var splitService = new SqliteReferenceMaterializationService(options, new EmptyChapterSplitAnalyzer());
+        var profile = await splitService.PreviewChapterSplitAsync(
+            new PreviewReferenceChapterSplitPayload(anchor.NovelId, anchor.AnchorId, "第{number}章 {title}"),
+            CancellationToken.None);
+        await splitService.ConfirmChapterSplitAsync(
+            new ConfirmReferenceChapterSplitPayload(anchor.NovelId, anchor.AnchorId, profile.SplitProfileId),
+            CancellationToken.None);
+        var resolver = new ReferenceCorpusDatabasePathResolver(options);
+        var store = new SqliteReferenceMaterializationRunStore(resolver);
+        var preflight = new RecordingPreflight(new ReferenceMaterializationModelPreflightResult(
+            new ReferenceMaterializationModelIdentityPayload("llm", "model"),
+            new ReferenceMaterializationModelIdentityPayload("embedding", "model", 8)));
+        var service = new SqliteReferenceMaterializationService(options, new EmptyChapterSplitAnalyzer(), modelPreflight: preflight);
+        var run = await service.EnqueueMaterializationAsync(
+            new EnqueueReferenceMaterializationPayload(anchor.NovelId, anchor.AnchorId, profile.SplitProfileId),
+            CancellationToken.None);
+
+        // 坏数据防御：第 1 章的章文本节点被写成全空白（绕过前置拆分的不变量）。
+        var databasePath = Path.Combine(options.DefaultDataDirectory, "reference-anchor", "index.sqlite");
+        var chapterNodeId = $"split-node:{profile.SplitProfileId}:c1";
+        await using (var connection = new SqliteConnection(new SqliteConnectionStringBuilder { DataSource = databasePath, Pooling = false }.ToString()))
+        {
+            await connection.OpenAsync(CancellationToken.None);
+            await using var blank = connection.CreateCommand();
+            blank.CommandText = "UPDATE reference_text_nodes SET text = '   ' WHERE node_id = $node_id;";
+            blank.Parameters.AddWithValue("$node_id", chapterNodeId);
+            Assert.Equal(1, await blank.ExecuteNonQueryAsync(CancellationToken.None));
+        }
+
+        // 空白章不该把 run 判死，也不该为它调用模型：走零候选空章收尾；
+        // 第 2 章正文正常，带一条摘录走完整管线，整本完成。
+        var extractor = new StubChapterMaterialExtractor(
+        [
+            new ReferenceChapterExtractedMaterial(
+                "门外响起第三次敲门。",
+                ReferenceMaterializationCandidateTypes.Passage,
+                new ReferenceMaterializationQualificationTags(["worldbuilding"], [], [], []),
+                new ReferenceMaterializationQualityScores(0.9, 0.7, 0.8, 0.6, 0.7, 0.5),
+                0.9,
+                ["worldbuilding"]),
+        ]);
+        var worker = new ReferenceMaterializationWorker(
+            resolver,
+            new FailingQualifier(),
+            new AcceptingEmbedder(),
+            new ReferenceMaterializationVectorIndexer(resolver, new RecordingVecProvisioner()),
+            workerId: "blank-chapter-worker",
+            chapterMaterialExtractor: extractor);
+        await DrainRunAsync(worker, run.RunId, maxPumps: 12);
+
+        var status = await store.GetAsync(run.RunId, CancellationToken.None);
+        Assert.True(
+            status?.Status == ReferenceMaterializationRunStates.Completed,
+            $"run status={status?.Status}, error={status?.LastErrorCode}:{status?.LastErrorMessage}");
+        Assert.DoesNotContain(extractor.RoundRequests, request => request.ChapterIndex == 1);
+        var chapters = await store.ListChapterProgressAsync(run.RunId, 1, 10, CancellationToken.None);
+        var chapter1 = chapters.Items.Single(item => item.ChapterIndex == 1);
+        Assert.Equal(0, chapter1.CandidateCount);
+    }
+
     private sealed class StubChapterMaterialExtractor(
         IReadOnlyList<ReferenceChapterExtractedMaterial> materials) : IReferenceChapterMaterialExtractor
     {
@@ -1458,10 +1577,12 @@ public sealed class ReferenceMaterializationRunStoreTests : IDisposable
             CancellationToken cancellationToken)
         {
             // 桩计划：单趟全类型（材料一次性返回，模拟短章场景）。
+            // 趟计划只产出六种章节提取类型——legacy 窗口类型（transition 等）
+            // 属于旧管线，混入会让读取校验正确地拒绝该计划。
             return ValueTask.FromResult<IReadOnlyList<ReferenceChapterExtractionRound>>(
             [
                 new ReferenceChapterExtractionRound(
-                    ReferenceMaterializationCandidateTypes.All,
+                    ReferenceMaterializationCandidateTypes.ChapterExtractionKinds,
                     "all kinds"),
             ]);
         }

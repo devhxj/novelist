@@ -1039,15 +1039,8 @@ public sealed class ReferenceMaterializationChatCompletionQualifier : IReference
             ReadUnitInterval(scoresElement, "technique_distinctiveness", "scores"));
     }
 
-    private static readonly HashSet<string> AllowedMaterialTypes = new(StringComparer.Ordinal)
-    {
-        ReferenceMaterializationCandidateTypes.Passage,
-        ReferenceMaterializationCandidateTypes.DialogueExchange,
-        ReferenceMaterializationCandidateTypes.ActionReaction,
-        ReferenceMaterializationCandidateTypes.Emotion,
-        ReferenceMaterializationCandidateTypes.Hook,
-        ReferenceMaterializationCandidateTypes.Payoff
-    };
+    private static readonly HashSet<string> AllowedMaterialTypes =
+        new(ReferenceMaterializationCandidateTypes.ChapterExtractionKinds, StringComparer.Ordinal);
 
     private static ReferenceChapterExtractionResult ParseChapterExtraction(string argumentsJson)
     {

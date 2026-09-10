@@ -344,6 +344,16 @@ public sealed class ReferenceMaterializationWorker : IAsyncDisposable
             var work = await store.BeginChapterExtractionAsync(runId, chapterIndex, cancellationToken);
             if (work is not null)
             {
+                // 防御深度：前置拆分保证章非空，但坏数据（空/全空白文本）不该把
+                // 整批判死——没有文本就没有素材。复用零候选路径收尾：完成提取
+                //（llm_qualifying→embedding，终值计数为 0）再走空章收尾。
+                if (string.IsNullOrWhiteSpace(work.ChapterText))
+                {
+                    await store.CompleteExtractionAsync(runId, chapterIndex, 0, cancellationToken);
+                    await store.CompleteEmptyEmbeddingAsync(runId, chapterIndex, cancellationToken);
+                    return;
+                }
+
                 // 计划分趟提取：先让模型把六种素材类型划分成若干趟（计划落库，进度有
                 // 分母"第 X/N 趟"），每趟通读全章只戴一副镜头——每趟材料到达即落库
                 //（候选+计数立即可见），失败从已完成的趟继续，不重复已付的模型费。

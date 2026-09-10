@@ -108,6 +108,18 @@ public static class ReferenceMaterializationCandidateTypes
         Transition,
         QualifiedSentence
     ];
+
+    // 章节直接提取（分趟计划）只产出这六种：transition/qualified_sentence 是
+    // legacy 窗口管线的类型，趟计划校验与趟内类型过滤都以这份清单为准。
+    public static IReadOnlyList<string> ChapterExtractionKinds { get; } =
+    [
+        Passage,
+        DialogueExchange,
+        ActionReaction,
+        Emotion,
+        Hook,
+        Payoff
+    ];
 }
 
 public static class ReferenceMaterializationCandidateDecisions

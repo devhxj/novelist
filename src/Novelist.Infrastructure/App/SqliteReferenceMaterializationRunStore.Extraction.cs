@@ -259,29 +259,85 @@ internal sealed partial class SqliteReferenceMaterializationRunStore
         var planJson = reader.GetString(0);
         var roundIndex = reader.GetInt32(1);
         var rounds = new List<ReferenceChapterExtractionRound>();
-        using (var document = JsonDocument.Parse(planJson))
+        // 读取侧与规划侧同等校验：任何不合格（旧格式、损坏 JSON、非法/重复类型、
+        // 空趟、越界 round_index）都返回 null 让 worker 重规划——持久化计划是缓存，
+        // 不是契约，重规划一次的代价远小于把垃圾载荷喂给模型或炸掉整批。
+        if (!TryParseExtractionPlan(planJson, roundIndex, rounds))
         {
-            // 旧格式（字符区间计划）检测到即作废：返回 null 让 worker 按类型
-            // 分组格式重新规划，已完成轮的候选凭 upsert 幂等不重复计数。
-            if (document.RootElement.ValueKind != JsonValueKind.Array ||
-                (document.RootElement.GetArrayLength() > 0 &&
-                 document.RootElement[0].TryGetProperty("start", out _)))
-            {
-                return null;
-            }
-
-            foreach (var item in document.RootElement.EnumerateArray())
-            {
-                var types = item.GetProperty("material_types").EnumerateArray()
-                    .Select(type => type.GetString() ?? string.Empty)
-                    .ToArray();
-                rounds.Add(new ReferenceChapterExtractionRound(
-                    types,
-                    item.GetProperty("focus").GetString() ?? string.Empty));
-            }
+            return null;
         }
 
         return new ExtractionPlanState(rounds, roundIndex);
+    }
+
+    internal static bool TryParseExtractionPlan(
+        string planJson,
+        int roundIndex,
+        List<ReferenceChapterExtractionRound> rounds)
+    {
+        rounds.Clear();
+        try
+        {
+            using var document = JsonDocument.Parse(planJson);
+            var root = document.RootElement;
+            // 旧格式（字符区间计划）检测到即作废：调用方按类型分组格式重新规划，
+            // 已完成轮的候选凭 upsert 幂等不重复计数。
+            if (root.ValueKind != JsonValueKind.Array ||
+                root.GetArrayLength() is 0 or > 16 ||
+                (root.GetArrayLength() > 0 && root[0].TryGetProperty("start", out _)) ||
+                roundIndex < 0 || roundIndex > root.GetArrayLength())
+            {
+                return false;
+            }
+
+            var allowedKinds = ReferenceMaterializationCandidateTypes.ChapterExtractionKinds;
+            var coveredTypes = new HashSet<string>(StringComparer.Ordinal);
+            foreach (var item in root.EnumerateArray())
+            {
+                if (item.ValueKind != JsonValueKind.Object ||
+                    !item.TryGetProperty("material_types", out var typesElement) ||
+                    !item.TryGetProperty("focus", out var focusElement) ||
+                    typesElement.ValueKind != JsonValueKind.Array ||
+                    focusElement.ValueKind != JsonValueKind.String)
+                {
+                    return false;
+                }
+
+                var types = new List<string>();
+                foreach (var typeElement in typesElement.EnumerateArray())
+                {
+                    if (typeElement.ValueKind != JsonValueKind.String ||
+                        typeElement.GetString() is not { Length: > 0 } type ||
+                        !allowedKinds.Contains(type) ||
+                        !coveredTypes.Add(type))
+                    {
+                        return false;
+                    }
+
+                    types.Add(type);
+                }
+
+                if (types.Count == 0)
+                {
+                    return false;
+                }
+
+                var focus = focusElement.GetString() ?? string.Empty;
+                rounds.Add(new ReferenceChapterExtractionRound(types, focus.Length > 80 ? focus[..80] : focus));
+            }
+
+            // 与规划校验一致：六种类型恰好各属一趟，不重不漏。
+            return coveredTypes.Count == allowedKinds.Count;
+        }
+        catch (JsonException)
+        {
+            return false;
+        }
+        catch (InvalidOperationException)
+        {
+            // GetProperty/索引越界等结构性缺陷：作废重规划。
+            return false;
+        }
     }
 
     // 趟完成推进：已完成趟次 +1（断点续趟的位置标记）。
