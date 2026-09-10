@@ -1337,6 +1337,117 @@ public sealed class ReferenceMaterializationRunStoreTests : IDisposable
         Assert.NotEmpty(embeddingWork.Request.Items);
     }
 
+    [Fact]
+    public async Task LegacyRangePlanIsDiscardedAndReplannedWhileKeepingCandidates()
+    {
+        var options = CreateOptions();
+        var anchor = await CreateRegisteredSourceAnchorAsync(options);
+        var splitService = new SqliteReferenceMaterializationService(options, new EmptyChapterSplitAnalyzer());
+        var profile = await splitService.PreviewChapterSplitAsync(
+            new PreviewReferenceChapterSplitPayload(anchor.NovelId, anchor.AnchorId, "第{number}章 {title}"),
+            CancellationToken.None);
+        await splitService.ConfirmChapterSplitAsync(
+            new ConfirmReferenceChapterSplitPayload(anchor.NovelId, anchor.AnchorId, profile.SplitProfileId),
+            CancellationToken.None);
+        var resolver = new ReferenceCorpusDatabasePathResolver(options);
+        var store = new SqliteReferenceMaterializationRunStore(resolver);
+        var preflight = new RecordingPreflight(new ReferenceMaterializationModelPreflightResult(
+            new ReferenceMaterializationModelIdentityPayload("llm", "model"),
+            new ReferenceMaterializationModelIdentityPayload("embedding", "model", 8)));
+        var service = new SqliteReferenceMaterializationService(options, new EmptyChapterSplitAnalyzer(), modelPreflight: preflight);
+        var run = await service.EnqueueMaterializationAsync(
+            new EnqueueReferenceMaterializationPayload(anchor.NovelId, anchor.AnchorId, profile.SplitProfileId),
+            CancellationToken.None);
+
+        // 模拟 alpha.13 的中断点：第 1 章停在 llm_qualifying，库里是旧格式
+        //（字符区间）计划与第 1 轮已落库的候选。
+        var claim = await store.ClaimCurrentBatchAsync(run.RunId, "alpha13-worker", TimeSpan.FromMinutes(1), CancellationToken.None);
+        Assert.NotNull(claim);
+        var work = await store.BeginChapterExtractionAsync(run.RunId, 1, CancellationToken.None);
+        Assert.NotNull(work);
+        await UpdateExtractionPlanRawAsync(
+            options,
+            run.RunId,
+            1,
+            """[{"start":0,"end":20,"focus":"chapter segment"},{"start":20,"end":40,"focus":"chapter segment"}]""",
+            roundCount: 2,
+            roundIndex: 1);
+        await store.PersistExtractionRoundAsync(
+            run.RunId,
+            1,
+            [new ReferenceChapterExtractedMaterial(
+                "他推门而入，屋里安静得能听见雨声。",
+                ReferenceMaterializationCandidateTypes.Passage,
+                new ReferenceMaterializationQualificationTags(["worldbuilding"], [], [], []),
+                new ReferenceMaterializationQualityScores(0.9, 0.7, 0.8, 0.6, 0.7, 0.5),
+                0.9,
+                ["worldbuilding"])],
+            CancellationToken.None);
+        await store.ReleaseBatchLeaseAsync(claim, CancellationToken.None);
+
+        // 旧格式计划读回应作废：ReadExtractionPlanAsync 返回 null。
+        Assert.Null(await store.ReadExtractionPlanAsync(run.RunId, 1, CancellationToken.None));
+
+        // 恢复跑：worker 检测到无（有效）计划即重规划，新计划为类型分组；
+        // 已落库候选凭 upsert 幂等保留——不重复计数、不白费。
+        var extractor = new StubChapterMaterialExtractor(
+        [
+            new ReferenceChapterExtractedMaterial(
+                "他推门而入，屋里安静得能听见雨声。",
+                ReferenceMaterializationCandidateTypes.Passage,
+                new ReferenceMaterializationQualificationTags(["worldbuilding"], [], [], []),
+                new ReferenceMaterializationQualityScores(0.9, 0.7, 0.8, 0.6, 0.7, 0.5),
+                0.9,
+                ["worldbuilding"]),
+        ]);
+        var worker = new ReferenceMaterializationWorker(
+            resolver,
+            new FailingQualifier(),
+            new AcceptingEmbedder(),
+            new ReferenceMaterializationVectorIndexer(resolver, new RecordingVecProvisioner()),
+            workerId: "replan-worker",
+            chapterMaterialExtractor: extractor);
+        await DrainRunAsync(worker, run.RunId, maxPumps: 12);
+
+        var status = await store.GetAsync(run.RunId, CancellationToken.None);
+        Assert.Equal(ReferenceMaterializationRunStates.Completed, status?.Status);
+        var chapters = await store.ListChapterProgressAsync(run.RunId, 1, 10, CancellationToken.None);
+        var chapter1 = chapters.Items.Single(item => item.ChapterIndex == 1);
+        // 同一摘录重复提取只落一条候选：幂等合并保留旧候选，不重复计数。
+        Assert.Equal(1, chapter1.CandidateCount);
+        var replanned = await store.ReadExtractionPlanAsync(run.RunId, 1, CancellationToken.None);
+        Assert.NotNull(replanned);
+        Assert.True(
+            replanned!.Rounds.Count > 0 && replanned.Rounds.All(round => round.MaterialTypes.Count > 0),
+            "replanned plan must group material kinds, not character ranges");
+    }
+
+    // 直写提取计划原始 JSON（迁移测试用：模拟 alpha.13 旧格式落库）。
+    private static async Task UpdateExtractionPlanRawAsync(
+        AppInitializationOptions options,
+        string runId,
+        int chapterIndex,
+        string planJson,
+        int roundCount,
+        int roundIndex)
+    {
+        await using var connection = await OpenConnectionAsync(options);
+        await using var command = connection.CreateCommand();
+        command.CommandText = """
+            UPDATE reference_materialization_chapter_progress
+            SET extraction_plan_json = $plan_json,
+                extraction_round_count = $round_count,
+                extraction_round_index = $round_index
+            WHERE run_id = $run_id AND chapter_index = $chapter_index;
+            """;
+        command.Parameters.AddWithValue("$plan_json", planJson);
+        command.Parameters.AddWithValue("$round_count", roundCount);
+        command.Parameters.AddWithValue("$round_index", roundIndex);
+        command.Parameters.AddWithValue("$run_id", runId);
+        command.Parameters.AddWithValue("$chapter_index", chapterIndex);
+        await command.ExecuteNonQueryAsync(CancellationToken.None);
+    }
+
     private sealed class StubChapterMaterialExtractor(
         IReadOnlyList<ReferenceChapterExtractedMaterial> materials) : IReferenceChapterMaterialExtractor
     {
@@ -1361,26 +1472,11 @@ public sealed class ReferenceMaterializationRunStoreTests : IDisposable
             CancellationToken cancellationToken)
         {
             RoundRequests.Add((request.ChapterIndex, string.Join(',', round.MaterialTypes)));
+            Requests.Add(request);
             return ValueTask.FromResult(new ReferenceChapterExtractionResult(materials, 1));
         }
 
         public List<(int ChapterIndex, string PassTypes)> RoundRequests { get; } = [];
-
-        public async ValueTask<ReferenceChapterExtractionResult> ExtractChapterMaterialsAsync(
-            ReferenceChapterExtractionRequest request,
-            IReadOnlyList<string> alreadyExtractedExcerpts,
-            Func<IReadOnlyList<ReferenceChapterExtractedMaterial>, CancellationToken, ValueTask<IReadOnlyList<string>>>? persistPageAsync,
-            CancellationToken cancellationToken)
-        {
-            Requests.Add(request);
-            if (persistPageAsync is not null)
-            {
-                // 模拟单轮提取：材料立即落库后返回。
-                await persistPageAsync(materials, cancellationToken);
-            }
-
-            return new ReferenceChapterExtractionResult(materials, 1);
-        }
     }
 
     private async ValueTask<ReferenceAnchorPayload> CreateRegisteredSourceAnchorAsync(AppInitializationOptions options)

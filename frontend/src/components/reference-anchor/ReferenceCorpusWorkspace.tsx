@@ -811,7 +811,7 @@ export default function ReferenceCorpusWorkspace({
                             <span className="block truncate text-foreground">{stageLabel(item.current_stage)}</span>
                             <span className="mt-0.5 block text-[11px] text-muted-foreground">
                               {item.extraction_round_count && item.current_stage === 'llm_qualifying'
-                                ? `第 ${Math.min(item.extraction_round_index ?? 0, item.extraction_round_count)}/${item.extraction_round_count} 轮 · `
+                                ? `第 ${Math.min(item.extraction_round_index ?? 0, item.extraction_round_count)}/${item.extraction_round_count} 趟 · `
                                 : ''}
                               候选 {formatCount(item.candidate_count)} · 接纳 {formatCount(item.accepted_count)} · 向量 {formatCount(item.vector_count)}
                             </span>

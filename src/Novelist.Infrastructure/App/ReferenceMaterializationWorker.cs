@@ -344,9 +344,11 @@ public sealed class ReferenceMaterializationWorker : IAsyncDisposable
             var work = await store.BeginChapterExtractionAsync(runId, chapterIndex, cancellationToken);
             if (work is not null)
             {
-                // 计划分轮提取：先让模型把整章切成若干连续区间（计划落库，进度有
-                // 分母"第 X/N 轮"），再逐轮提取——每轮材料到达即落库（候选+计数
-                // 立即可见），失败从已完成的轮继续，不重复已付的模型费。
+                // 计划分趟提取：先让模型把六种素材类型划分成若干趟（计划落库，进度有
+                // 分母"第 X/N 趟"），每趟通读全章只戴一副镜头——每趟材料到达即落库
+                //（候选+计数立即可见），失败从已完成的趟继续，不重复已付的模型费。
+                // 旧格式计划（字符区间）读取时作废，返回 null 走重规划；已落库候选
+                // 凭 upsert 幂等保留，已提取的摘录不白费。
                 var request = new ReferenceChapterExtractionRequest(
                     work.AnchorId,
                     work.ChapterIndex,
@@ -362,11 +364,10 @@ public sealed class ReferenceMaterializationWorker : IAsyncDisposable
                 }
 
                 var requestCount = 0;
-                var alreadyExtracted = new List<string>(
-                    await store.ListPersistedExtractionExcerptsAsync(runId, chapterIndex, cancellationToken));
+                var extractedCount = await store.CountChapterExtractionCandidatesAsync(runId, chapterIndex, cancellationToken);
                 for (; plan.RoundIndex < plan.Rounds.Count; plan = plan with { RoundIndex = plan.RoundIndex + 1 })
                 {
-                    if (alreadyExtracted.Count >= ReferenceMaterializationChatCompletionQualifier.MaxExtractedMaterialsPerChapter)
+                    if (extractedCount >= ReferenceMaterializationChatCompletionQualifier.MaxExtractedMaterialsPerChapter)
                     {
                         break;
                     }
@@ -377,7 +378,7 @@ public sealed class ReferenceMaterializationWorker : IAsyncDisposable
                     var persisted = await store.PersistExtractionRoundAsync(
                         runId, chapterIndex, roundResult.Materials, cancellationToken);
                     await store.AdvanceExtractionRoundAsync(runId, chapterIndex, cancellationToken);
-                    alreadyExtracted.AddRange(persisted.PersistedExcerpts);
+                    extractedCount += persisted.PersistedExcerpts.Count;
                 }
 
                 var completed = await store.CompleteExtractionAsync(

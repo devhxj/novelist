@@ -1,5 +1,4 @@
 using System.Security.Cryptography;
-using System.Text;
 using System.Text.Json;
 using Microsoft.Data.Sqlite;
 using Novelist.Contracts.App;
@@ -10,7 +9,7 @@ namespace Novelist.Infrastructure.App;
 internal sealed partial class SqliteReferenceMaterializationRunStore
 {
     // 章节级直接提取：worker 不再用本地窗口切候选，而是把整章文本交给模型，
-    // 由模型返回逐字摘录（store 贳责摘录定位、候选落库与进度推进）。
+    // 由模型返回逐字摘录（store 负责摘录定位、候选落库与进度推进）。
     public async ValueTask<bool> HasChapterSourceSegmentAsync(
         string runId,
         int chapterIndex,
@@ -163,35 +162,7 @@ internal sealed partial class SqliteReferenceMaterializationRunStore
         return Convert.ToInt32(await command.ExecuteScalarAsync(cancellationToken), System.Globalization.CultureInfo.InvariantCulture);
     }
 
-    // 分页提取的活性心跳：每完成一页就累加 model_call_count，让轮询中的 UI
-    // 在数分钟的长提取期间看到"模型调用"在增长。PersistChapterExtractionAsync
-    // 用 MAX(model_call_count, 页数) 合并，页内递增与最终计数天然一致。
-    public async ValueTask RecordExtractionPageAsync(
-        string runId,
-        int chapterIndex,
-        CancellationToken cancellationToken)
-    {
-        var normalizedRunId = NormalizeRunId(runId);
-        if (chapterIndex <= 0)
-        {
-            throw new ArgumentOutOfRangeException(nameof(chapterIndex), "Chapter index must be positive.");
-        }
-
-        var databasePath = await EnsureSchemaAsync(cancellationToken);
-        await using var connection = await OpenConnectionAsync(databasePath, cancellationToken);
-        await using var command = connection.CreateCommand();
-        command.CommandText = """
-            UPDATE reference_materialization_chapter_progress
-            SET model_call_count = model_call_count + 1,
-                row_version = row_version + 1
-            WHERE run_id = $run_id AND chapter_index = $chapter_index;
-            """;
-        command.Parameters.AddWithValue("$run_id", normalizedRunId);
-        command.Parameters.AddWithValue("$chapter_index", chapterIndex);
-        await command.ExecuteNonQueryAsync(cancellationToken);
-    }
-
-    // 计划落库：保存轮区间与总轮数（extraction_round_index 归零，重试重开计划时重置）。
+    // 计划落库：保存趟类型分组与总趟数（extraction_round_index 归零，重试重开计划时重置）。
     public async ValueTask SaveExtractionPlanAsync(
         string runId,
         int chapterIndex,
@@ -232,7 +203,32 @@ internal sealed partial class SqliteReferenceMaterializationRunStore
         IReadOnlyList<ReferenceChapterExtractionRound> Rounds,
         int RoundIndex);
 
-    // 读取计划与已完成轮次：无计划返回 null（worker 先建计划再分轮执行）。
+    // 每章候选计数（判 40 条上限用）：只数行数，不拼证据文本。
+    public async ValueTask<int> CountChapterExtractionCandidatesAsync(
+        string runId,
+        int chapterIndex,
+        CancellationToken cancellationToken)
+    {
+        var normalizedRunId = NormalizeRunId(runId);
+        if (chapterIndex <= 0)
+        {
+            throw new ArgumentOutOfRangeException(nameof(chapterIndex), "Chapter index must be positive.");
+        }
+
+        var databasePath = await EnsureSchemaAsync(cancellationToken);
+        await using var connection = await OpenConnectionAsync(databasePath, cancellationToken);
+        await using var command = connection.CreateCommand();
+        command.CommandText = """
+            SELECT COUNT(*) FROM reference_material_candidates
+            WHERE run_id = $run_id
+              AND candidate_key LIKE 'chapter-extract:' || $chapter_index || ':%';
+            """;
+        command.Parameters.AddWithValue("$run_id", normalizedRunId);
+        command.Parameters.AddWithValue("$chapter_index", chapterIndex);
+        return Convert.ToInt32(await command.ExecuteScalarAsync(cancellationToken), System.Globalization.CultureInfo.InvariantCulture);
+    }
+
+    // 读取计划与已完成趟次：无计划或旧格式返回 null（worker 重新规划再分趟执行）。
     public async ValueTask<ExtractionPlanState?> ReadExtractionPlanAsync(
         string runId,
         int chapterIndex,
@@ -288,7 +284,7 @@ internal sealed partial class SqliteReferenceMaterializationRunStore
         return new ExtractionPlanState(rounds, roundIndex);
     }
 
-    // 轮完成推进：已完成轮次 +1（断点续轮的位置标记）。
+    // 趟完成推进：已完成趟次 +1（断点续趟的位置标记）。
     public async ValueTask AdvanceExtractionRoundAsync(
         string runId,
         int chapterIndex,
@@ -314,12 +310,12 @@ internal sealed partial class SqliteReferenceMaterializationRunStore
         await command.ExecuteNonQueryAsync(cancellationToken);
     }
 
-    // 每轮持久化结果：落库摘录（去重/续跑上下文）与被丢弃的幻觉摘录数。
+    // 每趟持久化结果：落库摘录与被丢弃的幻觉摘录数。
     internal sealed record ExtractionRoundResult(IReadOnlyList<string> PersistedExcerpts, int SkippedCount);
 
-    // 每轮持久化：模型每返回一批材料就立即落库（逐字校验 + 候选 + 证据链接），
-    // 章节保持 llm_qualifying 不迁移；计数按轮增量累加并刷新 run 漏斗——长提取
-    // 期间 UI 能看到候选数持续增长。已存在的候选（重试重放轮）跳过，保证幂等。
+    // 每趟持久化：模型每返回一批材料就立即落库（逐字校验 + 候选 + 证据链接），
+    // 章节保持 llm_qualifying 不迁移；计数按趟增量累加并刷新 run 漏斗——长提取
+    // 期间 UI 能看到候选数持续增长。已存在的候选（重试重放趟）跳过，保证幂等。
     public async ValueTask<ExtractionRoundResult> PersistExtractionRoundAsync(
         string runId,
         int chapterIndex,
@@ -423,6 +419,23 @@ internal sealed partial class SqliteReferenceMaterializationRunStore
             }
         }
 
+        // 空趟也要推进 model_call_count：轮询中的 UI 靠它分辨"活着"与"挂了"，
+        // 模型明确回答"本趟没有值得收集的素材"同样是一次真实完成。
+        await using (var update = connection.CreateCommand())
+        {
+            update.Transaction = transaction;
+            update.CommandText = """
+                UPDATE reference_materialization_chapter_progress
+                SET model_call_count = model_call_count + $model_calls,
+                    row_version = row_version + 1
+                WHERE run_id = $run_id AND chapter_index = $chapter_index;
+                """;
+            update.Parameters.AddWithValue("$model_calls", 1);
+            update.Parameters.AddWithValue("$run_id", normalizedRunId);
+            update.Parameters.AddWithValue("$chapter_index", chapterIndex);
+            await update.ExecuteNonQueryAsync(cancellationToken);
+        }
+
         if (persisted.Count > 0)
         {
             await using (var update = connection.CreateCommand())
@@ -432,7 +445,6 @@ internal sealed partial class SqliteReferenceMaterializationRunStore
                     UPDATE reference_materialization_chapter_progress
                     SET candidate_count = candidate_count + $inserted,
                         decided_count = decided_count + $inserted,
-                        model_call_count = model_call_count + 1,
                         row_version = row_version + 1
                     WHERE run_id = $run_id AND chapter_index = $chapter_index;
                     """;
@@ -451,7 +463,7 @@ internal sealed partial class SqliteReferenceMaterializationRunStore
     }
 
     // 提取完成收尾：llm_qualifying -> embedding，计数从候选表重算为终值，
-    // model_call_count 用 MAX 合并轮心跳与本次调用数。
+    // model_call_count 用 MAX 合并趟心跳与本次调用数。
     public async ValueTask<ReferenceChapterExtractionPersistenceResult> CompleteExtractionAsync(
         string runId,
         int chapterIndex,
@@ -527,62 +539,6 @@ internal sealed partial class SqliteReferenceMaterializationRunStore
         var round = await PersistExtractionRoundAsync(runId, chapterIndex, extraction.Materials, cancellationToken);
         var completed = await CompleteExtractionAsync(runId, chapterIndex, extraction.ModelCallCount, cancellationToken);
         return completed with { SkippedCount = round.SkippedCount };
-    }
-
-    // 断点续跑上下文：读回该章已落库的全部摘录（证据区间拼接），作为分页去重载荷。
-    public async ValueTask<IReadOnlyList<string>> ListPersistedExtractionExcerptsAsync(
-        string runId,
-        int chapterIndex,
-        CancellationToken cancellationToken)
-    {
-        var normalizedRunId = NormalizeRunId(runId);
-        if (chapterIndex <= 0)
-        {
-            throw new ArgumentOutOfRangeException(nameof(chapterIndex), "Chapter index must be positive.");
-        }
-
-        var databasePath = await EnsureSchemaAsync(cancellationToken);
-        await using var connection = await OpenConnectionAsync(databasePath, cancellationToken);
-        await using var command = connection.CreateCommand();
-        command.CommandText = """
-            SELECT candidate_node.candidate_id, node.text, candidate_node.evidence_start, candidate_node.evidence_end
-            FROM reference_material_candidates candidate
-            JOIN reference_material_candidate_nodes candidate_node ON candidate_node.candidate_id = candidate.candidate_id
-            JOIN reference_text_nodes node ON node.node_id = candidate_node.node_id
-            WHERE candidate.run_id = $run_id
-              AND candidate.candidate_key LIKE 'chapter-extract:' || $chapter_index || ':%'
-            ORDER BY candidate_node.candidate_id, candidate_node.ordinal;
-            """;
-        command.Parameters.AddWithValue("$run_id", normalizedRunId);
-        command.Parameters.AddWithValue("$chapter_index", chapterIndex);
-        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
-        var byCandidate = new Dictionary<string, StringBuilder>(StringComparer.Ordinal);
-        while (await reader.ReadAsync(cancellationToken))
-        {
-            var candidateId = reader.GetString(0);
-            var text = reader.GetString(1);
-            var start = reader.GetInt32(2);
-            var end = reader.GetInt32(3);
-            if (!byCandidate.TryGetValue(candidateId, out var builder))
-            {
-                builder = new StringBuilder();
-                byCandidate[candidateId] = builder;
-            }
-
-            if (start < 0 || end <= start || end > text.Length)
-            {
-                continue;
-            }
-
-            if (builder.Length > 0)
-            {
-                builder.Append('\n');
-            }
-
-            builder.Append(text, start, end - start);
-        }
-
-        return byCandidate.Values.Select(builder => builder.ToString()).ToArray();
     }
 
     private async ValueTask LinkEvidenceNodesAsync(

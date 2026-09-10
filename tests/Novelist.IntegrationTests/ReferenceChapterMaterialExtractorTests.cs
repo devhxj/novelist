@@ -15,7 +15,7 @@ public sealed class ReferenceChapterMaterialExtractorTests
     }
 
     [Fact]
-    public async Task ExtractChapterMaterialsParsesVerbatimMaterialsAndDefaultsUnknownTypes()
+    public async Task ExtractChapterRoundParsesVerbatimMaterialsAndDefaultsUnknownTypes()
     {
         var chat = new ScriptedChatCompletionClient(
         [
@@ -28,18 +28,18 @@ public sealed class ReferenceChapterMaterialExtractorTests
         ]);
         var extractor = new ReferenceMaterializationChatCompletionQualifier(chat);
 
-        var result = await extractor.ExtractChapterMaterialsAsync(
+        var result = await extractor.ExtractChapterRoundAsync(
             new ReferenceChapterExtractionRequest(
                 1,
                 1,
                 "第一章",
-                "他推门而入，屋里安静得能听见雨声。",
+                "他推门而入，屋里安静得能听见雨声。第二段摘录材料。",
                 new ReferenceMaterializationLlmSelection("deepseek", "deepseek-v4-flash", "high")),
-            [],
-            null,
+            new ReferenceChapterExtractionRound(
+                ReferenceMaterializationCandidateTypes.All.Where(type => type is "passage" or "dialogue_exchange" or "action_reaction" or "emotion" or "hook" or "payoff").ToArray(),
+                "all six kinds"),
             CancellationToken.None);
 
-        // 首批不足额（2 < 12）即视为章节提取完毕：只发一次请求。
         Assert.Equal(1, chat.Requests.Count);
         Assert.Equal(2, result.Materials.Count);
         Assert.Equal("dialogue_exchange", result.Materials[0].MaterialType);
@@ -51,72 +51,6 @@ public sealed class ReferenceChapterMaterialExtractorTests
         Assert.Equal("passage", result.Materials[1].MaterialType);
         Assert.Empty(result.Materials[1].Tags.NarrativeFunctions);
         Assert.Empty(result.Materials[1].ReasonCodes);
-    }
-
-    [Fact]
-    public async Task ExtractionPaginatesOutputAcrossBatchesUntilExhausted()
-    {
-        // 每批最多 24 条：材料池 30 条时，首批满额、第二批只剩 6 条（不足额）即终止。
-        var chapterText = new string('文', 5_000);
-        var chat = new PaginatingChatCompletionClient(poolSize: 30, perBatch: 16);
-        var extractor = new ReferenceMaterializationChatCompletionQualifier(chat);
-        var heartbeatCount = 0;
-
-        var result = await extractor.ExtractChapterMaterialsAsync(
-            new ReferenceChapterExtractionRequest(
-                1,
-                1,
-                "第一章",
-                chapterText,
-                new ReferenceMaterializationLlmSelection("deepseek", "deepseek-v4-flash", "high")),
-            [],
-            async (materials, ct) =>
-            {
-                heartbeatCount++;
-                await Task.Delay(1, ct);
-                return materials.Select(material => material.Excerpt).ToArray();
-            },
-            CancellationToken.None);
-
-        Assert.Equal(2, chat.Requests.Count);
-        // 每完成一轮触发一次持久化回调（材料即落库）。
-        Assert.Equal(chat.Requests.Count, heartbeatCount);
-        Assert.Equal(30, result.Materials.Count);
-        for (var i = 0; i < chat.Requests.Count; i++)
-        {
-            using var payload = JsonDocument.Parse(chat.Requests[i].Messages[1].Content);
-            var root = payload.RootElement;
-            // 整章始终全量输入，分页的是输出：载荷携带已提取摘录与偏移。
-            Assert.Equal(chapterText, root.GetProperty("chapter_text").GetString());
-            Assert.Equal(i * 16, root.GetProperty("material_offset").GetInt32());
-            Assert.Equal(i * 16, root.GetProperty("extracted_excerpts").GetArrayLength());
-        }
-
-        Assert.Equal(30, result.Materials.Select(material => material.Excerpt).Distinct().Count());
-    }
-
-    [Fact]
-    public async Task TransportInterruptionIsRetriedOnceAndSucceeds()
-    {
-        // 供应商掐流（ResponseEnded）是传输层错误：同页重试一次应救回；
-        // 供应商侧拒绝（如限流）不适用此路径。
-        var chat = new TransportFlakyChatCompletionClient(
-            BuildBatchMaterialsJson(3));
-        var extractor = new ReferenceMaterializationChatCompletionQualifier(chat);
-
-        var result = await extractor.ExtractChapterMaterialsAsync(
-            new ReferenceChapterExtractionRequest(
-                1,
-                1,
-                "第一章",
-                new string('文', 2_000),
-                new ReferenceMaterializationLlmSelection("deepseek", "deepseek-v4-flash", "high")),
-            [],
-            null,
-            CancellationToken.None);
-
-        Assert.Equal(2, chat.Requests.Count);
-        Assert.Equal(3, result.Materials.Count);
     }
 
     [Fact]
@@ -169,52 +103,78 @@ public sealed class ReferenceChapterMaterialExtractorTests
     }
 
     [Fact]
-    public async Task MergedMaterialsAreCappedAtTheChapterLimit()
+    public async Task PlanningFallsBackToFixedGroupingAfterTwoBrokenAttempts()
     {
-        var chapterText = new string('文', 5_000);
-        var chat = new PaginatingChatCompletionClient(poolSize: 999, perBatch: 16);
-        var extractor = new ReferenceMaterializationChatCompletionQualifier(chat);
-
-        var result = await extractor.ExtractChapterMaterialsAsync(
-            new ReferenceChapterExtractionRequest(
-                1,
-                1,
-                "第一章",
-                chapterText,
-                new ReferenceMaterializationLlmSelection("deepseek", "deepseek-v4-flash", "high")),
-            [],
-            null,
-            CancellationToken.None);
-
-        // 达到全局 40 条上限后停止继续分轮。
-        Assert.Equal(3, chat.Requests.Count);
-        Assert.Equal(40, result.Materials.Count);
-    }
-
-    [Fact]
-    public async Task FullyDuplicateBatchTerminatesPagination()
-    {
+        // 两次计划都不合格（重复类型 + 遗漏类型）：固定分组兜底，覆盖全部六种类型。
         var chat = new ScriptedChatCompletionClient(
         [
-            [ReferenceChapterMaterialExtractorTests.ToolCall(BuildBatchMaterialsJson(16))],
-            [ReferenceChapterMaterialExtractorTests.ToolCall(BuildBatchMaterialsJson(16))],
+            [ReferenceChapterMaterialExtractorTests.PlanningToolCall("""{"passes":[{"material_types":["passage","passage"],"focus":"dup"},{"material_types":["hook","payoff"],"focus":"structural"}]}""")],
+            [ReferenceChapterMaterialExtractorTests.PlanningToolCall("""{"passes":[{"material_types":["emotion"],"focus":"feelings"}]}""")],
         ]);
         var extractor = new ReferenceMaterializationChatCompletionQualifier(chat);
 
-        var result = await extractor.ExtractChapterMaterialsAsync(
-            new ReferenceChapterExtractionRequest(
-                1,
-                1,
-                "第一章",
-                new string('文', 2_000),
+        var plan = await extractor.PlanChapterExtractionAsync(
+            new ReferenceChapterExtractionRequest(1, 1, "第一章", new string('文', 2_000),
                 new ReferenceMaterializationLlmSelection("deepseek", "deepseek-v4-flash", "high")),
-            [],
-            null,
             CancellationToken.None);
 
-        // 第二批全部与已提取重复：立即终止，不会无限分轮。
         Assert.Equal(2, chat.Requests.Count);
-        Assert.Equal(16, result.Materials.Count);
+        var allTypes = plan.SelectMany(round => round.MaterialTypes).ToArray();
+        Assert.Equal(
+            new[]
+            {
+                ReferenceMaterializationCandidateTypes.Passage,
+                ReferenceMaterializationCandidateTypes.DialogueExchange,
+                ReferenceMaterializationCandidateTypes.ActionReaction,
+                ReferenceMaterializationCandidateTypes.Emotion,
+                ReferenceMaterializationCandidateTypes.Hook,
+                ReferenceMaterializationCandidateTypes.Payoff
+            }.OrderBy(type => type, StringComparer.Ordinal).ToArray(),
+            allTypes.OrderBy(type => type, StringComparer.Ordinal).ToArray());
+        Assert.Equal(allTypes.Length, allTypes.Distinct(StringComparer.Ordinal).Count());
+    }
+
+    [Fact]
+    public async Task RoundExtractionRetriesTransportInterruptionOnce()
+    {
+        // 趟路径同样受传输掐流影响：掐流一次、重试成功，不应让整章失败。
+        var chat = new TransportFlakyChatCompletionClient(BuildBatchMaterialsJson(3));
+        var extractor = new ReferenceMaterializationChatCompletionQualifier(chat);
+
+        var result = await extractor.ExtractChapterRoundAsync(
+            new ReferenceChapterExtractionRequest(1, 1, "第一章", new string('文', 2_000),
+                new ReferenceMaterializationLlmSelection("deepseek", "deepseek-v4-flash", "high")),
+            new ReferenceChapterExtractionRound(ReferenceMaterializationCandidateTypes.All, "all kinds"),
+            CancellationToken.None);
+
+        Assert.Equal(2, chat.Requests.Count);
+        Assert.Equal(3, result.Materials.Count);
+    }
+
+    [Fact]
+    public async Task RoundExtractionPromptHasNoPaginationSemantics()
+    {
+        // 趟提示词不能携带分页语义（extracted_excerpts / 不足额即终止）：
+        // 趟请求的载荷没有这些字段，模型按分页语义会错误收敛或凑数。
+        var chat = new ScriptedChatCompletionClient(
+            [[ReferenceChapterMaterialExtractorTests.ToolCall("""{"materials":[]}""")]]);
+        var extractor = new ReferenceMaterializationChatCompletionQualifier(chat);
+
+        await extractor.ExtractChapterRoundAsync(
+            new ReferenceChapterExtractionRequest(1, 1, "第一章", new string('文', 2_000),
+                new ReferenceMaterializationLlmSelection("deepseek", "deepseek-v4-flash", "high")),
+            new ReferenceChapterExtractionRound(["emotion"], "feelings"),
+            CancellationToken.None);
+
+        var systemPrompt = chat.Requests[0].Messages[0].Content;
+        Assert.DoesNotContain("extracted_excerpts", systemPrompt, StringComparison.Ordinal);
+        Assert.DoesNotContain("paginated", systemPrompt, StringComparison.Ordinal);
+        Assert.Contains("pass_material_types", systemPrompt, StringComparison.Ordinal);
+        // 载荷只带趟类型与镜头，不带分页字段。
+        using var payload = JsonDocument.Parse(chat.Requests[0].Messages[1].Content);
+        Assert.Equal("emotion", payload.RootElement.GetProperty("pass_material_types")[0].GetString());
+        Assert.False(payload.RootElement.TryGetProperty("extracted_excerpts", out _));
+        Assert.False(payload.RootElement.TryGetProperty("material_offset", out _));
     }
 
     [Fact]
@@ -229,15 +189,14 @@ public sealed class ReferenceChapterMaterialExtractorTests
         try
         {
             var exception = await Assert.ThrowsAsync<ReferenceMaterializationException>(async () =>
-                await extractor.ExtractChapterMaterialsAsync(
+                await extractor.ExtractChapterRoundAsync(
                     new ReferenceChapterExtractionRequest(
                         1,
                         1,
                         "第一章",
                         new string('文', 2_000),
                         new ReferenceMaterializationLlmSelection("deepseek", "deepseek-v4-flash", "high")),
-                    [],
-                    null,
+                    new ReferenceChapterExtractionRound(["emotion"], "feelings"),
                     CancellationToken.None));
 
             Assert.Equal(ReferenceMaterializationErrorCodes.LlmRequestFailed, exception.ErrorCode);
@@ -331,30 +290,6 @@ public sealed class ReferenceChapterMaterialExtractorTests
             {
                 yield return item;
             }
-        }
-    }
-
-    // 按请求动态应答：读载荷中的已提取摘录数，返回接下来的新一批材料，
-    // 材料池耗尽后返回空数组（"没有更多"）。
-    private sealed class PaginatingChatCompletionClient(int poolSize, int perBatch) : IChatCompletionClient
-    {
-        public List<ChatCompletionRequest> Requests { get; } = [];
-
-        public ValueTask<string> GenerateTextAsync(ChatCompletionRequest request, CancellationToken cancellationToken) =>
-            throw new NotSupportedException();
-
-        public async IAsyncEnumerable<ChatCompletionStreamEvent> StreamChatAsync(
-            ChatCompletionRequest request,
-            [EnumeratorCancellation] CancellationToken cancellationToken)
-        {
-            Requests.Add(request);
-            await Task.CompletedTask;
-            using var payload = JsonDocument.Parse(request.Messages[1].Content);
-            var alreadyExtracted = payload.RootElement.GetProperty("extracted_excerpts").GetArrayLength();
-            var count = Math.Min(perBatch, Math.Max(poolSize - alreadyExtracted, 0));
-            var materials = string.Join(',', Enumerable.Range(0, count)
-                .Select(i => MaterialJson($"材料摘录编号{alreadyExtracted + i:D4}")));
-            yield return ReferenceChapterMaterialExtractorTests.ToolCall($"{{\"materials\":[{materials}]}}");
         }
     }
 }
