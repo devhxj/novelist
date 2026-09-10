@@ -17,13 +17,18 @@ public sealed class ReferenceMaterializationChatCompletionQualifier : IReference
     private const string QualificationToolName = "submit_materialization_qualification";
     private const string ExtractionToolName = "submit_chapter_materials";
     private const int MaxOutputChars = 128 * 1024;
-    // 思考模型的推理 token 与工具调用 JSON 共享 MaxOutputTokens（65K token，约 256KB UTF-8）
-    // 输出预算，一次响应装不下整章的全部材料（会被 finish_reason=length 截断，DeepSeek
-    // Responses 端点回 incomplete reason=length）。因此对输出按素材类型分趟：每趟通读
-    // 全章、只收集计划内类型的一批素材，趟间类型互斥（代码强制过滤越界类型）。
-    // 全局以 MaxExtractedMaterialsPerChapter（40 条）为上限。最坏一批 16×1200 字摘录约
-    // 24K token，叠加 max 力度推理后仍在预算内。
-    private const int MaxMaterialsPerRequest = 16;
+    // 思考模型的推理 token 与工具调用 JSON 共享 MaxOutputTokens（40,960 token）输出预算，
+    // 一次响应装不下整章的全部材料（会被 finish_reason=length 截断，DeepSeek Responses
+    // 端点回 incomplete reason=length）。因此对输出按素材类型分趟：每趟通读全章、只收集
+    // 计划内类型的一批素材，趟间类型互斥（代码强制过滤越界类型）。
+    // 单趟条数按全局预算均摊：MaxExtractedMaterialsPerChapter（40）/ 兜底趟数（4）= 10。
+    // 压批次不只是省 token：网关会在约 2 分钟处掐断长生成（实测 The response ended
+    // prematurely），单趟产出越少越早收尾，越不容易撞上一条救不回的掐流。代价是计划只给
+    // 2 趟时装不满全局 40 条——实测每趟产出约 5 条，上限是保险而不是配额。
+    private const int MaxMaterialsPerRequest = 10;
+    // 条数封顶不等于长度封顶（10×1200 字仍是 12K 字符的生成量），所以再压一份摘录总量：
+    // 超出预算的弱素材按"强者优先"取前缀丢弃，生成时长随输出体量线性增长。
+    private const int MaxExcerptCharsPerRequest = 6_000;
     public const int MaxExtractedMaterialsPerChapter = 40;
     private const int MaxExtractionExcerptChars = 1_200;
     // 思考模型在 high/max 推理力度下的推理 token 计入输出预算，8192 会被纯推理耗尽导致无声结束。
@@ -357,28 +362,37 @@ public sealed class ReferenceMaterializationChatCompletionQualifier : IReference
         ];
     }
 
-    // 趟请求的传输中断重试：掐流（ResponseEnded / 连接重置）是间歇性网络层错误，
-    // 重试一次大概率救回；供应商侧拒绝（限流/突发保护）仍立即失败——重试会延长冷却窗口。
+    // 趟请求的中断重试：掐流有两种表现——流在传输层就被切断（HttpClient 抛 ResponseEnded），
+    // 或流"正常"收尾但工具实参只写到一半（JSON 必然解析失败）。两者都是间歇性传输故障，
+    // 换一次请求大概率救回，因此按递增退避重试若干次；供应商侧拒绝（限流/突发保护）不带
+    // 这些签名，仍立即失败——重试会延长冷却窗口。
+    // 退避基准第 n 次重试等 n×该值；测试把它调小，否则回归用例要真的等几十秒。
+    internal static TimeSpan RoundRetryBackoff { get; set; } = TimeSpan.FromSeconds(10);
+    internal static int MaxRoundAttempts { get; set; } = 3;
+
     private async ValueTask<IReadOnlyList<ReferenceChapterExtractedMaterial>> ExtractRoundWithTransportRetryAsync(
         ReferenceChapterExtractionRequest input,
         ReferenceChapterExtractionRound round,
         CancellationToken cancellationToken)
     {
-        try
+        for (var attempt = 1; ; attempt++)
         {
-            return await ExtractRoundBatchAsync(input, round, cancellationToken);
-        }
-        catch (ReferenceMaterializationException exception) when (IsTransportInterruption(exception))
-        {
-            await Task.Delay(TimeSpan.FromSeconds(10), cancellationToken);
-            return await ExtractRoundBatchAsync(input, round, cancellationToken);
+            try
+            {
+                return await ExtractRoundBatchAsync(input, round, cancellationToken);
+            }
+            catch (ReferenceMaterializationException exception) when (
+                attempt < MaxRoundAttempts && !cancellationToken.IsCancellationRequested && IsInterruption(exception))
+            {
+                await Task.Delay(RoundRetryBackoff * attempt, cancellationToken);
+            }
         }
     }
 
-    private static bool IsTransportInterruption(ReferenceMaterializationException exception)
+    private static bool IsInterruption(ReferenceMaterializationException exception)
     {
         // 原始异常类型挂在 InnerException；消息兜底匹配掐流签名。
-        return exception.InnerException is HttpRequestException ||
+        return exception.InnerException is HttpRequestException or JsonException ||
             exception.Message.Contains("response ended prematurely", StringComparison.OrdinalIgnoreCase) ||
             exception.Message.Contains("响应过早结束", StringComparison.Ordinal);
     }
@@ -446,10 +460,31 @@ public sealed class ReferenceMaterializationChatCompletionQualifier : IReference
             throw InvalidOutput("Chapter extraction did not return the required tool call.");
         }
 
-        // 类型强制：只保留本趟计划类型内的材料，越界类型一律丢弃。
-        return ParseChapterExtraction(toolCall.ArgumentsJson).Materials
-            .Where(material => allowedThisRound.Contains(material.MaterialType))
-            .ToArray();
+        // 类型强制：只保留本趟计划类型内的材料，越界类型一律丢弃。输出预算在过滤之后才取用，
+        // 否则越界素材会白占额度，把本趟真正要收集的类型的弱尾部挤掉。
+        return TakeWithinOutputBudget(ParseChapterExtraction(toolCall.ArgumentsJson).Materials
+            .Where(material => allowedThisRound.Contains(material.MaterialType)));
+    }
+
+    // 单趟输出预算：模型被要求按强度排序，因此超额度时丢弃的是本趟最弱的一批（取前缀）。
+    private static IReadOnlyList<ReferenceChapterExtractedMaterial> TakeWithinOutputBudget(
+        IEnumerable<ReferenceChapterExtractedMaterial> orderedMaterials)
+    {
+        var taken = new List<ReferenceChapterExtractedMaterial>(MaxMaterialsPerRequest);
+        var excerptChars = 0;
+        foreach (var material in orderedMaterials)
+        {
+            if (taken.Count >= MaxMaterialsPerRequest ||
+                excerptChars + material.Excerpt.Length > MaxExcerptCharsPerRequest)
+            {
+                break;
+            }
+
+            excerptChars += material.Excerpt.Length;
+            taken.Add(material);
+        }
+
+        return taken;
     }
 
     // 供应商的突发保护按"流量增长"判定：材料化分趟把每章放大成多次大请求，
@@ -666,7 +701,9 @@ public sealed class ReferenceMaterializationChatCompletionQualifier : IReference
 
     private static string BuildRoundExtractionSystemPrompt()
     {
-        return """
+        // 额度写进提示词的必须就是代码执行的那一个：文案与常量漂移会让模型按旧配额产出、
+        // 尾部被代码静默丢弃，看起来像"模型漏收"。
+        return $$"""
             You curate reusable fiction-writing materials from one chapter of a Chinese novel.
             One response cannot hold every material in the chapter, so extraction runs pass by
             pass: every pass reads the WHOLE chapter but collects ONLY the material kinds named
@@ -681,8 +718,11 @@ public sealed class ReferenceMaterializationChatCompletionQualifier : IReference
             - Only include fragments genuinely reusable as reference material for other authors:
               vivid dialogue exchanges, emotional beats, hooks, payoffs, sensory or technique passages.
               Skip plain plot-advancing filler and scene transitions.
-            - At most 16 materials per pass; each excerpt between 8 and 1200 characters.
-              Order the batch from strongest to weakest.
+            - Budget for this pass: at most {{MaxMaterialsPerRequest}} materials and at most
+              {{MaxExcerptCharsPerRequest}} characters of excerpt text in total; each excerpt
+              between 8 and {{MaxExtractionExcerptChars}} characters. Order the batch from strongest
+              to weakest — everything past the budget is dropped, so a few strong materials beat a
+              full batch of marginal ones.
             - This pass has the chapter to itself: return an empty materials array if the
               chapter holds nothing worth keeping for these kinds, and never pad to fill the batch.
             - Extraction is selection, not analysis: decide quickly, keep reasoning brief,
@@ -1086,17 +1126,15 @@ public sealed class ReferenceMaterializationChatCompletionQualifier : IReference
                     ParseScores(item),
                     ReadUnitInterval(item, "confidence", "material"),
                     ParseEnumList(item, "reason_codes", AllowedReasonCodes, MaxReasonCodes, "material", dropUnknownValues: true)));
-                if (materials.Count >= MaxMaterialsPerRequest)
-                {
-                    break;
-                }
             }
 
             return new ReferenceChapterExtractionResult(materials);
         }
         catch (JsonException exception)
         {
-            throw InvalidOutput("Chapter extraction tool arguments are not valid JSON.", exception);
+            // 绝大多数不是模型跑偏而是生成在提交工具调用前被掐断：实参只写了一半。
+            // JsonException 保留为 InnerException，趟路径按中断类故障重试。
+            throw InvalidOutput("Chapter extraction tool arguments were cut off before the tool call completed.", exception);
         }
     }
 
@@ -1324,6 +1362,6 @@ public sealed class ReferenceMaterializationChatCompletionQualifier : IReference
     {
         return innerException is null
             ? new ReferenceMaterializationException(ReferenceMaterializationErrorCodes.LlmOutputInvalid, message)
-            : new ReferenceMaterializationException(ReferenceMaterializationErrorCodes.LlmOutputInvalid, message);
+            : new ReferenceMaterializationException(ReferenceMaterializationErrorCodes.LlmOutputInvalid, message, innerException);
     }
 }

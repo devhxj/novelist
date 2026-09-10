@@ -1,7 +1,9 @@
 using System.Runtime.CompilerServices;
 using System.Text.Json;
 using Novelist.Contracts.App;
+using Novelist.Contracts.Bridge;
 using Novelist.Core.App;
+using Novelist.Core.Bridge;
 using Novelist.Infrastructure.App;
 
 namespace Novelist.IntegrationTests;
@@ -12,6 +14,8 @@ public sealed class ReferenceChapterMaterialExtractorTests
     {
         // 测试不等待材料化的 30 秒请求间隔（静态共享，全部测试统一写 0）。
         ReferenceMaterializationChatCompletionQualifier.MinRequestGap = TimeSpan.Zero;
+        // 中断重试的退避同理：真实值 10/20 秒，用例只验证重试发生与次数上限。
+        ReferenceMaterializationChatCompletionQualifier.RoundRetryBackoff = TimeSpan.FromMilliseconds(1);
     }
 
     [Fact]
@@ -152,6 +156,109 @@ public sealed class ReferenceChapterMaterialExtractorTests
     }
 
     [Fact]
+    public async Task RoundExtractionRetriesTruncatedToolArguments()
+    {
+        // 掐流的另一种表现：流"正常"结束但工具实参只写了一半。同属可重试的传输类故障，
+        // 换一次请求就能拿到完整载荷，不该把整章判死。
+        var chat = new ScriptedChatCompletionClient(
+        [
+            [ReferenceChapterMaterialExtractorTests.ToolCall("""{"materials":[{"excerpt":"他推门而入，屋里安静得能听见雨声。","material_type":"passage","tags":{"narrative_functions":""")],
+            [ReferenceChapterMaterialExtractorTests.ToolCall(BuildBatchMaterialsJson(3))],
+        ]);
+        var extractor = new ReferenceMaterializationChatCompletionQualifier(chat);
+
+        var result = await extractor.ExtractChapterRoundAsync(
+            new ReferenceChapterExtractionRequest(1, 1, "第一章", new string('文', 2_000),
+                new ReferenceMaterializationLlmSelection("deepseek", "deepseek-v4-flash", "high")),
+            new ReferenceChapterExtractionRound(["passage"], "passages"),
+            CancellationToken.None);
+
+        Assert.Equal(2, chat.Requests.Count);
+        Assert.Equal(3, result.Materials.Count);
+    }
+
+    [Fact]
+    public async Task RoundExtractionStopsRetryingAfterMaxAttempts()
+    {
+        // 每次都被截断：重试有上限，超限后如实报错并保留底层 JSON 异常供诊断。
+        var chat = new ScriptedChatCompletionClient(
+        [
+            [ReferenceChapterMaterialExtractorTests.ToolCall("{\"materials\":[{\"excerpt\":\"他推门而入")],
+        ]);
+        var extractor = new ReferenceMaterializationChatCompletionQualifier(chat);
+
+        var exception = await Assert.ThrowsAsync<ReferenceMaterializationException>(async () =>
+            await extractor.ExtractChapterRoundAsync(
+                new ReferenceChapterExtractionRequest(1, 1, "第一章", new string('文', 2_000),
+                    new ReferenceMaterializationLlmSelection("deepseek", "deepseek-v4-flash", "high")),
+                new ReferenceChapterExtractionRound(["passage"], "passages"),
+                CancellationToken.None));
+
+        Assert.Equal(ReferenceMaterializationErrorCodes.LlmOutputInvalid, exception.ErrorCode);
+        Assert.IsAssignableFrom<JsonException>(exception.InnerException);
+        Assert.Equal(
+            ReferenceMaterializationChatCompletionQualifier.MaxRoundAttempts,
+            chat.Requests.Count);
+    }
+
+    [Fact]
+    public async Task RoundExtractionDoesNotRetryProviderBurstProtection()
+    {
+        // 限流/突发保护是冷却窗口型失败：机器重试会延长窗口，必须一次即失败。
+        var chat = new BurstProtectedChatCompletionClient();
+        var extractor = new ReferenceMaterializationChatCompletionQualifier(chat);
+
+        var exception = await Assert.ThrowsAsync<ReferenceMaterializationException>(async () =>
+            await extractor.ExtractChapterRoundAsync(
+                new ReferenceChapterExtractionRequest(1, 1, "第一章", new string('文', 2_000),
+                    new ReferenceMaterializationLlmSelection("deepseek", "deepseek-v4-flash", "high")),
+                new ReferenceChapterExtractionRound(["passage"], "passages"),
+                CancellationToken.None));
+
+        Assert.Equal(ReferenceMaterializationErrorCodes.LlmRequestFailed, exception.ErrorCode);
+        Assert.Single(chat.Requests);
+    }
+
+    [Fact]
+    public async Task RoundExtractionKeepsOnlyTheStrongestMaterialsWithinPassBudget()
+    {
+        // 单趟输出预算双重封顶：条数上限 10，摘录总字数上限 6,000。
+        var inScopePassages = string.Join(',', Enumerable.Range(0, 8).Select(i =>
+            MaterialJson($"材料摘录编号{i:D4}")));
+        var outOfScope = string.Join(',', Enumerable.Range(0, 6).Select(i =>
+            MaterialJsonOfType("emotion", $"情绪素材编号{i:D4}")));
+        var longExcerpts = string.Join(',', Enumerable.Range(0, 10).Select(i =>
+            MaterialJson($"{i:D3}" + new string('文', 697))));
+        var chat = new ScriptedChatCompletionClient(
+        [
+            [ReferenceChapterMaterialExtractorTests.ToolCall($"{{\"materials\":[{outOfScope},{inScopePassages}]}}")],
+            [ReferenceChapterMaterialExtractorTests.ToolCall($"{{\"materials\":[{longExcerpts}]}}")],
+        ]);
+        var extractor = new ReferenceMaterializationChatCompletionQualifier(chat);
+
+        var capped = await extractor.ExtractChapterRoundAsync(
+            new ReferenceChapterExtractionRequest(1, 1, "第一章", new string('文', 2_000),
+                new ReferenceMaterializationLlmSelection("deepseek", "deepseek-v4-flash", "high")),
+            new ReferenceChapterExtractionRound(["passage"], "passages"),
+            CancellationToken.None);
+        var volumeCapped = await extractor.ExtractChapterRoundAsync(
+            new ReferenceChapterExtractionRequest(1, 1, "第一章", new string('文', 2_000),
+                new ReferenceMaterializationLlmSelection("deepseek", "deepseek-v4-flash", "high")),
+            new ReferenceChapterExtractionRound(["passage"], "passages"),
+            CancellationToken.None);
+
+        // 载荷共 14 条（6 条 emotion 越界 + 8 条 passage）：越界项若先占额度，本趟只剩 4 条。
+        Assert.Equal(8, capped.Materials.Count);
+        Assert.All(capped.Materials, material => Assert.Equal("passage", material.MaterialType));
+        // 10 条 700 字摘录共 7,000 字：第 9 条会越过 6,000 字预算，取前 8 条。
+        Assert.Equal(8, volumeCapped.Materials.Count);
+        Assert.Equal(700, volumeCapped.Materials[0].Excerpt.Length);
+        // 提示词里的额度必须是被代码执行的那一个。
+        Assert.Contains("at most 10 materials", chat.Requests[0].Messages[0].Content, StringComparison.Ordinal);
+        Assert.Contains("6000 characters of excerpt text", chat.Requests[0].Messages[0].Content, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task RoundExtractionPromptHasNoPaginationSemantics()
     {
         // 趟提示词不能携带分页语义（extracted_excerpts / 不足额即终止）：
@@ -251,9 +358,32 @@ public sealed class ReferenceChapterMaterialExtractorTests
             "plan_chapter_extraction",
             argumentsJson));
 
-    private static string MaterialJson(string excerpt) => $$"""
-        {"excerpt":"{{excerpt}}","material_type":"passage","tags":{"narrative_functions":[],"emotion_mechanics":[],"pov":[],"techniques":[],"scene_beat_roles":[],"character_relations":[],"causal_information_roles":[]},"scores":{"semantic_completeness":0.5,"information_density":0.5,"narrative_value":0.5,"transferability":0.5,"context_independence":0.5,"technique_distinctiveness":0.5},"confidence":0.5,"reason_codes":[]}
+    private static string MaterialJson(string excerpt) => MaterialJsonOfType("passage", excerpt);
+
+    private static string MaterialJsonOfType(string materialType, string excerpt) => $$"""
+        {"excerpt":"{{excerpt}}","material_type":"{{materialType}}","tags":{"narrative_functions":[],"emotion_mechanics":[],"pov":[],"techniques":[],"scene_beat_roles":[],"character_relations":[],"causal_information_roles":[]},"scores":{"semantic_completeness":0.5,"information_density":0.5,"narrative_value":0.5,"transferability":0.5,"context_independence":0.5,"technique_distinctiveness":0.5},"confidence":0.5,"reason_codes":[]}
         """;
+
+    // 供应商突发保护：请求被服务端拒绝（冷却窗口型失败），材料化必须一次即失败。
+    private sealed class BurstProtectedChatCompletionClient : IChatCompletionClient
+    {
+        public List<ChatCompletionRequest> Requests { get; } = [];
+
+        public ValueTask<string> GenerateTextAsync(ChatCompletionRequest request, CancellationToken cancellationToken) =>
+            throw new NotSupportedException();
+
+        public IAsyncEnumerable<ChatCompletionStreamEvent> StreamChatAsync(
+            ChatCompletionRequest request,
+            CancellationToken cancellationToken)
+        {
+            Requests.Add(request);
+            // 供应商收到请求即拒绝（冷却窗口型失败），流根本不产生事件。
+            throw new BridgeRequestException(
+                BridgeErrorCodes.LlmProviderError,
+                "System protection triggered by request burst. Please slow down traffic growth.",
+                retryable: true);
+        }
+    }
 
     // 脚本化假客户端：外层列表的每一项是一次请求的响应事件序列，按调用次序消费。
     // 永不产出的模型流：只在取消令牌触发时结束，模拟活着但永不完成的生成。
