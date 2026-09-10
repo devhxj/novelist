@@ -181,6 +181,16 @@ internal sealed partial class SqliteReferenceMaterializationRunStore
             material_types = round.MaterialTypes,
             focus = round.Focus,
         }));
+        // 写入侧 round-trip 校验：序列化结果必须能被读取校验重新接受。_extractor
+        // 的实现错误（空趟/类型缺失/重复/legacy 类型）在这里 fail fast，而不是
+        // 把坏计划落库、再把垃圾 pass_material_types 发给模型。
+        if (!TryParseExtractionPlan(planJson, 0, []))
+        {
+            throw new ArgumentException(
+                "Extraction plan does not partition the six chapter-extraction kinds into passes.",
+                nameof(rounds));
+        }
+
         var databasePath = await EnsureSchemaAsync(cancellationToken);
         await using var connection = await OpenConnectionAsync(databasePath, cancellationToken);
         await using var command = connection.CreateCommand();

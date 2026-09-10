@@ -1476,6 +1476,59 @@ public sealed class ReferenceMaterializationRunStoreTests : IDisposable
         Assert.Empty(rounds);
     }
 
+    [Fact]
+    public async Task SaveExtractionPlanRejectsBrokenPartitionsInsteadOfPersistingThem()
+    {
+        var options = CreateOptions();
+        var anchor = await CreateRegisteredSourceAnchorAsync(options);
+        var splitService = new SqliteReferenceMaterializationService(options, new EmptyChapterSplitAnalyzer());
+        var profile = await splitService.PreviewChapterSplitAsync(
+            new PreviewReferenceChapterSplitPayload(anchor.NovelId, anchor.AnchorId, "第{number}章 {title}"),
+            CancellationToken.None);
+        await splitService.ConfirmChapterSplitAsync(
+            new ConfirmReferenceChapterSplitPayload(anchor.NovelId, anchor.AnchorId, profile.SplitProfileId),
+            CancellationToken.None);
+        var resolver = new ReferenceCorpusDatabasePathResolver(options);
+        var store = new SqliteReferenceMaterializationRunStore(resolver);
+        var preflight = new RecordingPreflight(new ReferenceMaterializationModelPreflightResult(
+            new ReferenceMaterializationModelIdentityPayload("llm", "model"),
+            new ReferenceMaterializationModelIdentityPayload("embedding", "model", 8)));
+        var service = new SqliteReferenceMaterializationService(options, new EmptyChapterSplitAnalyzer(), modelPreflight: preflight);
+        var run = await service.EnqueueMaterializationAsync(
+            new EnqueueReferenceMaterializationPayload(anchor.NovelId, anchor.AnchorId, profile.SplitProfileId),
+            CancellationToken.None);
+        var claim = await store.ClaimCurrentBatchAsync(run.RunId, "save-plan-worker", TimeSpan.FromMinutes(1), CancellationToken.None);
+        Assert.NotNull(claim);
+        Assert.NotNull(await store.BeginChapterExtractionAsync(run.RunId, 1, CancellationToken.None));
+
+        // extractor 实现错误的三种形态：遗漏类型、重复类型、legacy 窗口类型。
+        // 写入侧必须拒绝落库（fail fast），而不是让坏计划进库或进模型载荷。
+        var brokenPlans = new[]
+        {
+            new List<ReferenceChapterExtractionRound>
+            {
+                new(["emotion"], "only emotion"),
+            },
+            new List<ReferenceChapterExtractionRound>
+            {
+                new(["passage", "passage"], "duplicated"),
+            },
+            new List<ReferenceChapterExtractionRound>
+            {
+                new(ReferenceMaterializationCandidateTypes.All, "window kinds"),
+            },
+        };
+        foreach (var broken in brokenPlans)
+        {
+            await Assert.ThrowsAsync<ArgumentException>(
+                () => store.SaveExtractionPlanAsync(run.RunId, 1, broken, CancellationToken.None).AsTask());
+        }
+
+        // 库里没有留下任何坏计划：读取仍是 null（待重规划），而不是半写状态。
+        Assert.Null(await store.ReadExtractionPlanAsync(run.RunId, 1, CancellationToken.None));
+        await store.ReleaseBatchLeaseAsync(claim, CancellationToken.None);
+    }
+
     // 直写提取计划原始 JSON（迁移测试用：模拟 alpha.13 旧格式落库）。
     private static async Task UpdateExtractionPlanRawAsync(
         AppInitializationOptions options,
