@@ -935,6 +935,14 @@ public sealed class ReferenceMaterializationRunStoreTests : IDisposable
                 anchor.NovelId, anchor.AnchorId, run.RunId, ReferenceMaterializationCandidateDecisions.Accepted),
             CancellationToken.None);
         Assert.Equal(2, keptAccepted.Items.Count);
+
+        // 回收把章节计数清零、判定保留：重放一趟落库必须整表重算计数，实时进度不能
+        // 停在 0（旧写法按"新增行"累加，重放时一行都不新增，UI 会一直显示候选 0）。
+        await store.PersistExtractionRoundAsync(run.RunId, 1, PassageMaterials(), CancellationToken.None);
+        var replayed = await store.ListChapterProgressAsync(run.RunId, 1, 10, CancellationToken.None);
+        var replayedChapter = Assert.Single(replayed.Items, item => item.ChapterIndex == 1);
+        Assert.Equal(2, replayedChapter.CandidateCount);
+        Assert.Equal(2, replayedChapter.DecidedCount);
         await store.ReleaseBatchLeaseAsync(reclaimed, CancellationToken.None);
 
         var extractor = new StubChapterMaterialExtractor(PassageMaterials());
@@ -962,56 +970,42 @@ public sealed class ReferenceMaterializationRunStoreTests : IDisposable
     }
 
     [Fact]
-    public async Task LostExtractionDecisionsRewindTheRoundCursorAndReviveOnResume()
+    public async Task LostExtractionDecisionsAreRequalifiedWithoutRepayingFinishedRounds()
     {
         var options = CreateOptions();
-        var anchor = await CreateRegisteredSourceAnchorAsync(options);
-        var splitService = new SqliteReferenceMaterializationService(options, new EmptyChapterSplitAnalyzer());
-        var profile = await splitService.PreviewChapterSplitAsync(
-            new PreviewReferenceChapterSplitPayload(anchor.NovelId, anchor.AnchorId, "第{number}章 {title}"),
-            CancellationToken.None);
-        await splitService.ConfirmChapterSplitAsync(
-            new ConfirmReferenceChapterSplitPayload(anchor.NovelId, anchor.AnchorId, profile.SplitProfileId),
-            CancellationToken.None);
-        var resolver = new ReferenceCorpusDatabasePathResolver(options);
-        var store = new SqliteReferenceMaterializationRunStore(resolver);
-        var preflight = new RecordingPreflight(new ReferenceMaterializationModelPreflightResult(
-            new ReferenceMaterializationModelIdentityPayload("llm", "model"),
-            new ReferenceMaterializationModelIdentityPayload("embedding", "model", 8)));
-        var service = new SqliteReferenceMaterializationService(options, new EmptyChapterSplitAnalyzer(), modelPreflight: preflight);
-        var run = await service.EnqueueMaterializationAsync(
-            new EnqueueReferenceMaterializationPayload(anchor.NovelId, anchor.AnchorId, profile.SplitProfileId),
-            CancellationToken.None);
+        var fixture = await CreateExtractionRunFixtureAsync(options);
+        var store = fixture.Store;
 
         // 老版本留下的坏状态：趟次游标已到底，但候选判定被租约回收打回 pending。
         // 按游标续跑等于零趟不跑，章节会以"候选 2 / 接纳 0 / 向量 0"完成。
-        var claim = await store.ClaimCurrentBatchAsync(run.RunId, "corrupt-owner", TimeSpan.FromMinutes(1), CancellationToken.None);
+        var claim = await store.ClaimCurrentBatchAsync(fixture.RunId, "corrupt-owner", TimeSpan.FromMinutes(1), CancellationToken.None);
         Assert.NotNull(claim);
-        Assert.NotNull(await store.BeginChapterExtractionAsync(run.RunId, 1, CancellationToken.None));
-        await store.SaveExtractionPlanAsync(run.RunId, 1, SceneRounds(), CancellationToken.None);
-        await store.PersistExtractionRoundAsync(run.RunId, 1, PassageMaterials(), CancellationToken.None);
-        await store.AdvanceExtractionRoundAsync(run.RunId, 1, CancellationToken.None);
-        await store.AdvanceExtractionRoundAsync(run.RunId, 1, CancellationToken.None);
-        await MarkExtractionCandidatesPendingAsync(options, run.RunId, 1);
+        Assert.NotNull(await store.BeginChapterExtractionAsync(fixture.RunId, 1, CancellationToken.None));
+        await store.SaveExtractionPlanAsync(fixture.RunId, 1, SceneRounds(), CancellationToken.None);
+        await store.PersistExtractionRoundAsync(fixture.RunId, 1, PassageMaterials(), CancellationToken.None);
+        await store.AdvanceExtractionRoundAsync(fixture.RunId, 1, CancellationToken.None);
+        await store.AdvanceExtractionRoundAsync(fixture.RunId, 1, CancellationToken.None);
+        await MarkExtractionCandidatesPendingAsync(options, fixture.RunId, 1);
         await store.ReleaseBatchLeaseAsync(claim, CancellationToken.None);
 
-        // 读取侧自愈：有 pending 的提取候选即判定丢失，游标回卷重跑趟。
-        var plan = await store.ReadExtractionPlanAsync(run.RunId, 1, CancellationToken.None);
+        // 游标不回卷：pending 行归判定阶段所有，重跑趟等于把已付的模型费再付一遍。
+        var plan = await store.ReadExtractionPlanAsync(fixture.RunId, 1, CancellationToken.None);
         Assert.NotNull(plan);
-        Assert.Equal(0, plan!.RoundIndex);
+        Assert.Equal(2, plan!.RoundIndex);
 
         var extractor = new StubChapterMaterialExtractor(PassageMaterials());
+        var qualifier = new RecordingAcceptingQualifier();
         var worker = new ReferenceMaterializationWorker(
-            resolver,
-            new FailingQualifier(),
+            fixture.Resolver,
+            qualifier,
             new AcceptingEmbedder(),
-            new ReferenceMaterializationVectorIndexer(resolver, new RecordingVecProvisioner()),
-            workerId: "revive-worker",
+            new ReferenceMaterializationVectorIndexer(fixture.Resolver, new RecordingVecProvisioner()),
+            workerId: "requalify-worker",
             chapterMaterialExtractor: extractor);
-        await DrainRunAsync(worker, run.RunId, maxPumps: 12);
+        await DrainRunAsync(worker, fixture.RunId, maxPumps: 12);
 
-        var status = await store.GetAsync(run.RunId, CancellationToken.None);
-        var chapters = await store.ListChapterProgressAsync(run.RunId, 1, 10, CancellationToken.None);
+        var status = await store.GetAsync(fixture.RunId, CancellationToken.None);
+        var chapters = await store.ListChapterProgressAsync(fixture.RunId, 1, 10, CancellationToken.None);
         var chapter1 = Assert.Single(chapters.Items, item => item.ChapterIndex == 1);
         Assert.NotNull(status);
         Assert.True(
@@ -1021,11 +1015,203 @@ public sealed class ReferenceMaterializationRunStoreTests : IDisposable
         Assert.Equal(2, chapter1.CandidateCount);
         Assert.Equal(2, chapter1.AcceptedCount);
         Assert.Equal(2, chapter1.VectorCount);
-        var revived = await splitService.ListMaterializationCandidatesAsync(
+        // 修复只补判定：第 1 章一趟都不重跑，两条丢失判定由模型重新打分。
+        Assert.DoesNotContain(extractor.RoundRequests, request => request.ChapterIndex == 1);
+        Assert.True(qualifier.InvocationCount >= 1);
+    }
+
+    [Fact]
+    public async Task ConfirmedExtractionCandidateIsRequalifiedOnResumeWithoutRepayingRounds()
+    {
+        var options = CreateOptions();
+        var fixture = await CreateExtractionRunFixtureAsync(options);
+        var firstPass = await RunPassExtractionToCompletionAsync(fixture, MixedConfidenceMaterials(), "confirm-pass-worker");
+        Assert.Equal(ReferenceMaterializationRunStates.Completed, firstPass.Status.Status);
+        Assert.Equal(1, firstPass.Chapter1.AcceptedCount);
+        Assert.Equal(1, firstPass.Chapter1.ReviewCount);
+        var reviewCandidate = Assert.Single((await fixture.Materialization.ListMaterializationCandidatesAsync(
             new ListReferenceMaterializationCandidatesPayload(
-                anchor.NovelId, anchor.AnchorId, run.RunId, ReferenceMaterializationCandidateDecisions.Accepted),
+                fixture.Anchor.NovelId,
+                fixture.Anchor.AnchorId,
+                fixture.RunId,
+                ReferenceMaterializationCandidateDecisions.ReviewRequired),
+            CancellationToken.None)).Items);
+
+        var reviewed = await fixture.Materialization.ReviewMaterializationCandidateAsync(
+            new ReviewReferenceMaterializationCandidatePayload(
+                fixture.Anchor.NovelId,
+                fixture.Anchor.AnchorId,
+                fixture.RunId,
+                reviewCandidate.CandidateId,
+                ReferenceMaterializationCandidateReviewActions.Confirm,
+                reviewCandidate.RowVersion),
             CancellationToken.None);
-        Assert.Equal(2, revived.Items.Count);
+        Assert.True(reviewed.RequalificationQueued);
+        Assert.Equal(ReferenceMaterializationCandidateDecisions.Pending, reviewed.Decision);
+
+        // 恢复：确认过的候选由判定阶段补打分并重新嵌入，提取一趟都不重跑——
+        // 重跑会让模型用新判定覆盖人工结论，还把 6 种类型的模型费再付一遍。
+        var extractor = new StubChapterMaterialExtractor(MixedConfidenceMaterials());
+        var qualifier = new RecordingAcceptingQualifier();
+        var worker = new ReferenceMaterializationWorker(
+            fixture.Resolver,
+            qualifier,
+            new AcceptingEmbedder(),
+            new ReferenceMaterializationVectorIndexer(fixture.Resolver, new RecordingVecProvisioner()),
+            workerId: "confirm-resume-worker",
+            chapterMaterialExtractor: extractor);
+        await DrainRunAsync(worker, fixture.RunId, maxPumps: 12);
+
+        var status = await fixture.Store.GetAsync(fixture.RunId, CancellationToken.None);
+        var chapters = await fixture.Store.ListChapterProgressAsync(fixture.RunId, 1, 10, CancellationToken.None);
+        var chapter1 = Assert.Single(chapters.Items, item => item.ChapterIndex == 1);
+        Assert.NotNull(status);
+        Assert.True(
+            status.Status == ReferenceMaterializationRunStates.Completed,
+            $"run status={status.Status}, error={status.LastErrorCode}:{status.LastErrorMessage}; chapters=" +
+            string.Join(";", chapters.Items.Select(item => $"c{item.ChapterIndex}:{item.Status}:{item.CandidateCount}/{item.AcceptedCount}/{item.VectorCount}")));
+        Assert.Equal(2, chapter1.AcceptedCount);
+        Assert.Equal(2, chapter1.VectorCount);
+        Assert.Equal(0, chapter1.ReviewCount);
+        Assert.DoesNotContain(extractor.RoundRequests, request => request.ChapterIndex == 1);
+        Assert.True(qualifier.InvocationCount >= 1);
+        // 同代次继续：复核不新起一代材料，确认的候选晋升进原有代次。
+        Assert.Equal(firstPass.Status.GenerationId, status.GenerationId);
+        var accepted = await fixture.Materialization.ListMaterializationCandidatesAsync(
+            new ListReferenceMaterializationCandidatesPayload(
+                fixture.Anchor.NovelId,
+                fixture.Anchor.AnchorId,
+                fixture.RunId,
+                ReferenceMaterializationCandidateDecisions.Accepted),
+            CancellationToken.None);
+        Assert.Contains(accepted.Items, item => item.CandidateId == reviewCandidate.CandidateId);
+    }
+
+    [Fact]
+    public async Task AdjustedReviewBoundarySurvivesRequalificationWithoutModelRecut()
+    {
+        var options = CreateOptions();
+        var fixture = await CreateExtractionRunFixtureAsync(options);
+        await RunPassExtractionToCompletionAsync(fixture, MixedConfidenceMaterials(), "boundary-pass-worker");
+        var reviewCandidate = Assert.Single((await fixture.Materialization.ListMaterializationCandidatesAsync(
+            new ListReferenceMaterializationCandidatesPayload(
+                fixture.Anchor.NovelId,
+                fixture.Anchor.AnchorId,
+                fixture.RunId,
+                ReferenceMaterializationCandidateDecisions.ReviewRequired),
+            CancellationToken.None)).Items);
+        var originalSpan = Assert.Single(reviewCandidate.SourceSpans);
+        var adjusted = new ReferenceMaterializationCandidateSourceSpanPayload(
+            originalSpan.NodeId,
+            originalSpan.Start,
+            originalSpan.End - 3);
+
+        await fixture.Materialization.ReviewMaterializationCandidateAsync(
+            new ReviewReferenceMaterializationCandidatePayload(
+                fixture.Anchor.NovelId,
+                fixture.Anchor.AnchorId,
+                fixture.RunId,
+                reviewCandidate.CandidateId,
+                ReferenceMaterializationCandidateReviewActions.AdjustBoundary,
+                reviewCandidate.RowVersion,
+                [adjusted]),
+            CancellationToken.None);
+
+        // 判定桩会把证据重切成"去掉尾部 3 字"：人工边界若被覆盖，长度对不上。
+        var qualifier = new ReshapingAcceptingQualifier();
+        var worker = new ReferenceMaterializationWorker(
+            fixture.Resolver,
+            qualifier,
+            new AcceptingEmbedder(),
+            new ReferenceMaterializationVectorIndexer(fixture.Resolver, new RecordingVecProvisioner()),
+            workerId: "boundary-resume-worker",
+            chapterMaterialExtractor: new StubChapterMaterialExtractor(MixedConfidenceMaterials()));
+        await DrainRunAsync(worker, fixture.RunId, maxPumps: 12);
+
+        var status = await fixture.Store.GetAsync(fixture.RunId, CancellationToken.None);
+        Assert.NotNull(status);
+        Assert.Equal(ReferenceMaterializationRunStates.Completed, status.Status);
+        Assert.True(qualifier.InvocationCount >= 1);
+        var accepted = await fixture.Materialization.ListMaterializationCandidatesAsync(
+            new ListReferenceMaterializationCandidatesPayload(
+                fixture.Anchor.NovelId,
+                fixture.Anchor.AnchorId,
+                fixture.RunId,
+                ReferenceMaterializationCandidateDecisions.Accepted),
+            CancellationToken.None);
+        var reviewed = Assert.Single(accepted.Items, item => item.CandidateId == reviewCandidate.CandidateId);
+        Assert.Equal(adjusted.Start, Assert.Single(reviewed.SourceSpans).Start);
+        Assert.Equal(adjusted.End, Assert.Single(reviewed.SourceSpans).End);
+    }
+
+    [Fact]
+    public async Task UndecidedCandidatesBlockPromotionInsteadOfActivatingEmptyGeneration()
+    {
+        var options = CreateOptions();
+        var fixture = await CreateExtractionRunFixtureAsync(options);
+        var firstPass = await RunPassExtractionToCompletionAsync(fixture, MixedConfidenceMaterials(), "guard-pass-worker");
+        Assert.Equal(1, firstPass.Chapter1.AcceptedCount);
+
+        // 历史损坏形态：章节早已 completed，判定却被抹回 pending，进度计数看起来正常。
+        await MarkExtractionCandidatesPendingAsync(options, fixture.RunId, 1);
+        await ReopenRunForPromotionAsync(options, fixture.RunId);
+
+        Assert.False(await fixture.Store.PromoteIfReadyAsync(fixture.RunId, CancellationToken.None));
+        var status = await fixture.Store.GetAsync(fixture.RunId, CancellationToken.None);
+        Assert.NotNull(status);
+        Assert.Equal(ReferenceMaterializationRunStates.Failed, status.Status);
+        Assert.Equal(ReferenceMaterializationErrorCodes.GenerationIncomplete, status.LastErrorCode);
+        Assert.Contains("未判定", status.LastErrorMessage ?? string.Empty);
+    }
+
+    private sealed record ExtractionRunFixture(
+        SqliteReferenceMaterializationService Materialization,
+        SqliteReferenceMaterializationRunStore Store,
+        ReferenceCorpusDatabasePathResolver Resolver,
+        ReferenceAnchorPayload Anchor,
+        string RunId);
+
+    // 分趟提取用的运行夹具：两章来源 + 已确认切分 + 预检通过后的材料化入队。
+    private async ValueTask<ExtractionRunFixture> CreateExtractionRunFixtureAsync(AppInitializationOptions options)
+    {
+        var anchor = await CreateRegisteredSourceAnchorAsync(options);
+        var resolver = new ReferenceCorpusDatabasePathResolver(options);
+        var preflight = new RecordingPreflight(new ReferenceMaterializationModelPreflightResult(
+            new ReferenceMaterializationModelIdentityPayload("llm", "model"),
+            new ReferenceMaterializationModelIdentityPayload("embedding", "model", 8)));
+        var service = new SqliteReferenceMaterializationService(options, new EmptyChapterSplitAnalyzer(), modelPreflight: preflight);
+        var profile = await service.PreviewChapterSplitAsync(
+            new PreviewReferenceChapterSplitPayload(anchor.NovelId, anchor.AnchorId, "第{number}章 {title}"),
+            CancellationToken.None);
+        await service.ConfirmChapterSplitAsync(
+            new ConfirmReferenceChapterSplitPayload(anchor.NovelId, anchor.AnchorId, profile.SplitProfileId),
+            CancellationToken.None);
+        var run = await service.EnqueueMaterializationAsync(
+            new EnqueueReferenceMaterializationPayload(anchor.NovelId, anchor.AnchorId, profile.SplitProfileId),
+            CancellationToken.None);
+        return new ExtractionRunFixture(service, new SqliteReferenceMaterializationRunStore(resolver), resolver, anchor, run.RunId);
+    }
+
+    // 跑完整趟流水线到 completed：判定模型一次都不该被调用，用必抛的桩守住这一点。
+    private static async ValueTask<(ReferenceMaterializationChapterProgressPayload Chapter1, ReferenceMaterializationStatusPayload Status)>
+        RunPassExtractionToCompletionAsync(
+            ExtractionRunFixture fixture,
+            IReadOnlyList<ReferenceChapterExtractedMaterial> materials,
+            string workerId)
+    {
+        var worker = new ReferenceMaterializationWorker(
+            fixture.Resolver,
+            new FailingQualifier(),
+            new AcceptingEmbedder(),
+            new ReferenceMaterializationVectorIndexer(fixture.Resolver, new RecordingVecProvisioner()),
+            workerId,
+            chapterMaterialExtractor: new StubChapterMaterialExtractor(materials));
+        await DrainRunAsync(worker, fixture.RunId, maxPumps: 12);
+        var status = await fixture.Store.GetAsync(fixture.RunId, CancellationToken.None);
+        var chapters = await fixture.Store.ListChapterProgressAsync(fixture.RunId, 1, 10, CancellationToken.None);
+        return (
+            Assert.Single(chapters.Items, item => item.ChapterIndex == 1),
+            status ?? throw new InvalidOperationException("Materialization run disappeared."));
     }
 
     // 两趟划分六种章节提取类型（与规划侧校验同形）。
@@ -1065,6 +1251,25 @@ public sealed class ReferenceMaterializationRunStoreTests : IDisposable
             []),
     ];
 
+    // 分趟落库即定判定：一条高置信直接接纳，一条低置信进复核队列。
+    private static List<ReferenceChapterExtractedMaterial> MixedConfidenceMaterials() =>
+    [
+        new(
+            "他推门而入，屋里安静得能听见雨声。",
+            ReferenceMaterializationCandidateTypes.Passage,
+            new ReferenceMaterializationQualificationTags(["worldbuilding"], [], [], []),
+            new ReferenceMaterializationQualityScores(0.9, 0.7, 0.8, 0.6, 0.7, 0.5),
+            0.9,
+            ["worldbuilding"]),
+        new(
+            "雨声压住窗沿，他想起昨夜的电话。",
+            ReferenceMaterializationCandidateTypes.Emotion,
+            new ReferenceMaterializationQualificationTags([], [], [], []),
+            new ReferenceMaterializationQualityScores(0.4, 0.3, 0.4, 0.2, 0.3, 0.2),
+            0.3,
+            []),
+    ];
+
     // 直写老版本的损坏形态：判定被打回 pending、来源冒充窗口构建器、置信度清空。
     private static async ValueTask MarkExtractionCandidatesPendingAsync(
         AppInitializationOptions options,
@@ -1087,6 +1292,21 @@ public sealed class ReferenceMaterializationRunStoreTests : IDisposable
         command.Parameters.AddWithValue("$run_id", runId);
         command.Parameters.AddWithValue("$chapter_index", chapterIndex);
         Assert.Equal(2, await command.ExecuteNonQueryAsync(CancellationToken.None));
+    }
+
+    // 直写"整轮已收尾、等待晋升"的运行形态，用来单独验证晋升守卫。
+    private static async ValueTask ReopenRunForPromotionAsync(AppInitializationOptions options, string runId)
+    {
+        await using var connection = await OpenConnectionAsync(options);
+        await using var command = connection.CreateCommand();
+        command.CommandText = """
+            UPDATE reference_materialization_runs
+            SET status = $running, current_batch_index = NULL, completed_at = NULL, activated_at = NULL
+            WHERE run_id = $run_id;
+            """;
+        command.Parameters.AddWithValue("$running", ReferenceMaterializationRunStates.Running);
+        command.Parameters.AddWithValue("$run_id", runId);
+        Assert.Equal(1, await command.ExecuteNonQueryAsync(CancellationToken.None));
     }
 
     [Fact]
@@ -2411,6 +2631,31 @@ public sealed class ReferenceMaterializationRunStoreTests : IDisposable
                     return;
                 }
             }
+        }
+    }
+
+    // 判定桩：全部接纳，但故意把证据边界重切成"尾部去掉 3 字"。
+    // 用来分辨人工调整的边界是被保留还是被模型重新裁切。
+    private sealed class ReshapingAcceptingQualifier : IReferenceMaterializationQualifier
+    {
+        public int InvocationCount { get; private set; }
+
+        public ValueTask<ReferenceMaterializationQualificationResult> QualifyAsync(
+            ReferenceMaterializationQualificationRequest input,
+            CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            InvocationCount++;
+            return ValueTask.FromResult(new ReferenceMaterializationQualificationResult(
+                input.Candidates.Select(candidate => new ReferenceMaterializationCandidateQualification(
+                    candidate.CandidateId,
+                    ReferenceMaterializationCandidateDecisions.Accepted,
+                    candidate.SourceNodes.Select(node =>
+                        new ReferenceMaterializationQualificationSpan(node.NodeId, 0, Math.Max(1, node.Text.Length - 3))).ToArray(),
+                    new ReferenceMaterializationQualityScores(0.9, 0.8, 0.7, 0.6, 0.5, 0.4),
+                    new ReferenceMaterializationQualificationTags(["reveal"], [], ["close_third"], ["subtext"]),
+                    0.85,
+                    ["complete_exchange"])).ToArray()));
         }
     }
 

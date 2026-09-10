@@ -213,9 +213,10 @@ internal sealed partial class SqliteReferenceMaterializationRunStore
         IReadOnlyList<ReferenceChapterExtractionRound> Rounds,
         int RoundIndex);
 
-    // 每章候选计数（判 40 条上限用）：只数已判定的行，不拼证据文本。pending 行
-    // 是判定丢失的行，算进进度会让达到上限的损坏章节被上限直接跳过、永远修不好。
-    public async ValueTask<int> CountChapterExtractionCandidatesAsync(
+    // 本章提取候选的判定分布，一次查询供两处使用：
+    // 已判定数用于 40 条上限（pending 行是丢失的判定，算进进度会让损坏章节被上限
+    // 直接跳过、永远修不好）；未判定数用于判断该不该补跑判定阶段。
+    public async ValueTask<(int Decided, int Undecided)> CountChapterExtractionCandidateDecisionsAsync(
         string runId,
         int chapterIndex,
         CancellationToken cancellationToken)
@@ -230,19 +231,28 @@ internal sealed partial class SqliteReferenceMaterializationRunStore
         await using var connection = await OpenConnectionAsync(databasePath, cancellationToken);
         await using var command = connection.CreateCommand();
         command.CommandText = """
-            SELECT COUNT(*) FROM reference_material_candidates
+            SELECT COALESCE(SUM(CASE WHEN decision <> $pending THEN 1 ELSE 0 END), 0),
+                   COALESCE(SUM(CASE WHEN decision = $pending THEN 1 ELSE 0 END), 0)
+            FROM reference_material_candidates
             WHERE run_id = $run_id
-              AND decision <> $pending
               AND candidate_key LIKE 'chapter-extract:' || $chapter_index || ':%';
             """;
-        command.Parameters.AddWithValue("$run_id", normalizedRunId);
         command.Parameters.AddWithValue("$pending", ReferenceMaterializationCandidateDecisions.Pending);
+        command.Parameters.AddWithValue("$run_id", normalizedRunId);
         command.Parameters.AddWithValue("$chapter_index", chapterIndex);
-        return Convert.ToInt32(await command.ExecuteScalarAsync(cancellationToken), System.Globalization.CultureInfo.InvariantCulture);
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        if (!await reader.ReadAsync(cancellationToken))
+        {
+            return (0, 0);
+        }
+
+        return (Convert.ToInt32(reader.GetInt64(0), System.Globalization.CultureInfo.InvariantCulture),
+            Convert.ToInt32(reader.GetInt64(1), System.Globalization.CultureInfo.InvariantCulture));
     }
 
-    // 读取计划与已完成趟次：无计划或旧格式返回 null（worker 重新规划再分趟执行）；
-    // 本章仍有 pending 的提取候选（判定丢失）时把游标回卷到 0，交回趟循环重跑补判定。
+    // 读取计划与已完成趟次：无计划或旧格式返回 null（worker 重新规划再分趟执行）。
+    // 游标只反映"哪些趟已经付过模型费"，丢失判定的候选不在此处回卷重跑——重跑会重复
+    // 付费并覆盖人工复核结果，交给判定阶段补打分（见 worker 的 pending 收尾分支）。
     public async ValueTask<ExtractionPlanState?> ReadExtractionPlanAsync(
         string runId,
         int chapterIndex,
@@ -279,29 +289,6 @@ internal sealed partial class SqliteReferenceMaterializationRunStore
         if (!TryParseExtractionPlan(planJson, roundIndex, rounds))
         {
             return null;
-        }
-
-        // 判定丢失自愈：chapter-extract 候选停在 pending 说明它们的判定被抹过
-        //（老版本租约回收会把它们打回 pending，混版本写入同理），而分趟路径不会再跑
-        // qualifier 重算判定——按游标续跑只会让章节以"0 接纳 0 向量"完成。回卷游标
-        // 重跑趟：upsert 按 confidence 重新判定，pending 行原地复活。
-        if (roundIndex > 0)
-        {
-            await using var undecided = connection.CreateCommand();
-            undecided.CommandText = """
-                SELECT EXISTS(
-                  SELECT 1 FROM reference_material_candidates
-                  WHERE run_id = $run_id
-                    AND decision = $pending
-                    AND candidate_key LIKE 'chapter-extract:' || $chapter_index || ':%');
-                """;
-            undecided.Parameters.AddWithValue("$run_id", normalizedRunId);
-            undecided.Parameters.AddWithValue("$pending", ReferenceMaterializationCandidateDecisions.Pending);
-            undecided.Parameters.AddWithValue("$chapter_index", chapterIndex);
-            if (Convert.ToInt64(await undecided.ExecuteScalarAsync(cancellationToken), System.Globalization.CultureInfo.InvariantCulture) != 0)
-            {
-                roundIndex = 0;
-            }
         }
 
         return new ExtractionPlanState(rounds, roundIndex);
@@ -407,8 +394,9 @@ internal sealed partial class SqliteReferenceMaterializationRunStore
     internal sealed record ExtractionRoundResult(IReadOnlyList<string> PersistedExcerpts, int SkippedCount);
 
     // 每趟持久化：模型每返回一批材料就立即落库（逐字校验 + 候选 + 证据链接），
-    // 章节保持 llm_qualifying 不迁移；计数按趟增量累加并刷新 run 漏斗——长提取
-    // 期间 UI 能看到候选数持续增长。已存在的候选（重试重放趟）跳过，保证幂等。
+    // 章节保持 llm_qualifying 不迁移；计数每趟从候选表重算并刷新 run 漏斗——长提取
+    // 期间 UI 能看到候选数持续增长，续跑与判定丢失修复时也一样。已判定候选（重试重放
+    // 趟）幂等覆盖，未判定行交回判定阶段，保证人工复核结果不被重放冲掉。
     public async ValueTask<ExtractionRoundResult> PersistExtractionRoundAsync(
         string runId,
         int chapterIndex,
@@ -459,9 +447,17 @@ internal sealed partial class SqliteReferenceMaterializationRunStore
             await using (var probe = connection.CreateCommand())
             {
                 probe.Transaction = transaction;
-                probe.CommandText = "SELECT 1 FROM reference_material_candidates WHERE candidate_id = $candidate_id;";
+                probe.CommandText = "SELECT decision FROM reference_material_candidates WHERE candidate_id = $candidate_id;";
                 probe.Parameters.AddWithValue("$candidate_id", candidateId);
-                isExisting = await probe.ExecuteScalarAsync(cancellationToken) is not null;
+                var existingDecision = await probe.ExecuteScalarAsync(cancellationToken) as string;
+                if (existingDecision == ReferenceMaterializationCandidateDecisions.Pending)
+                {
+                    // 未判定行归判定阶段所有：重放趟不得用模型的新判定覆盖它，也不得重切
+                    // 人工复核调整过的证据边界（复核确认的候选正停在 pending 等打分）。
+                    continue;
+                }
+
+                isExisting = existingDecision is not null;
             }
 
             var absoluteStart = snapshot.ContentStart + indexInChapter;
@@ -512,45 +508,44 @@ internal sealed partial class SqliteReferenceMaterializationRunStore
             }
         }
 
-        // 空趟也要推进 model_call_count：轮询中的 UI 靠它分辨"活着"与"挂了"，
-        // 模型明确回答"本趟没有值得收集的素材"同样是一次真实完成。
+        // 每趟都从候选表重算计数（不按新增行增量累加）：续跑与判定丢失自愈时行已经
+        // 存在，增量写法会让实时进度停在 0 看起来像卡住。空趟同样要推进
+        // model_call_count——轮询中的 UI 靠它分辨"活着"与"挂了"，模型明确回答
+        // "本趟没有值得收集的素材"同样是一次真实完成。
         await using (var update = connection.CreateCommand())
         {
             update.Transaction = transaction;
             update.CommandText = """
                 UPDATE reference_materialization_chapter_progress
                 SET model_call_count = model_call_count + $model_calls,
+                    candidate_count = (SELECT COUNT(*) FROM reference_material_candidates
+                                       WHERE run_id = $run_id
+                                         AND candidate_key LIKE 'chapter-extract:' || $chapter_index || ':%'),
+                    decided_count = (SELECT COUNT(*) FROM reference_material_candidates
+                                     WHERE run_id = $run_id
+                                       AND decision <> $pending
+                                       AND candidate_key LIKE 'chapter-extract:' || $chapter_index || ':%'),
+                    accepted_count = (SELECT COUNT(*) FROM reference_material_candidates
+                                      WHERE run_id = $run_id
+                                        AND decision = $accepted
+                                        AND candidate_key LIKE 'chapter-extract:' || $chapter_index || ':%'),
+                    review_count = (SELECT COUNT(*) FROM reference_material_candidates
+                                    WHERE run_id = $run_id
+                                      AND decision = $review
+                                      AND candidate_key LIKE 'chapter-extract:' || $chapter_index || ':%'),
                     row_version = row_version + 1
                 WHERE run_id = $run_id AND chapter_index = $chapter_index;
                 """;
             update.Parameters.AddWithValue("$model_calls", 1);
+            update.Parameters.AddWithValue("$pending", ReferenceMaterializationCandidateDecisions.Pending);
+            update.Parameters.AddWithValue("$accepted", ReferenceMaterializationCandidateDecisions.Accepted);
+            update.Parameters.AddWithValue("$review", ReferenceMaterializationCandidateDecisions.ReviewRequired);
             update.Parameters.AddWithValue("$run_id", normalizedRunId);
             update.Parameters.AddWithValue("$chapter_index", chapterIndex);
             await update.ExecuteNonQueryAsync(cancellationToken);
         }
 
-        if (persisted.Count > 0)
-        {
-            await using (var update = connection.CreateCommand())
-            {
-                update.Transaction = transaction;
-                update.CommandText = """
-                    UPDATE reference_materialization_chapter_progress
-                    SET candidate_count = candidate_count + $inserted,
-                        decided_count = decided_count + $inserted,
-                        row_version = row_version + 1
-                    WHERE run_id = $run_id AND chapter_index = $chapter_index;
-                    """;
-                update.Parameters.AddWithValue("$inserted", persisted.Count);
-                update.Parameters.AddWithValue("$run_id", normalizedRunId);
-                update.Parameters.AddWithValue("$chapter_index", chapterIndex);
-                await update.ExecuteNonQueryAsync(cancellationToken);
-            }
-
-            await RefreshAcceptedReviewCountsAsync(connection, transaction, normalizedRunId, chapterIndex, cancellationToken);
-            await RefreshRunCountsAsync(connection, transaction, normalizedRunId, cancellationToken);
-        }
-
+        await RefreshRunCountsAsync(connection, transaction, normalizedRunId, cancellationToken);
         await transaction.CommitAsync(cancellationToken);
         return new ExtractionRoundResult(persisted, skipped);
     }
@@ -715,35 +710,6 @@ internal sealed partial class SqliteReferenceMaterializationRunStore
             await linkNode.ExecuteNonQueryAsync(cancellationToken);
             ordinal++;
         }
-    }
-
-    private static async ValueTask RefreshAcceptedReviewCountsAsync(
-        SqliteConnection connection,
-        SqliteTransaction transaction,
-        string runId,
-        int chapterIndex,
-        CancellationToken cancellationToken)
-    {
-        await using var command = connection.CreateCommand();
-        command.Transaction = transaction;
-        command.CommandText = """
-            UPDATE reference_materialization_chapter_progress
-            SET accepted_count = (SELECT COUNT(*) FROM reference_material_candidates candidate
-                                  WHERE candidate.run_id = $run_id
-                                    AND candidate.decision = $accepted
-                                    AND candidate.candidate_key LIKE 'chapter-extract:' || $chapter_index || ':%'),
-                review_count = (SELECT COUNT(*) FROM reference_material_candidates candidate
-                                WHERE candidate.run_id = $run_id
-                                  AND candidate.decision = $review
-                                  AND candidate.candidate_key LIKE 'chapter-extract:' || $chapter_index || ':%'),
-                row_version = row_version + 1
-            WHERE run_id = $run_id AND chapter_index = $chapter_index;
-            """;
-        command.Parameters.AddWithValue("$accepted", ReferenceMaterializationCandidateDecisions.Accepted);
-        command.Parameters.AddWithValue("$review", ReferenceMaterializationCandidateDecisions.ReviewRequired);
-        command.Parameters.AddWithValue("$run_id", runId);
-        command.Parameters.AddWithValue("$chapter_index", chapterIndex);
-        await command.ExecuteNonQueryAsync(cancellationToken);
     }
 
     private async ValueTask<ExtractionSnapshot?> ReadExtractionSnapshotAsync(

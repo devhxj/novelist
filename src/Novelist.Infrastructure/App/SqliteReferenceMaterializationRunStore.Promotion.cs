@@ -34,32 +34,31 @@ internal sealed partial class SqliteReferenceMaterializationRunStore
         // 而不是静默显示"已完成 · 全 0"。
         if (run.CandidateCount == 0)
         {
-            ReferenceMaterializationRunStateMachine.EnsureCanTransition(
-                ReferenceMaterializationRunStates.Running,
-                ReferenceMaterializationRunStates.Failed);
-            var failedAt = DateTimeOffset.UtcNow;
-            await using (var failure = connection.CreateCommand())
-            {
-                failure.Transaction = transaction;
-                failure.CommandText = """
-                    UPDATE reference_materialization_runs
-                    SET status = $failed,
-                        last_error_code = $error_code,
-                        last_error_message = $error_message,
-                        completed_at = $completed_at
-                    WHERE run_id = $run_id AND status = $running;
-                    """;
-                failure.Parameters.AddWithValue("$failed", ReferenceMaterializationRunStates.Failed);
-                failure.Parameters.AddWithValue("$error_code", ReferenceMaterializationErrorCodes.LlmOutputInvalid);
-                failure.Parameters.AddWithValue(
-                    "$error_message",
-                    "材料化完成但未产生任何候选材料：模型没有摘录有效内容（或摘录均未通过逐字校验）。请更换模型或调整后重新材料化。");
-                failure.Parameters.AddWithValue("$completed_at", FormatTimestamp(failedAt));
-                failure.Parameters.AddWithValue("$run_id", normalizedRunId);
-                failure.Parameters.AddWithValue("$running", ReferenceMaterializationRunStates.Running);
-                await failure.ExecuteNonQueryAsync(cancellationToken);
-            }
+            await MarkPromotionRunFailedAsync(
+                connection,
+                transaction,
+                normalizedRunId,
+                ReferenceMaterializationErrorCodes.LlmOutputInvalid,
+                "材料化完成但未产生任何候选材料：模型没有摘录有效内容（或摘录均未通过逐字校验）。请更换模型或调整后重新材料化。",
+                cancellationToken);
+            await transaction.CommitAsync(cancellationToken);
+            return false;
+        }
 
+        // 判定丢失守卫：仍有 pending 候选却已经全部章节收尾，只可能是判定结果被抹掉了。
+        // 两条流水线的收尾条件都要求 pending 归零（判定阶段 isComplete、提取阶段从不写
+        // pending），因此这里看到 pending 必然是中断恢复造成的丢失。放行的话会用一个缺
+        // 材料的代次顶掉上一代可用材料，且进度看起来完全正常——必须明确失败并指引重做。
+        // 判定依据取候选表本身，不依赖进度表汇总（进度表可能被中断恢复清零）。
+        if (await CountPendingCandidatesAsync(connection, transaction, normalizedRunId, cancellationToken) > 0)
+        {
+            await MarkPromotionRunFailedAsync(
+                connection,
+                transaction,
+                normalizedRunId,
+                ReferenceMaterializationErrorCodes.GenerationIncomplete,
+                "材料化完成但仍有未判定的候选材料：判定结果在中断恢复中丢失，放行的话会丢料。请重新材料化本书。",
+                cancellationToken);
             await transaction.CommitAsync(cancellationToken);
             return false;
         }
@@ -79,6 +78,57 @@ internal sealed partial class SqliteReferenceMaterializationRunStore
         await ActivateGenerationAsync(connection, transaction, run, now, cancellationToken);
         await transaction.CommitAsync(cancellationToken);
         return true;
+    }
+
+    // 晋升守卫统一落库：running -> failed，并写回错误码与用户可见的重做指引。
+    private static async ValueTask MarkPromotionRunFailedAsync(
+        SqliteConnection connection,
+        SqliteTransaction transaction,
+        string runId,
+        string errorCode,
+        string errorMessage,
+        CancellationToken cancellationToken)
+    {
+        ReferenceMaterializationRunStateMachine.EnsureCanTransition(
+            ReferenceMaterializationRunStates.Running,
+            ReferenceMaterializationRunStates.Failed);
+        await using var failure = connection.CreateCommand();
+        failure.Transaction = transaction;
+        failure.CommandText = """
+            UPDATE reference_materialization_runs
+            SET status = $failed,
+                last_error_code = $error_code,
+                last_error_message = $error_message,
+                completed_at = $completed_at
+            WHERE run_id = $run_id AND status = $running;
+            """;
+        failure.Parameters.AddWithValue("$failed", ReferenceMaterializationRunStates.Failed);
+        failure.Parameters.AddWithValue("$error_code", errorCode);
+        failure.Parameters.AddWithValue("$error_message", errorMessage);
+        failure.Parameters.AddWithValue("$completed_at", FormatTimestamp(DateTimeOffset.UtcNow));
+        failure.Parameters.AddWithValue("$run_id", runId);
+        failure.Parameters.AddWithValue("$running", ReferenceMaterializationRunStates.Running);
+        await failure.ExecuteNonQueryAsync(cancellationToken);
+    }
+
+    // 仍未判定的候选数：整轮收尾时用来识别"判定丢失"。
+    private static async ValueTask<int> CountPendingCandidatesAsync(
+        SqliteConnection connection,
+        SqliteTransaction transaction,
+        string runId,
+        CancellationToken cancellationToken)
+    {
+        await using var command = connection.CreateCommand();
+        command.Transaction = transaction;
+        command.CommandText = """
+            SELECT COUNT(*)
+            FROM reference_material_candidates
+            WHERE run_id = $run_id
+              AND decision = $pending;
+            """;
+        command.Parameters.AddWithValue("$pending", ReferenceMaterializationCandidateDecisions.Pending);
+        command.Parameters.AddWithValue("$run_id", runId);
+        return Convert.ToInt32(await command.ExecuteScalarAsync(cancellationToken));
     }
 
     private static async ValueTask<PromotionRun?> ReadPromotionRunAsync(

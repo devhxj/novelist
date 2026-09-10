@@ -344,6 +344,9 @@ internal sealed partial class SqliteReferenceMaterializationRunStore
         ReferenceMaterializationCandidateQualification decision,
         CancellationToken cancellationToken)
     {
+        // 判定会重写 decision_origin，所以先取人工来源：复核确认或手工调过边界的候选
+        // 只补打分，证据边界以人工结论为准，不能让模型重新裁切掉评审者的调整。
+        var decisionOrigin = await ReadCandidateDecisionOriginAsync(connection, transaction, candidate.CandidateId, cancellationToken);
         await using (var command = connection.CreateCommand())
         {
             command.Transaction = transaction;
@@ -376,6 +379,11 @@ internal sealed partial class SqliteReferenceMaterializationRunStore
             }
         }
 
+        if (decisionOrigin.StartsWith("user_", StringComparison.Ordinal))
+        {
+            return;
+        }
+
         var spans = decision.SourceSpans.ToDictionary(span => span.NodeId, StringComparer.Ordinal);
         foreach (var node in candidate.SourceNodes)
         {
@@ -398,6 +406,19 @@ internal sealed partial class SqliteReferenceMaterializationRunStore
                 throw new InvalidOperationException("Material candidate evidence changed while applying model qualification.");
             }
         }
+    }
+
+    private static async ValueTask<string> ReadCandidateDecisionOriginAsync(
+        SqliteConnection connection,
+        SqliteTransaction transaction,
+        string candidateId,
+        CancellationToken cancellationToken)
+    {
+        await using var command = connection.CreateCommand();
+        command.Transaction = transaction;
+        command.CommandText = "SELECT decision_origin FROM reference_material_candidates WHERE candidate_id = $candidate_id;";
+        command.Parameters.AddWithValue("$candidate_id", candidateId);
+        return await command.ExecuteScalarAsync(cancellationToken) as string ?? string.Empty;
     }
 
     private static async ValueTask UpdateQualificationProgressAsync(

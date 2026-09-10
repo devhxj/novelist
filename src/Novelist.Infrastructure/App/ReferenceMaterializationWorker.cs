@@ -354,6 +354,18 @@ public sealed class ReferenceMaterializationWorker : IAsyncDisposable
                     return;
                 }
 
+                // 判定丢失 / 人工重准入收尾：本章仍有未判定候选（历史版本把判定抹回
+                // pending，或复核把候选打回 pending 等重准入）时补跑判定阶段，而不是
+                // 重跑提取趟——已付的模型费不重复支付，复核者调整过的证据边界也不会
+                // 被模型重新裁切。趟次已跑完的章节在这里天然只走这一步。
+                var (decidedCount, undecidedCount) = await store.CountChapterExtractionCandidateDecisionsAsync(
+                    runId, chapterIndex, cancellationToken);
+                if (undecidedCount > 0)
+                {
+                    await QualifyAndEmbedChapterAsync(store, runId, chapterIndex, cancellationToken);
+                    return;
+                }
+
                 // 计划分趟提取：先让模型把六种素材类型划分成若干趟（计划落库，进度有
                 // 分母"第 X/N 趟"），每趟通读全章只戴一副镜头——每趟材料到达即落库
                 //（候选+计数立即可见），失败从已完成的趟继续，不重复已付的模型费。
@@ -374,7 +386,7 @@ public sealed class ReferenceMaterializationWorker : IAsyncDisposable
                 }
 
                 var requestCount = 0;
-                var extractedCount = await store.CountChapterExtractionCandidatesAsync(runId, chapterIndex, cancellationToken);
+                var extractedCount = decidedCount;
                 for (; plan.RoundIndex < plan.Rounds.Count; plan = plan with { RoundIndex = plan.RoundIndex + 1 })
                 {
                     if (extractedCount >= ReferenceMaterializationChatCompletionQualifier.MaxExtractedMaterialsPerChapter)
@@ -475,6 +487,17 @@ public sealed class ReferenceMaterializationWorker : IAsyncDisposable
             return;
         }
 
+        await QualifyAndEmbedChapterAsync(store, runId, chapterIndex, cancellationToken);
+    }
+
+    // 判定阶段收尾：把章节内未判定候选交给判定模型打分，随后推进到嵌入；
+    // 整章零接纳时走空收尾，让批次索引器正常关账。
+    private async Task QualifyAndEmbedChapterAsync(
+        SqliteReferenceMaterializationRunStore store,
+        string runId,
+        int chapterIndex,
+        CancellationToken cancellationToken)
+    {
         ReferenceMaterializationQualificationPersistenceResult persistedQualification;
         do
         {
