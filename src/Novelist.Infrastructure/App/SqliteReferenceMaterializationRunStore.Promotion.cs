@@ -1,5 +1,6 @@
 using System.Security.Cryptography;
 using System.Text;
+using System.Text.Json;
 using Microsoft.Data.Sqlite;
 using Novelist.Contracts.App;
 using Novelist.Core.App;
@@ -69,12 +70,19 @@ internal sealed partial class SqliteReferenceMaterializationRunStore
             throw new InvalidOperationException("Materialization generation accepted-material projection is incomplete.");
         }
 
+        var now = DateTimeOffset.UtcNow;
+        // 换新代次时先归档上一代的素材库行，再把本代投影进素材库：库视图——覆盖度、素材检索、
+        // 风格画像、语料包——全部只读素材库，投影缺失会让材料化成果在界面上永远是 0 条。
+        await SqliteReferenceMaterializationLibraryProjection.ArchivePreviousGenerationsAsync(
+            connection, transaction, run.AnchorId, run.GenerationId, now, cancellationToken);
+
         foreach (var material in materials)
         {
             await InsertMaterialAsync(connection, transaction, run, material, cancellationToken);
         }
 
-        var now = DateTimeOffset.UtcNow;
+        await SqliteReferenceMaterializationLibraryProjection.ProjectGenerationAsync(
+            connection, transaction, run.AnchorId, run.GenerationId, cancellationToken);
         await ActivateGenerationAsync(connection, transaction, run, now, cancellationToken);
         await transaction.CommitAsync(cancellationToken);
         return true;

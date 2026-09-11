@@ -31,8 +31,14 @@ export const bridgeErrorGuide: Record<string, BridgeErrorGuideEntry> = {
     action: '检查 API Key 与网络后重试',
   },
   materialization_llm_request_failed: {
-    message: '大模型请求失败，可能是服务繁忙或额度不足。',
-    action: '稍后重试',
+    message: '大模型请求没有正常完成（服务繁忙、配额受限，或请求被拒绝）。',
+    action: '稍后重试；持续失败请检查模型服务状态与配额，或更换模型',
+  },
+  materialization_llm_request_interrupted: {
+    // 连接在生成完成前被切断，是传输层故障：与配额/鉴权无关，这一点必须说清楚，
+    // 否则作者会去查一个根本没问题的额度。
+    message: '连接在模型生成完成前被切断（响应提前结束），不是额度或鉴权问题。',
+    action: '已自动重试仍失败时，请降低该模型的推理力度、换用输出更短的模型，或改用章节更短的参考书',
   },
   materialization_llm_output_invalid: {
     message: '大模型返回了无法解析的内容。',
@@ -94,6 +100,22 @@ export const bridgeErrorGuide: Record<string, BridgeErrorGuideEntry> = {
     message: '这次复核请求已失效。',
     action: '刷新列表后重试',
   },
+}
+
+/**
+ * 后台通知（状态栏通知条 / toast）的错误正文：优先走错误码映射的人话，未命中才回退后端原始消息。
+ * 通知里没有空间放折叠详情，所以后端原始 SDK 文本只在没有映射时才出现——
+ * 不能像带折叠面板的地方那样"人话 + 原文并存"。
+ */
+export function notificationErrorMessage(
+  code: string | null | undefined,
+  rawMessage: string | null | undefined,
+): string | null {
+  const guide = code ? bridgeErrorGuide[code] : undefined
+  if (guide) {
+    return `${guide.message}（${guide.action}）`
+  }
+  return rawMessage ?? null
 }
 
 // 统一的 bridge 错误呈现：优先透出服务端错误码与消息，未知错误退回兜底文案。

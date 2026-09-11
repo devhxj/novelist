@@ -138,14 +138,23 @@ export async function verifyReferenceWorkspaceBridgeCalls(page) {
     'ListReferenceMaterializationCandidates',
     'RegisterReferenceMaterializationSource',
     'DeleteReferenceAnchor',
-    'ListReferenceCorpusFeatureObservations',
-    'ListReferenceCorpusTechniqueSpecimens',
     'GetReferenceMaterialCoverage',
-    'GetReferenceCorpusAssetTotals',
+    'SearchReferenceMaterials',
+    'GetReferenceMaterialDetail',
   ]
 
   for (const method of requiredMethods) {
     assert(methods.includes(method), `Expected reference workspace bridge method ${method} to be called.`)
+  }
+
+  // 早期分析管线（观察/标本）的浏览与资产接口随实现换代退役：
+  // 语料现在只有一个来源——材料化（整章抽取 + 多维度标签）。
+  for (const retired of [
+    'ListReferenceCorpusFeatureObservations',
+    'ListReferenceCorpusTechniqueSpecimens',
+    'GetReferenceCorpusAssetTotals',
+  ]) {
+    assert(!methods.includes(retired), `Retired corpus analysis surface ${retired} must not be called by the reference workspace.`)
   }
 
   assert(!methods.includes('GenerateReferenceMaterializationBlueprintPreview'), 'blueprint preview is retired with the assembly line')

@@ -1,6 +1,7 @@
 import { useMemo, useState, useRef } from 'react'
 import { BookMarked, CircleCheck, CircleX } from 'lucide-react'
 import type { MaterializationCompletion } from '@/hooks/useMaterializationWatcher'
+import { notificationErrorMessage } from '@/lib/novelist/bridgeErrors'
 
 interface Props {
   content: string
@@ -167,9 +168,12 @@ export default function StatusBar({
                 {notice.status === 'completed' ? '材料化完成' : notice.status === 'failed' ? '材料化失败' : '材料化已取消'}
               </div>
               <p className="mt-0.5 text-muted-foreground">《{notice.anchor_title}》</p>
-              {notice.error_message && (
-                <p className="mt-0.5 line-clamp-2 break-words text-destructive">{notice.error_message}</p>
-              )}
+              {/* 只有失败才谈得上"原因"：完成/取消态残留的上一条错误正文会让通知自相矛盾
+                  （标题写完成、正文挂着原始 SDK 报错）。正文一律走错误码映射的人话。 */}
+              {notice.status === 'failed' && (() => {
+                const reason = notificationErrorMessage(notice.error_code, notice.error_message)
+                return reason ? <p className="mt-0.5 line-clamp-2 break-words text-destructive" data-testid="materialization-notice-reason">{reason}</p> : null
+              })()}
               <div className="mt-1.5 flex gap-2">
                 <button
                   type="button"

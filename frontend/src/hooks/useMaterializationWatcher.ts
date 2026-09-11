@@ -7,6 +7,8 @@ export interface MaterializationCompletion {
   anchor_title: string
   run_id: string
   status: 'completed' | 'failed' | 'cancelled'
+  /** 错误码：通知正文靠它映射成人话；只带 message 会把后端原始 SDK 文本直接推给作者。 */
+  error_code: string | null
   error_message: string | null
 }
 
@@ -65,6 +67,7 @@ export function useMaterializationWatcher(
           anchor_title: titlesRef.current.get(anchorId) ?? '参考书',
           run_id: runId!,
           status: runStatus,
+          error_code: status.last_error_code ?? null,
           error_message: status.last_error_message ?? null,
         })
       }

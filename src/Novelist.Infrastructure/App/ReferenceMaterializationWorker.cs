@@ -396,7 +396,9 @@ public sealed class ReferenceMaterializationWorker : IAsyncDisposable
 
                     var round = plan.Rounds[plan.RoundIndex];
                     var roundResult = await _chapterMaterialExtractor.ExtractChapterRoundAsync(request, round, cancellationToken);
-                    requestCount++;
+                    // 一趟可能因为掐流续跑成多次请求：按实际调用数记账，
+                    // 否则界面上的"模型调用"会少报，作者看到的成本是错的。
+                    requestCount += Math.Max(1, roundResult.ModelCallCount);
                     var persisted = await store.PersistExtractionRoundAsync(
                         runId, chapterIndex, roundResult.Materials, cancellationToken);
                     await store.AdvanceExtractionRoundAsync(runId, chapterIndex, cancellationToken);

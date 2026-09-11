@@ -142,7 +142,7 @@ public sealed class ReferenceChapterMaterialExtractorTests
     public async Task RoundExtractionRetriesTransportInterruptionOnce()
     {
         // 趟路径同样受传输掐流影响：掐流一次、重试成功，不应让整章失败。
-        var chat = new TransportFlakyChatCompletionClient(BuildBatchMaterialsJson(3));
+        var chat = new TransportFlakyChatCompletionClient(ToolCall(BuildBatchMaterialsJson(3)));
         var extractor = new ReferenceMaterializationChatCompletionQualifier(chat);
 
         var result = await extractor.ExtractChapterRoundAsync(
@@ -153,6 +153,51 @@ public sealed class ReferenceChapterMaterialExtractorTests
 
         Assert.Equal(2, chat.Requests.Count);
         Assert.Equal(3, result.Materials.Count);
+    }
+
+    [Fact]
+    public async Task PlanningRetriesTransportInterruption()
+    {
+        // 计划调用此前没有中断重试：掐流一次就判死整章。同属传输类故障，应当重试。
+        var chat = new TransportFlakyChatCompletionClient(PlanningToolCall("""
+            {"passes":[
+              {"material_types":["dialogue_exchange","action_reaction"],"focus":"interactive"},
+              {"material_types":["emotion"],"focus":"feelings"},
+              {"material_types":["hook","payoff"],"focus":"structural"},
+              {"material_types":["passage"],"focus":"descriptive"}]}
+            """));
+        var extractor = new ReferenceMaterializationChatCompletionQualifier(chat);
+
+        var plan = await extractor.PlanChapterExtractionAsync(
+            new ReferenceChapterExtractionRequest(1, 1, "第一章", new string('文', 2_000),
+                new ReferenceMaterializationLlmSelection("deepseek", "deepseek-v4-flash", "high")),
+            CancellationToken.None);
+
+        Assert.Equal(2, chat.Requests.Count);
+        Assert.Equal(4, plan.Count);
+    }
+
+    [Fact]
+    public async Task QualificationRetriesTransportInterruption()
+    {
+        // 准入调用同样此前无重试——一次掐流会让整章在 llm_qualifying 判死。
+        var chat = new TransportFlakyChatCompletionClient(QualificationToolCall("""
+            {"decisions":[{"candidate_id":"candidate-a","decision":"accept","source_spans":[{"node_id":"node-a","start":0,"end":7}],"scores":{"semantic_completeness":0.5,"information_density":0.5,"narrative_value":0.5,"transferability":0.5,"context_independence":0.5,"technique_distinctiveness":0.5},"tags":{"narrative_functions":[],"emotion_mechanics":[],"pov":[],"techniques":[],"scene_beat_roles":[],"character_relations":[],"causal_information_roles":[]},"confidence":0.5,"reason_codes":["complete_exchange"]}]}
+            """));
+        var extractor = new ReferenceMaterializationChatCompletionQualifier(chat);
+
+        var result = await extractor.QualifyAsync(
+            new ReferenceMaterializationQualificationRequest(
+                new ReferenceMaterializationLlmSelection("deepseek", "deepseek-v4-flash", "high"),
+                [new ReferenceMaterializationQualificationCandidate(
+                    "candidate-a",
+                    "dialogue_exchange",
+                    "他说出了真相。",
+                    [new ReferenceMaterializationQualificationSourceNode("node-a", "他说出了真相。")])]),
+            CancellationToken.None);
+
+        Assert.Equal(2, chat.Requests.Count);
+        Assert.Single(result.Decisions);
     }
 
     [Fact]
@@ -196,8 +241,25 @@ public sealed class ReferenceChapterMaterialExtractorTests
 
         Assert.Equal(ReferenceMaterializationErrorCodes.LlmOutputInvalid, exception.ErrorCode);
         Assert.IsAssignableFrom<JsonException>(exception.InnerException);
+        // 重试耗尽要把"试过了"写进消息，作者才不会把系统性掐流当成偶发故障反复点重试。
+        Assert.Contains("已自动重试", exception.Message, StringComparison.Ordinal);
+        // 每次都被截断时，续跑先把每次请求的上限逐档减半（10 → 5 → 2 → 1），
+        // 每档各试满 MaxRoundAttempts 次；减到 1 还失败才如实报错。
+        var ladder = 0;
+        var limit = ReferenceMaterializationChatCompletionQualifier.MaxMaterialsPerRequest;
+        while (true)
+        {
+            ladder++;
+            if (limit == 1)
+            {
+                break;
+            }
+
+            limit = Math.Max(1, limit / 2);
+        }
+
         Assert.Equal(
-            ReferenceMaterializationChatCompletionQualifier.MaxRoundAttempts,
+            ReferenceMaterializationChatCompletionQualifier.MaxRoundAttempts * ladder,
             chat.Requests.Count);
     }
 
@@ -253,9 +315,14 @@ public sealed class ReferenceChapterMaterialExtractorTests
         // 10 条 700 字摘录共 7,000 字：第 9 条会越过 6,000 字预算，取前 8 条。
         Assert.Equal(8, volumeCapped.Materials.Count);
         Assert.Equal(700, volumeCapped.Materials[0].Excerpt.Length);
-        // 提示词里的额度必须是被代码执行的那一个。
-        Assert.Contains("at most 10 materials", chat.Requests[0].Messages[0].Content, StringComparison.Ordinal);
+        // 提示词里的额度必须是被代码执行的那一个：续跑后每次请求的预算随请求下发，
+        // 提示词必须指向同一个字段，而不是写一个会随常量漂移的数字。
+        Assert.Contains("\"budget\" field", chat.Requests[0].Messages[0].Content, StringComparison.Ordinal);
         Assert.Contains("6000 characters of excerpt text", chat.Requests[0].Messages[0].Content, StringComparison.Ordinal);
+        // 健康路径：每次请求的预算就是单趟上限。
+        Assert.Equal(
+            ReferenceMaterializationChatCompletionQualifier.MaxMaterialsPerRequest,
+            ReadRequestedBudget(chat.Requests[0]));
     }
 
     [Fact]
@@ -321,8 +388,116 @@ public sealed class ReferenceChapterMaterialExtractorTests
         return $"{{\"materials\":[{materials}]}}";
     }
 
-    // 首次流式调用模拟供应商掐流（ResponseEnded），第二次正常返回。
-    private sealed class TransportFlakyChatCompletionClient(string argumentsJson) : IChatCompletionClient
+    private static string BuildMaterialsJson(IEnumerable<string> excerpts) =>
+        $"{{\"materials\":[{string.Join(',', excerpts.Select(MaterialJson))}]}}";
+
+    private static int ReadRequestedBudget(ChatCompletionRequest request)
+    {
+        using var document = JsonDocument.Parse(request.Messages[1].Content ?? "{}");
+        return document.RootElement.GetProperty("budget").GetInt32();
+    }
+
+    private static string ReadRequestedChapterText(ChatCompletionRequest request)
+    {
+        using var document = JsonDocument.Parse(request.Messages[1].Content ?? "{}");
+        return document.RootElement.GetProperty("chapter_text").GetString() ?? string.Empty;
+    }
+
+    private static IReadOnlyList<string> ReadAlreadyCollected(ChatCompletionRequest request)
+    {
+        using var document = JsonDocument.Parse(request.Messages[1].Content ?? "{}");
+        return document.RootElement.GetProperty("already_collected")
+            .EnumerateArray()
+            .Select(item => item.GetString() ?? string.Empty)
+            .ToArray();
+    }
+
+    [Fact]
+    public async Task RoundExtractionShrinksEachRequestInsteadOfSplittingTheChapter()
+    {
+        // 掐流的退路必须是"让每次生成变小"，不是把章节切碎——切窗会丢掉整章上下文，
+        // 而钩子/兑现这类素材恰恰依赖在整章中的位置。此用例锁住这个约束：
+        // 每一次请求带上的 chapter_text 都必须是完整整章。
+        var chapterText = string.Concat(Enumerable.Repeat("雨下了一整夜。\n\n", 400));
+        var chat = new BudgetAwareFlakyChatCompletionClient(maxBudget: 2);
+        var extractor = new ReferenceMaterializationChatCompletionQualifier(chat);
+
+        var result = await extractor.ExtractChapterRoundAsync(
+            new ReferenceChapterExtractionRequest(1, 1, "第一章", chapterText,
+                new ReferenceMaterializationLlmSelection("deepseek", "deepseek-v4-flash", "high")),
+            new ReferenceChapterExtractionRound(["passage"], "passages"),
+            CancellationToken.None);
+
+        // 大预算请求被掐断后，续跑把每次请求的预算压到阈值以下并成功收料。
+        Assert.NotEmpty(result.Materials);
+        // 关键断言：输入自始至终是整章，从未被切成窗口。
+        Assert.All(chat.Requests, request => Assert.Equal(chapterText, ReadRequestedChapterText(request)));
+        Assert.Contains(chat.Requests, request => ReadRequestedBudget(request) <= 2);
+    }
+
+    [Fact]
+    public async Task RoundExtractionContinuesWithSmallerBatchesUntilThePassBudgetIsMet()
+    {
+        // 被掐到只能用小预算时，靠续跑把这一趟收满：每次请求带 already_collected，
+        // 模型接着给下一批最强的，而不是只收一批就收工。
+        var chapterText = string.Concat(Enumerable.Repeat("雨下了一整夜。\n\n", 400));
+        var chat = new BudgetAwareFlakyChatCompletionClient(maxBudget: 2);
+        var extractor = new ReferenceMaterializationChatCompletionQualifier(chat);
+
+        var result = await extractor.ExtractChapterRoundAsync(
+            new ReferenceChapterExtractionRequest(1, 1, "第一章", chapterText,
+                new ReferenceMaterializationLlmSelection("deepseek", "deepseek-v4-flash", "high")),
+            new ReferenceChapterExtractionRound(["passage"], "passages"),
+            CancellationToken.None);
+
+        // 单次预算只有 2 条，续跑之后收上来的应明显多于一批。
+        Assert.True(result.Materials.Count > 2, "小预算下应靠续跑收满这一趟");
+        // 续跑多发的请求必须计入模型调用数，界面上的成本才不会少报。
+        Assert.True(result.ModelCallCount > 1, "续跑的额外请求必须计入模型调用数");
+        Assert.True(
+            result.Materials.Count <= ReferenceMaterializationChatCompletionQualifier.MaxMaterialsPerRequest,
+            "续跑不得突破单趟上限，否则会挤掉后面几趟的额度");
+        // 已收的摘录回传给后续请求，因此结果里不应出现重复。
+        Assert.Contains(chat.Requests, request => ReadAlreadyCollected(request).Count > 0);
+        Assert.Equal(
+            result.Materials.Count,
+            result.Materials.Select(material => material.Excerpt).Distinct(StringComparer.Ordinal).Count());
+        Assert.All(chat.Requests, request => Assert.Equal(chapterText, ReadRequestedChapterText(request)));
+    }
+
+    // 只在"每次请求的预算"偏大时掐流：预算压到阈值以下才正常返回。
+    // 用于验证退路是把每次生成变小，而不是把输入切碎。
+    private sealed class BudgetAwareFlakyChatCompletionClient(int maxBudget) : IChatCompletionClient
+    {
+        public List<ChatCompletionRequest> Requests { get; } = [];
+
+        private int _returned;
+
+        public ValueTask<string> GenerateTextAsync(ChatCompletionRequest request, CancellationToken cancellationToken) =>
+            throw new NotSupportedException();
+
+        public async IAsyncEnumerable<ChatCompletionStreamEvent> StreamChatAsync(
+            ChatCompletionRequest request,
+            [EnumeratorCancellation] CancellationToken cancellationToken)
+        {
+            Requests.Add(request);
+            var payload = JsonDocument.Parse(request.Messages[1].Content ?? "{}").RootElement;
+            var budget = payload.GetProperty("budget").GetInt32();
+            await Task.CompletedTask;
+            if (budget > maxBudget)
+            {
+                throw new HttpRequestException("The response ended prematurely. (ResponseEnded)");
+            }
+
+            _returned++;
+            // 按请求给出的预算返回满批：只有满批才会触发续跑，才验证得到这条路径。
+            var excerpts = Enumerable.Range(0, budget).Select(index => $"续跑摘录第{_returned:D2}批第{index:D2}段");
+            yield return ReferenceChapterMaterialExtractorTests.ToolCall(BuildMaterialsJson(excerpts));
+        }
+    }
+
+    // 首次流式调用模拟供应商掐流（ResponseEnded），第二次正常返回给定事件。
+    private sealed class TransportFlakyChatCompletionClient(ChatCompletionStreamEvent success) : IChatCompletionClient
     {
         public List<ChatCompletionRequest> Requests { get; } = [];
 
@@ -340,7 +515,7 @@ public sealed class ReferenceChapterMaterialExtractorTests
                 throw new HttpRequestException("The response ended prematurely. (ResponseEnded)");
             }
 
-            yield return ReferenceChapterMaterialExtractorTests.ToolCall(argumentsJson);
+            yield return success;
         }
     }
 
@@ -356,6 +531,13 @@ public sealed class ReferenceChapterMaterialExtractorTests
         ToolCall: new ChatToolCall(
             "call-planning",
             "plan_chapter_extraction",
+            argumentsJson));
+
+    private static ChatCompletionStreamEvent QualificationToolCall(string argumentsJson) => new(
+        ChatCompletionStreamEventKind.ToolCall,
+        ToolCall: new ChatToolCall(
+            "call-qualification",
+            "submit_materialization_qualification",
             argumentsJson));
 
     private static string MaterialJson(string excerpt) => MaterialJsonOfType("passage", excerpt);

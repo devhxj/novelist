@@ -25,7 +25,8 @@ public sealed class ReferenceMaterializationChatCompletionQualifier : IReference
     // 压批次不只是省 token：网关会在约 2 分钟处掐断长生成（实测 The response ended
     // prematurely），单趟产出越少越早收尾，越不容易撞上一条救不回的掐流。代价是计划只给
     // 2 趟时装不满全局 40 条——实测每趟产出约 5 条，上限是保险而不是配额。
-    private const int MaxMaterialsPerRequest = 10;
+    // 对外可见：续跑按它递推每次请求的预算，回归用例也按它推导重试阶梯。
+    public const int MaxMaterialsPerRequest = 10;
     // 条数封顶不等于长度封顶（10×1200 字仍是 12K 字符的生成量），所以再压一份摘录总量：
     // 超出预算的弱素材按"强者优先"取前缀丢弃，生成时长随输出体量线性增长。
     private const int MaxExcerptCharsPerRequest = 6_000;
@@ -99,13 +100,49 @@ public sealed class ReferenceMaterializationChatCompletionQualifier : IReference
         ArgumentNullException.ThrowIfNull(input);
         ValidateRequest(input);
 
+        var decisions = await QualifyWithBatchFallbackAsync(input, input.Candidates, cancellationToken);
+        return new ReferenceMaterializationQualificationResult(decisions);
+    }
+
+    /// <summary>
+    /// 准入的退路与提取趟一致：整批被掐时把候选对半拆开分别判定。
+    /// 拆的是"批量大小"，不是候选内容——每条候选的正文与溯源节点完整保留，
+    /// 判定标准与输出 schema 都不变，因此质量不动，只是判定请求变多。
+    /// </summary>
+    private async ValueTask<IReadOnlyList<ReferenceMaterializationCandidateQualification>> QualifyWithBatchFallbackAsync(
+        ReferenceMaterializationQualificationRequest input,
+        IReadOnlyList<ReferenceMaterializationQualificationCandidate> candidates,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            return await QualifyBatchAsync(input, candidates, cancellationToken);
+        }
+        catch (ReferenceMaterializationException exception) when (
+            IsInterruption(exception) &&
+            !cancellationToken.IsCancellationRequested &&
+            candidates.Count >= MinCandidatesForBatchSplit)
+        {
+            var half = candidates.Count / 2;
+            var left = await QualifyWithBatchFallbackAsync(input, candidates.Take(half).ToArray(), cancellationToken);
+            var right = await QualifyWithBatchFallbackAsync(input, candidates.Skip(half).ToArray(), cancellationToken);
+            return [.. left, .. right];
+        }
+    }
+
+    private async ValueTask<IReadOnlyList<ReferenceMaterializationCandidateQualification>> QualifyBatchAsync(
+        ReferenceMaterializationQualificationRequest input,
+        IReadOnlyList<ReferenceMaterializationQualificationCandidate> candidates,
+        CancellationToken cancellationToken)
+    {
+        var batch = input with { Candidates = candidates };
         var request = new ChatCompletionRequest(
             input.Model.ProviderName,
             input.Model.ModelId,
             input.Model.ReasoningEffort,
             [
                 new ChatCompletionMessage("system", BuildSystemPrompt()),
-                new ChatCompletionMessage("user", BuildUserPrompt(input))
+                new ChatCompletionMessage("user", BuildUserPrompt(batch))
             ],
             [new ChatToolDefinition(
                 QualificationToolName,
@@ -116,10 +153,12 @@ public sealed class ReferenceMaterializationChatCompletionQualifier : IReference
             TemperatureOverride: 0,
             RequireToolCall: true);
 
-        ChatToolCall? toolCall = null;
+        ChatToolCall? toolCall;
         try
         {
-            toolCall = await ReceiveRequiredToolCallAsync(request, QualificationToolName, cancellationToken);
+            toolCall = await WithTransportInterruptionRetryAsync(
+                token => ReceiveRequiredToolCallAsync(request, QualificationToolName, token),
+                cancellationToken);
         }
         catch (ReferenceMaterializationException)
         {
@@ -134,7 +173,7 @@ public sealed class ReferenceMaterializationChatCompletionQualifier : IReference
 
         return toolCall is null
             ? throw InvalidOutput("Material qualification did not return the required tool call.")
-            : ParseToolArguments(toolCall.ArgumentsJson, input);
+            : ParseToolArguments(toolCall.ArgumentsJson, batch).Decisions;
     }
 
     private const string PlanningToolName = "plan_chapter_extraction";
@@ -179,7 +218,9 @@ public sealed class ReferenceMaterializationChatCompletionQualifier : IReference
                     MaxOutputTokens: MaxOutputTokens,
                     TemperatureOverride: 0,
                     RequireToolCall: true);
-                toolCall = await ReceiveRequiredToolCallAsync(request, PlanningToolName, cancellationToken);
+                toolCall = await WithTransportInterruptionRetryAsync(
+                    token => ReceiveRequiredToolCallAsync(request, PlanningToolName, token),
+                    cancellationToken);
             }
             catch (ReferenceMaterializationException)
             {
@@ -370,20 +411,52 @@ public sealed class ReferenceMaterializationChatCompletionQualifier : IReference
     internal static TimeSpan RoundRetryBackoff { get; set; } = TimeSpan.FromSeconds(10);
     internal static int MaxRoundAttempts { get; set; } = 3;
 
-    private async ValueTask<IReadOnlyList<ReferenceChapterExtractedMaterial>> ExtractRoundWithTransportRetryAsync(
+    // 重试之上还需要一条"让每次生成更小"的退路。掐流是单次请求的生成时长撞上网关的
+    // 墙钟上限：原样重试是同一个请求，必然在同一处再被掐。
+    // 因此退路改在输出侧——整章输入原样保留（上下文不动，质量不动），
+    // 只是每次请求少收几条，收完再续，直到模型说没有了。见 ExtractRoundWithContinuation。
+    internal static int MaxContinuationRequests { get; set; } = 6;
+    // 准入批量同理：整批被掐时把候选对半拆开分别判定（25 → 13/12 → …）。
+    internal static int MinCandidatesForBatchSplit { get; set; } = 4;
+
+    private ValueTask<IReadOnlyList<ReferenceChapterExtractedMaterial>> ExtractRoundWithTransportRetryAsync(
         ReferenceChapterExtractionRequest input,
         ReferenceChapterExtractionRound round,
+        IReadOnlyList<string> excludedExcerpts,
+        int materialLimit,
+        CancellationToken cancellationToken) =>
+        WithTransportInterruptionRetryAsync(
+            token => ExtractRoundBatchAsync(input, round, excludedExcerpts, materialLimit, token),
+            cancellationToken);
+
+    /// <summary>
+    /// 传输层中断的统一重试：三个模型调用点（规划、分趟提取、准入）共用，
+    /// 任何一处被掐流都按同样的退避重试，而不是只有分趟提取扛得住。
+    /// </summary>
+    private async ValueTask<T> WithTransportInterruptionRetryAsync<T>(
+        Func<CancellationToken, ValueTask<T>> operation,
         CancellationToken cancellationToken)
     {
         for (var attempt = 1; ; attempt++)
         {
             try
             {
-                return await ExtractRoundBatchAsync(input, round, cancellationToken);
+                return await operation(cancellationToken);
             }
             catch (ReferenceMaterializationException exception) when (
-                attempt < MaxRoundAttempts && !cancellationToken.IsCancellationRequested && IsInterruption(exception))
+                !cancellationToken.IsCancellationRequested && IsInterruption(exception))
             {
+                if (attempt >= MaxRoundAttempts)
+                {
+                    // 重试后仍被掐断说明不是一次性抖动。把"试过了"写进消息，
+                    // 否则作者会把系统性掐流当成偶发故障，反复点重试。
+                    throw new ReferenceMaterializationException(
+                        exception.ErrorCode,
+                        $"{exception.Message}（已自动重试 {attempt - 1} 次仍被中断：连接在模型生成完成前被切断，"
+                        + "通常是网关或模型服务对单次请求时长的限制）",
+                        exception.InnerException ?? exception);
+                }
+
                 await Task.Delay(RoundRetryBackoff * attempt, cancellationToken);
             }
         }
@@ -391,13 +464,27 @@ public sealed class ReferenceMaterializationChatCompletionQualifier : IReference
 
     private static bool IsInterruption(ReferenceMaterializationException exception)
     {
-        // 原始异常类型挂在 InnerException；消息兜底匹配掐流签名。
-        return exception.InnerException is HttpRequestException or JsonException ||
-            exception.Message.Contains("response ended prematurely", StringComparison.OrdinalIgnoreCase) ||
-            exception.Message.Contains("响应过早结束", StringComparison.Ordinal);
+        // 已分类好的中断码优先；否则看原始异常类型（InnerException）——HttpIOException
+        // （.NET 的 ResponseEnded）与 JSON 截断都是传输层中断。类型判断比字符串匹配可靠，
+        // .NET 或供应商改文案不会让重试静默失效；消息签名兜底覆盖被包成其它类型的情形。
+        return exception.ErrorCode == ReferenceMaterializationErrorCodes.LlmRequestInterrupted ||
+            exception.InnerException is IOException or HttpRequestException or JsonException ||
+            IsTransportInterruption(exception.InnerException ?? exception);
     }
 
-    // 执行一趟：全章照常输入，本趟只收集计划类型的素材（代码强制过滤类型）。
+    /// <summary>
+    /// 原始传输层异常的掐流判定：连接被切断（HttpIOException/ResponseEnded）、
+    /// 流被静默断开（看门狗超时），或响应体只写到一半。
+    /// </summary>
+    private static bool IsTransportInterruption(Exception exception)
+    {
+        return exception is IOException or HttpRequestException ||
+            exception.Message.Contains("response ended prematurely", StringComparison.OrdinalIgnoreCase) ||
+            exception.Message.Contains("响应过早结束", StringComparison.Ordinal) ||
+            exception.Message.Contains("没有任何数据", StringComparison.Ordinal);
+    }
+
+    // 执行一趟：整章输入原样发出；被掐断时靠"每次少收一点 + 续跑"把这一趟收满。
     public async ValueTask<ReferenceChapterExtractionResult> ExtractChapterRoundAsync(
         ReferenceChapterExtractionRequest input,
         ReferenceChapterExtractionRound round,
@@ -405,16 +492,91 @@ public sealed class ReferenceMaterializationChatCompletionQualifier : IReference
     {
         ArgumentNullException.ThrowIfNull(input);
         ArgumentNullException.ThrowIfNull(round);
-        var batch = await ExtractRoundWithTransportRetryAsync(input, round, cancellationToken);
-        return new ReferenceChapterExtractionResult(batch, 1);
+        var result = await ExtractRoundWithContinuationAsync(input, round, cancellationToken);
+        return new ReferenceChapterExtractionResult(result.Materials, Math.Max(1, result.CallCount));
     }
 
-    private async ValueTask<IReadOnlyList<ReferenceChapterExtractedMaterial>> ExtractRoundBatchAsync(
+    /// <summary>
+    /// 一趟提取的推进方式：
+    /// 健康路径一次请求就是一趟（行为与不做续跑时完全相同，不额外花钱）；
+    /// 整章输入原样发出（上下文不切），每次请求只收一批，收完把已收摘录作为
+    /// already_collected 回传再续下一批，直到模型给不满预算或到达单趟上限。
+    /// 掐流时把每次请求的条数减半再续——生成变短，但镜头（material_types/focus）
+    /// 与单趟上限都不变，因此覆盖与选样标准不动，质量不降。
+    /// </summary>
+    private async ValueTask<(IReadOnlyList<ReferenceChapterExtractedMaterial> Materials, int CallCount)> ExtractRoundWithContinuationAsync(
         ReferenceChapterExtractionRequest input,
         ReferenceChapterExtractionRound round,
         CancellationToken cancellationToken)
     {
         var allowedThisRound = new HashSet<string>(round.MaterialTypes, StringComparer.Ordinal);
+        var collected = new List<ReferenceChapterExtractedMaterial>();
+        var excluded = new List<string>();
+        var perRequestLimit = MaxMaterialsPerRequest;
+        var callCount = 0;
+
+        for (var requestIndex = 0;
+             collected.Count < MaxMaterialsPerRequest && requestIndex < MaxContinuationRequests;
+             requestIndex++)
+        {
+            IReadOnlyList<ReferenceChapterExtractedMaterial> batch;
+            try
+            {
+                callCount++;
+                batch = await ExtractRoundWithTransportRetryAsync(input, round, excluded, perRequestLimit, cancellationToken);
+            }
+            catch (ReferenceMaterializationException exception) when (
+                IsInterruption(exception) &&
+                !cancellationToken.IsCancellationRequested &&
+                perRequestLimit > 1)
+            {
+                // 依然被掐：这次生成还是太多，减半后再续（输入与镜头都不变）。
+                perRequestLimit = Math.Max(1, perRequestLimit / 2);
+                continue;
+            }
+
+            if (batch.Count == 0)
+            {
+                // 模型认为整章里这几类已经没有更值得收的了：正常收尾。
+                break;
+            }
+
+            foreach (var material in batch)
+            {
+                // 越界类型丢弃前也记进排除集，避免模型反复把它们交回来。
+                excluded.Add(material.Excerpt);
+                if (allowedThisRound.Contains(material.MaterialType))
+                {
+                    collected.Add(material);
+                }
+            }
+
+            // 健康路径：一次请求就是一趟，与不做续跑时完全一致，不额外发请求。
+            // 只有被掐小预算之后才靠续跑把这一趟收满。
+            if (perRequestLimit == MaxMaterialsPerRequest)
+            {
+                break;
+            }
+
+            if (batch.Count < perRequestLimit)
+            {
+                // 小预算也没给满：整章里这几类确实没有了。
+                break;
+            }
+        }
+
+        // 单趟上限与摘录总量都在合并后统一取用：续跑不会让这一趟多收，
+        // 也就不会挤掉后面几趟的额度。
+        return (TakeWithinOutputBudget(collected), callCount);
+    }
+
+    private async ValueTask<IReadOnlyList<ReferenceChapterExtractedMaterial>> ExtractRoundBatchAsync(
+        ReferenceChapterExtractionRequest input,
+        ReferenceChapterExtractionRound round,
+        IReadOnlyList<string> excludedExcerpts,
+        int materialLimit,
+        CancellationToken cancellationToken)
+    {
         ChatToolCall? toolCall = null;
         try
         {
@@ -430,7 +592,11 @@ public sealed class ReferenceMaterializationChatCompletionQualifier : IReference
                         chapter_title = input.ChapterTitle,
                         chapter_text = input.ChapterText,
                         pass_material_types = round.MaterialTypes,
-                        pass_focus = round.Focus
+                        pass_focus = round.Focus,
+                        // 额度写进提示词的必须就是代码执行的那一个：续跑时每次请求的上限
+                        // 会缩小，提示词必须同步，否则模型按旧配额产出、尾部被静默丢弃。
+                        budget = materialLimit,
+                        already_collected = excludedExcerpts
                     }))
                 ],
                 [new ChatToolDefinition(
@@ -460,10 +626,10 @@ public sealed class ReferenceMaterializationChatCompletionQualifier : IReference
             throw InvalidOutput("Chapter extraction did not return the required tool call.");
         }
 
-        // 类型强制：只保留本趟计划类型内的材料，越界类型一律丢弃。输出预算在过滤之后才取用，
-        // 否则越界素材会白占额度，把本趟真正要收集的类型的弱尾部挤掉。
-        return TakeWithinOutputBudget(ParseChapterExtraction(toolCall.ArgumentsJson).Materials
-            .Where(material => allowedThisRound.Contains(material.MaterialType)));
+        // 按模型给出的强度顺序原样返回，不在这里过滤类型或取预算：
+        // 续跑的调用侧需要看到全部返回项——越界类型也要记进排除集，否则模型会反复
+        // 把它们交回来；预算与本趟上限在合并后统一取用。
+        return ParseChapterExtraction(toolCall.ArgumentsJson).Materials;
     }
 
     // 单趟输出预算：模型被要求按强度排序，因此超额度时丢弃的是本趟最弱的一批（取前缀）。
@@ -585,9 +751,14 @@ public sealed class ReferenceMaterializationChatCompletionQualifier : IReference
             // 供应商已经收到并拒绝了这次请求（含限流）：按已承压记账，
             // 避免失败后立即重试撞进冷却窗口。包装为材料化错误继续上抛。
             RecordCompletedRequest(succeeded: false);
+            var interrupted = IsTransportInterruption(exception);
             throw new ReferenceMaterializationException(
-                ReferenceMaterializationErrorCodes.LlmRequestFailed,
-                $"模型请求失败: {exception.Message}",
+                interrupted
+                    ? ReferenceMaterializationErrorCodes.LlmRequestInterrupted
+                    : ReferenceMaterializationErrorCodes.LlmRequestFailed,
+                interrupted
+                    ? $"模型连接在生成完成前被切断: {exception.Message}"
+                    : $"模型请求失败: {exception.Message}",
                 exception);
         }
 
@@ -718,11 +889,15 @@ public sealed class ReferenceMaterializationChatCompletionQualifier : IReference
             - Only include fragments genuinely reusable as reference material for other authors:
               vivid dialogue exchanges, emotional beats, hooks, payoffs, sensory or technique passages.
               Skip plain plot-advancing filler and scene transitions.
-            - Budget for this pass: at most {{MaxMaterialsPerRequest}} materials and at most
-              {{MaxExcerptCharsPerRequest}} characters of excerpt text in total; each excerpt
+            - Budget for this request: at most the number given in the request's "budget" field and
+              at most {{MaxExcerptCharsPerRequest}} characters of excerpt text in total; each excerpt
               between 8 and {{MaxExtractionExcerptChars}} characters. Order the batch from strongest
               to weakest — everything past the budget is dropped, so a few strong materials beat a
               full batch of marginal ones.
+            - Never repeat an excerpt listed in the request's "already_collected": those were taken
+              by earlier requests of this same pass. Return the next strongest ones instead.
+              When nothing further in this chapter is worth keeping for these kinds, return an
+              empty materials array — that is the normal way to end this pass, not an error.
             - This pass has the chapter to itself: return an empty materials array if the
               chapter holds nothing worth keeping for these kinds, and never pad to fill the batch.
             - Extraction is selection, not analysis: decide quickly, keep reasoning brief,
@@ -1028,30 +1203,74 @@ public sealed class ReferenceMaterializationChatCompletionQualifier : IReference
         }
 
         var nodes = candidate.SourceNodes.ToDictionary(node => node.NodeId, StringComparer.Ordinal);
-        var spans = new List<ReferenceMaterializationQualificationSpan>();
+        var spans = new Dictionary<string, ReferenceMaterializationQualificationSpan>(StringComparer.Ordinal);
         foreach (var spanElement in spansElement.EnumerateArray())
         {
-            RequireExactProperties(spanElement, "source span", "node_id", "start", "end");
-            var nodeId = ReadIdentifier(spanElement, "node_id", "source span");
-            if (!nodes.TryGetValue(nodeId, out var node) ||
-                !TryReadOffset(spanElement, "start", out var start) ||
-                !TryReadOffset(spanElement, "end", out var end) ||
-                start >= end || end > node.Text.Length)
+            // 与标签同理（290f45f）：证据区间是描述性元数据，模型偶尔会写错偏移或带上未知节点。
+            // 丢这一条好过让整章材料化失败——而丢弃是安全的，因为候选文本由候选自身记录的
+            // 节点证据拼出（晋升读 reference_material_candidate_nodes），这些 span 只用于复核展示。
+            if (!TryReadSpan(spanElement, nodes, out var span) || spans.ContainsKey(span.NodeId))
             {
-                throw InvalidOutput("Material qualification response has an ungrounded source span.");
+                continue;
             }
 
-            spans.Add(new ReferenceMaterializationQualificationSpan(nodeId, start, end));
+            spans[span.NodeId] = span;
         }
 
-        if (spans.Count != nodes.Count ||
-            spans.Select(span => span.NodeId).Distinct(StringComparer.Ordinal).Count() != spans.Count ||
-            spans.Any(span => !nodes.ContainsKey(span.NodeId)))
+        // 覆盖补齐：模型漏给或写坏的节点，回落到该节点自身的完整区间（构造候选时就已校验过），
+        // 这样"被采纳的候选一定带可引用证据"，同时不会因为一个偏移写错就废掉整章。
+        foreach (var node in candidate.SourceNodes)
+        {
+            if (spans.ContainsKey(node.NodeId) || string.IsNullOrEmpty(node.Text))
+            {
+                continue;
+            }
+
+            spans[node.NodeId] = new ReferenceMaterializationQualificationSpan(node.NodeId, 0, node.Text.Length);
+        }
+
+        var ordered = candidate.SourceNodes
+            .Where(node => spans.ContainsKey(node.NodeId))
+            .Select(node => spans[node.NodeId])
+            .ToArray();
+        // 候选节点全为空文本是唯一救不回来的形态：没有任何区间可以回落到。
+        if (ordered.Length == 0)
         {
             throw InvalidOutput("Material qualification response has invalid source span evidence.");
         }
 
-        return spans;
+        return ordered;
+    }
+
+    // 单个 span 的可救性判定：对象形状、节点归属、偏移范围任意一项不成立就丢这一条。
+    // 不校验多余字段：多写一个 note 之类的字段不值得废掉整章。
+    private static bool TryReadSpan(
+        JsonElement element,
+        IReadOnlyDictionary<string, ReferenceMaterializationQualificationSourceNode> nodes,
+        out ReferenceMaterializationQualificationSpan span)
+    {
+        span = null!;
+        if (element.ValueKind != JsonValueKind.Object ||
+            !element.TryGetProperty("node_id", out var nodeIdElement) ||
+            nodeIdElement.ValueKind != JsonValueKind.String)
+        {
+            return false;
+        }
+
+        var nodeId = nodeIdElement.GetString();
+        if (string.IsNullOrWhiteSpace(nodeId) ||
+            nodeId.Length > MaxIdentifierLength ||
+            !nodes.TryGetValue(nodeId, out var node) ||
+            !TryReadOffset(element, "start", out var start) ||
+            !TryReadOffset(element, "end", out var end) ||
+            start >= end ||
+            end > node.Text.Length)
+        {
+            return false;
+        }
+
+        span = new ReferenceMaterializationQualificationSpan(nodeId, start, end);
+        return true;
     }
 
     private static ReferenceMaterializationQualityScores ParseScores(JsonElement element)

@@ -69,6 +69,9 @@ public static class ReferenceMaterializationErrorCodes
     public const string LlmNotConfigured = "materialization_llm_not_configured";
     public const string LlmHealthCheckFailed = "materialization_llm_health_check_failed";
     public const string LlmRequestFailed = "materialization_llm_request_failed";
+    // 连接在生成完成前被切断（HttpIOException/ResponseEnded 或工具实参写到一半）。
+    // 与笼统的 LlmRequestFailed 分开：它可重试，且文案要告诉作者"不是额度问题"。
+    public const string LlmRequestInterrupted = "materialization_llm_request_interrupted";
     public const string LlmOutputInvalid = "materialization_llm_output_invalid";
     public const string EmbeddingNotConfigured = "materialization_embedding_not_configured";
     public const string EmbeddingHealthCheckFailed = "materialization_embedding_health_check_failed";

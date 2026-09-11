@@ -818,6 +818,9 @@ public sealed partial class SqliteReferenceAnchorService : IReferenceAnchorServi
         {
             await EnsureSchemaAsync(databasePath, cancellationToken);
             await using var connection = await OpenConnectionAsync(databasePath, cancellationToken);
+            // 升级前完成的 run 从未投影过素材库（当时还没有这段代码）：启动时按 active generation 补投，
+            // 免得"材料化早就跑完了、界面却永远是 0 条"，也不需要用户再花一次材料化的钱。
+            await BackfillMaterializationLibraryProjectionAsync(connection, cancellationToken);
             recoverableAnchors = await ReadRecoverableAnchorsAsync(connection, cancellationToken);
         }
         finally
@@ -828,6 +831,48 @@ public sealed partial class SqliteReferenceAnchorService : IReferenceAnchorServi
         foreach (var anchor in recoverableAnchors)
         {
             await RebuildAnchorCoreAsync(anchor.NovelId, anchor.AnchorId, cancellationToken);
+        }
+    }
+
+    // 只补"有 active generation、代次表有素材、素材库没有该代次行"的锚点：投影本身幂等，
+    // 但这个前置过滤让每次启动不做无谓的全量 upsert。
+    private static async ValueTask BackfillMaterializationLibraryProjectionAsync(
+        SqliteConnection connection,
+        CancellationToken cancellationToken)
+    {
+        var pending = new List<(long AnchorId, string GenerationId)>();
+        await using (var command = connection.CreateCommand())
+        {
+            command.CommandText = """
+                SELECT state.anchor_id, state.active_generation_id
+                FROM reference_anchor_materialization_state state
+                WHERE state.active_generation_id IS NOT NULL
+                  AND EXISTS (
+                    SELECT 1
+                    FROM reference_materialization_materials material
+                    WHERE material.anchor_id = state.anchor_id
+                      AND material.generation_id = state.active_generation_id
+                  )
+                  AND NOT EXISTS (
+                    SELECT 1
+                    FROM reference_materials library
+                    WHERE library.anchor_id = state.anchor_id
+                      AND library.materialization_generation_id = state.active_generation_id
+                  );
+                """;
+            await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+            while (await reader.ReadAsync(cancellationToken))
+            {
+                pending.Add((reader.GetInt64(0), reader.GetString(1)));
+            }
+        }
+
+        foreach (var (anchorId, generationId) in pending)
+        {
+            await SqliteReferenceMaterializationLibraryProjection.ArchivePreviousGenerationsAsync(
+                connection, transaction: null, anchorId, generationId, DateTimeOffset.UtcNow, cancellationToken);
+            await SqliteReferenceMaterializationLibraryProjection.ProjectGenerationAsync(
+                connection, transaction: null, anchorId, generationId, cancellationToken);
         }
     }
 
@@ -3711,9 +3756,11 @@ CancellationToken cancellationToken)
         await using (var deleteStale = connection.CreateCommand())
         {
             deleteStale.Transaction = transaction;
+            // 材料化投影的行属于代次生命周期（晋升归档、启动补投），锚点重建不得顺手删掉它们。
             deleteStale.CommandText = """
                 DELETE FROM reference_materials
                 WHERE anchor_id = $anchor_id
+                  AND materialization_generation_id IS NULL
                   AND material_id NOT IN (SELECT material_id FROM temp_reference_material_keep);
                 """;
             deleteStale.Parameters.AddWithValue("$anchor_id", anchorId);
@@ -5989,6 +6036,9 @@ CancellationToken cancellationToken)
               ON reference_library_members(anchor_id, enabled);
             """;
         await command.ExecuteNonQueryAsync(cancellationToken);
+        // 必须先于检索索引守卫：旧归档形状的 materials 要先升级成 Typed 形状，
+        // 后面的 EnsureLegacyMaterialSearchIndexesAsync 才会在新表上建出类型/标签索引。
+        await ReferenceCorpusSchemaProvisioner.RebuildLegacyReferenceMaterialsTableAsync(connection, cancellationToken);
         await EnsureLegacyMaterialSearchIndexesAsync(connection, cancellationToken);
         await ReferenceCorpusSchemaProvisioner.EnsureCoreTablesAsync(connection, cancellationToken);
         var addedCorpusVisibilityColumn = await EnsureColumnAsync(

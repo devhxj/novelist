@@ -5,6 +5,7 @@ import type { novel, chapter, search } from '@/hooks/useApp'
 import type { novelImport, reference, update } from '@/lib/novelist/types'
 import { useNovelImport } from '@/hooks/useNovelImport'
 import { pushToast } from '@/lib/toast'
+import { notificationErrorMessage } from '@/lib/novelist/bridgeErrors'
 import ActivityBar from '@/components/shell/ActivityBar'
 import StatusBar from '@/components/shell/StatusBar'
 import SidePanel from '@/components/sidebar/SidePanel'
@@ -423,7 +424,14 @@ export default function WorkspaceView({ initialNovelId, initialShowHelp, startup
         pushToast({
           kind: 'error',
           message: `《${notice.anchor_title}》材料化失败`,
-          description: notice.error_message ?? undefined,
+          // 错误码映射成人话；toast 没有折叠详情的空间，所以原文只在没有映射时才出现。
+          description: notificationErrorMessage(notice.error_code, notice.error_message) ?? undefined,
+        })
+      } else if (notice.status === 'cancelled') {
+        // 取消不是成功：以前会落到下面的分支报"材料化完成"。
+        pushToast({
+          kind: 'info',
+          message: `《${notice.anchor_title}》材料化已取消`,
         })
       } else {
         pushToast({

@@ -430,6 +430,17 @@ public sealed class ReferenceMaterializationRunStoreTests : IDisposable
             $"{status?.LastErrorCode}: {status?.LastErrorMessage}");
         Assert.True(status?.VectorIndexHealthy);
         Assert.Equal(status?.AcceptedCount, await CountPromotedMaterialsAsync(options, run.RunId));
+        // 素材库投影：覆盖度、素材检索、风格画像、语料包全部只读 reference_materials，
+        // 晋升不写这张表，材料化跑完在界面上就永远是 0 条（2026-09-11 "语料处理成功了但看不到"）。
+        var library = await ReadProjectedLibraryMaterialsAsync(options, anchor.AnchorId, status!.GenerationId);
+        Assert.Equal(status.AcceptedCount, library.Count);
+        Assert.All(library, row =>
+        {
+            Assert.NotEmpty(row.MaterialType);
+            // 来源片段必须真的存在，否则库视图的 segment 连接会静默丢行。
+            Assert.NotNull(row.SegmentId);
+        });
+        Assert.Contains(library, row => row.FunctionTag.Length > 0 || row.TechniqueTag.Length > 0);
         Assert.Equal(status?.GenerationId, await ReadActiveGenerationAsync(options, anchor.AnchorId));
         var materializationService = new SqliteReferenceMaterializationService(options, new EmptyChapterSplitAnalyzer());
         var listed = await materializationService.ListActiveMaterialsAsync(
@@ -2414,6 +2425,81 @@ public sealed class ReferenceMaterializationRunStoreTests : IDisposable
         command.CommandText = "SELECT COUNT(*) FROM reference_materialization_materials WHERE run_id = $run_id;";
         command.Parameters.AddWithValue("$run_id", runId);
         return Convert.ToInt32(await command.ExecuteScalarAsync(CancellationToken.None));
+    }
+
+    [Fact]
+    public async Task StartupReconcileBackfillsLibraryProjectionForGenerationsCompletedBeforeProjectionExisted()
+    {
+        // 升级场景：代次早已完成并激活，但素材库里没有它的投影（这段代码之前跑完的 run）。
+        // 启动恢复必须把成果补投进素材库，否则界面永远是 0 条，而重跑要再付一次材料化的钱。
+        var options = CreateOptions();
+        var completed = await CreateCompletedGenerationAsync(options);
+        var generationId = completed.Status.GenerationId;
+        Assert.NotEmpty(await ReadProjectedLibraryMaterialsAsync(options, completed.Anchor.AnchorId, generationId));
+
+        await using (var connection = await OpenConnectionAsync(options))
+        {
+            await using var delete = connection.CreateCommand();
+            delete.CommandText = """
+                DELETE FROM reference_materials
+                WHERE anchor_id = $anchor_id
+                  AND materialization_generation_id = $generation_id;
+                """;
+            delete.Parameters.AddWithValue("$anchor_id", completed.Anchor.AnchorId);
+            delete.Parameters.AddWithValue("$generation_id", generationId);
+            await delete.ExecuteNonQueryAsync(CancellationToken.None);
+        }
+
+        Assert.Empty(await ReadProjectedLibraryMaterialsAsync(options, completed.Anchor.AnchorId, generationId));
+
+        var novels = new FileSystemNovelService(options, new FileSystemAppSettingsService(options));
+        await new SqliteReferenceAnchorService(options, novels)
+            .ReconcileRecoverableProcessingAsync(CancellationToken.None);
+
+        var restored = await ReadProjectedLibraryMaterialsAsync(options, completed.Anchor.AnchorId, generationId);
+        Assert.Equal(completed.Status.AcceptedCount, restored.Count);
+        Assert.Contains(restored, row => row.FunctionTag.Length > 0 || row.TechniqueTag.Length > 0);
+    }
+
+    private sealed record ProjectedLibraryMaterial(
+        string MaterialType,
+        string FunctionTag,
+        string TechniqueTag,
+        string? SegmentId);
+
+    // 只取本代次投影出来的行：素材库同时承载锚点构建管线的素材，不能按 anchor 全量计数。
+    private static async ValueTask<IReadOnlyList<ProjectedLibraryMaterial>> ReadProjectedLibraryMaterialsAsync(
+        AppInitializationOptions options,
+        long anchorId,
+        string generationId)
+    {
+        await using var connection = await OpenConnectionAsync(options);
+        await using var command = connection.CreateCommand();
+        command.CommandText = """
+            SELECT material.material_type, material.function_tag, material.technique_tag,
+                   (SELECT segment.segment_id
+                    FROM reference_source_segments segment
+                    WHERE segment.segment_id = material.source_segment_id)
+            FROM reference_materials material
+            WHERE material.anchor_id = $anchor_id
+              AND material.materialization_generation_id = $generation_id
+              AND material.archived_at IS NULL
+            ORDER BY material.material_id;
+            """;
+        command.Parameters.AddWithValue("$anchor_id", anchorId);
+        command.Parameters.AddWithValue("$generation_id", generationId);
+        await using var reader = await command.ExecuteReaderAsync(CancellationToken.None);
+        var rows = new List<ProjectedLibraryMaterial>();
+        while (await reader.ReadAsync(CancellationToken.None))
+        {
+            rows.Add(new ProjectedLibraryMaterial(
+                reader.GetString(0),
+                reader.GetString(1),
+                reader.GetString(2),
+                reader.IsDBNull(3) ? null : reader.GetString(3)));
+        }
+
+        return rows;
     }
 
     private static async ValueTask<string?> ReadActiveGenerationAsync(AppInitializationOptions options, long anchorId)

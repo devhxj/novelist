@@ -11,6 +11,9 @@ internal static class ReferenceCorpusSchemaProvisioner
         await RebuildStaleChapterProgressTableAsync(connection, cancellationToken);
         await RebuildLegacyMaterializationRunsTableAsync(connection, cancellationToken);
         await RelaxMaterializationBatchSizeConstraintAsync(connection, cancellationToken);
+        // 材料化晋升会写素材库，库视图也全部读它：必须先保证 reference_materials 是 Typed 形状，
+        // 否则晋升与读取都会撞 no such column。
+        await RebuildLegacyReferenceMaterialsTableAsync(connection, cancellationToken);
         await using var command = connection.CreateCommand();
         command.CommandText = """
             CREATE TABLE IF NOT EXISTS reference_anchors (
@@ -47,6 +50,32 @@ internal static class ReferenceCorpusSchemaProvisioner
               created_at TEXT NOT NULL,
               FOREIGN KEY(anchor_id) REFERENCES reference_anchors(anchor_id) ON DELETE CASCADE,
               FOREIGN KEY(parent_node_id) REFERENCES reference_text_nodes(node_id) ON DELETE CASCADE
+            );
+
+            -- 素材库：材料化晋升与锚点构建管线共用，覆盖度/检索/风格画像/语料包都读它。
+            -- 形状必须与 SqliteReferenceAnchorService 的建表保持一致（含 node_id）。
+            CREATE TABLE IF NOT EXISTS reference_materials (
+              material_id TEXT PRIMARY KEY,
+              anchor_id INTEGER NOT NULL,
+              source_segment_id TEXT NOT NULL,
+              material_type TEXT NOT NULL,
+              function_tag TEXT NOT NULL,
+              emotion_tag TEXT NOT NULL,
+              scene_tag TEXT NOT NULL,
+              pov_tag TEXT NOT NULL,
+              technique_tag TEXT NOT NULL,
+              function_confidence REAL NOT NULL,
+              emotion_confidence REAL NOT NULL,
+              pov_confidence REAL NOT NULL,
+              text TEXT NOT NULL,
+              source_hash TEXT NOT NULL,
+              extractor_version TEXT NOT NULL,
+              user_verified INTEGER NOT NULL,
+              created_at TEXT NOT NULL,
+              archived_at TEXT,
+              node_id TEXT REFERENCES reference_text_nodes(node_id),
+              FOREIGN KEY(anchor_id) REFERENCES reference_anchors(anchor_id) ON DELETE CASCADE,
+              FOREIGN KEY(source_segment_id) REFERENCES reference_source_segments(segment_id) ON DELETE CASCADE
             );
 
             CREATE TABLE IF NOT EXISTS reference_chapter_split_profiles (
@@ -764,7 +793,11 @@ await command.ExecuteNonQueryAsync(cancellationToken);
  await EnsureColumnAsync(connection, "reference_materialization_chapter_progress", "extraction_plan_json", "TEXT", cancellationToken);
  await EnsureColumnAsync(connection, "reference_materialization_chapter_progress", "extraction_round_count", "INTEGER", cancellationToken);
  await EnsureColumnAsync(connection, "reference_materialization_chapter_progress", "extraction_round_index", "INTEGER NOT NULL DEFAULT 0", cancellationToken);
- }
+
+ // 素材库行的来源代次：重新材料化时据此归档上一代，只保留当前 active generation 的素材
+ // （NULL 表示非材料化管线写入的行，例如锚点构建管线，归档时不触碰）。
+ await EnsureColumnAsync(connection, "reference_materials", "materialization_generation_id", "TEXT", cancellationToken);
+}
 
  // v6 批处理拆分前的 runs 表无法追加升级：既缺 batch 列，又带着 INSERT 不再提供、且无默认值的
  // 旧 NOT NULL 列（extractor_schema_version/material_count 等）。copy-first：旧表改名备份、旧行按
@@ -981,6 +1014,132 @@ await command.ExecuteNonQueryAsync(cancellationToken);
  "runs-rebuild",
  "chapter_batch_size CHECK relaxed from (5, 10) to (1, 5, 10) for chapter-wise processing; table renamed copy-first, rows carried over unchanged, and the table recreated.",
  cancellationToken);
+ }
+
+ // pre-v6 归档形状的 reference_materials（metadata_json 承载，无 material_type/tag 列）无法用
+ // ADD COLUMN 升级：覆盖度、素材检索、风格画像、以及材料化晋升的教学投影都按 Typed 列读取，
+ // 缺列会让每个读取接口抛 no such column（2026-09-11 总览 Internal bridge error）。
+ // copy-first：旧表改名备份、共有列回填新表（新形状必填列取显式空值）、按新形状重建并写 manifest。
+ // 归档行没有类型/标签列，取空串而不是编造某个具体标签——"未知类型"必须看起来就是未知。
+ internal static async ValueTask RebuildLegacyReferenceMaterialsTableAsync(
+  SqliteConnection connection,
+  CancellationToken cancellationToken)
+ {
+  var legacyColumns = await ReadColumnNamesAsync(connection, "reference_materials", cancellationToken);
+  if (legacyColumns.Count == 0 || legacyColumns.Contains("material_type"))
+  {
+  return;
+  }
+
+  var suffix = $"{DateTimeOffset.UtcNow:yyyyMMddHHmmss}_{Guid.NewGuid():N}";
+  var backupTable = $"reference_materials_legacy_{suffix}";
+  var foreignKeysEnabled = await ScalarPragmaAsync(connection, "PRAGMA foreign_keys;", cancellationToken);
+  await using (var rename = connection.CreateCommand())
+  {
+  rename.CommandText = $"""
+             PRAGMA foreign_keys=OFF;
+             PRAGMA legacy_alter_table=ON;
+             ALTER TABLE reference_materials RENAME TO {backupTable};
+             PRAGMA legacy_alter_table=OFF;
+             """;
+  await rename.ExecuteNonQueryAsync(cancellationToken);
+  }
+
+  // 旧表的索引随改名挂在备份表上并占用原名，先卸载，稍后由检索索引守卫在新表上重建。
+  await using (var dropIndexes = connection.CreateCommand())
+  {
+  dropIndexes.CommandText = """
+             DROP INDEX IF EXISTS idx_reference_materials_archived;
+             DROP INDEX IF EXISTS idx_reference_materials_anchor_type;
+             DROP INDEX IF EXISTS idx_reference_materials_tags;
+             """;
+  await dropIndexes.ExecuteNonQueryAsync(cancellationToken);
+  }
+
+  await using (var create = connection.CreateCommand())
+  {
+  create.CommandText = """
+             CREATE TABLE reference_materials (
+               material_id TEXT PRIMARY KEY,
+               anchor_id INTEGER NOT NULL,
+               source_segment_id TEXT NOT NULL,
+               material_type TEXT NOT NULL,
+               function_tag TEXT NOT NULL,
+               emotion_tag TEXT NOT NULL,
+               scene_tag TEXT NOT NULL,
+               pov_tag TEXT NOT NULL,
+               technique_tag TEXT NOT NULL,
+               function_confidence REAL NOT NULL,
+               emotion_confidence REAL NOT NULL,
+               pov_confidence REAL NOT NULL,
+               text TEXT NOT NULL,
+               source_hash TEXT NOT NULL,
+               extractor_version TEXT NOT NULL,
+               user_verified INTEGER NOT NULL,
+               created_at TEXT NOT NULL,
+               archived_at TEXT,
+               node_id TEXT REFERENCES reference_text_nodes(node_id),
+               FOREIGN KEY(anchor_id) REFERENCES reference_anchors(anchor_id) ON DELETE CASCADE,
+               FOREIGN KEY(source_segment_id) REFERENCES reference_source_segments(segment_id) ON DELETE CASCADE
+             );
+             """;
+  await create.ExecuteNonQueryAsync(cancellationToken);
+  }
+
+  // 回填必须在外键恢复之前：FK 开启时父表引用在 prepare 阶段解析。
+  await CopyLegacyReferenceMaterialsAsync(connection, backupTable, legacyColumns, cancellationToken);
+
+  await using (var restore = connection.CreateCommand())
+  {
+  restore.CommandText = $"PRAGMA foreign_keys={(foreignKeysEnabled != 0 ? "ON" : "OFF")};";
+  await restore.ExecuteNonQueryAsync(cancellationToken);
+  }
+
+  await WriteRebuildManifestAsync(
+  connection,
+  backupTable,
+  "materials-rebuild",
+  "pre-v6 reference_materials shape (metadata_json archive without material_type/tag columns) cannot be additively upgraded; the table was renamed copy-first, shared columns carried over with explicit empty values for the typed columns, and the table recreated so coverage/search/style-profile reads stop failing with no such column.",
+  cancellationToken);
+ }
+
+ private static async ValueTask CopyLegacyReferenceMaterialsAsync(
+  SqliteConnection connection,
+  string backupTable,
+  IReadOnlySet<string> legacyColumns,
+  CancellationToken cancellationToken)
+ {
+  var targetColumns = new List<string>
+  {
+  "material_id", "anchor_id", "source_segment_id", "material_type",
+  "function_tag", "emotion_tag", "scene_tag", "pov_tag", "technique_tag",
+  "function_confidence", "emotion_confidence", "pov_confidence",
+  "text", "source_hash", "extractor_version", "user_verified", "created_at",
+  "archived_at", "node_id",
+  };
+  var sourceColumns = new List<string>
+  {
+  "material_id",
+  "anchor_id",
+  "''",
+  "''",
+  "''", "''", "''", "''", "''",
+  "0", "0", "0",
+  "text",
+  legacyColumns.Contains("text_hash") ? "text_hash" : "''",
+  "''",
+  "0",
+  "created_at",
+  legacyColumns.Contains("archived_at") ? "archived_at" : "NULL",
+  legacyColumns.Contains("node_id") ? "node_id" : "NULL",
+  };
+
+  await using var command = connection.CreateCommand();
+  command.CommandText = $"""
+             INSERT INTO reference_materials ({string.Join(", ", targetColumns)})
+             SELECT {string.Join(", ", sourceColumns)} FROM {backupTable};
+             """;
+  await command.ExecuteNonQueryAsync(cancellationToken);
  }
 
  // v6 插入不再提供的旧 NOT NULL 列（extractor_schema_version 等）不回填，留在备份表里；

@@ -58,9 +58,22 @@ try {
     '兜底文案',
   )
   assert.equal(known.code, 'materialization_llm_request_failed')
-  assert.match(known.message, /大模型请求失败/)
+  assert.match(known.message, /大模型请求/)
   assert.match(known.message, /稍后重试/)
+  assert.doesNotMatch(known.message, /502/, 'backend text must not leak into the author-facing line')
   assert.equal(known.detail, 'LLM provider returned 502.', 'backend message must survive as folded diagnostic')
+
+  // 掐流单独成一个码：它的文案必须与"配额"解耦，并给出与中断相符的下一步。
+  const interrupted = describeBridgeError(
+    new BridgeError('The response ended prematurely. (ResponseEnded)', {
+      code: 'materialization_llm_request_interrupted',
+    }),
+    '兜底文案',
+  )
+  assert.equal(interrupted.code, 'materialization_llm_request_interrupted')
+  assert.match(interrupted.message, /被切断/)
+  assert.doesNotMatch(interrupted.message, /额度不足/)
+  assert.equal(interrupted.detail, 'The response ended prematurely. (ResponseEnded)')
 
   // 未命中映射：保持透传优先的老行为，detail 为 null。
   const unknown = describeBridgeError(

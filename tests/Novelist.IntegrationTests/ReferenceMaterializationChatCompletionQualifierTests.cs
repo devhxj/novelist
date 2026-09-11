@@ -1,4 +1,5 @@
 using System.Runtime.CompilerServices;
+using System.Text.Json;
 using Novelist.Contracts.App;
 using Novelist.Core.App;
 using Novelist.Infrastructure.App;
@@ -166,6 +167,39 @@ public sealed class ReferenceMaterializationChatCompletionQualifierTests
     }
 
     [Fact]
+    public async Task QualifyAsyncRepairsUnusableSourceSpansInsteadOfFailingTheChapter()
+    {
+        // 2026-09-11 回归：模型偶尔给出越界偏移、未知节点或整项漏掉的证据区间，
+        // 此前一个坏区间就废掉整章。区间只是复核用元数据——候选文本由候选自身的
+        // 节点证据拼出（晋升读 reference_material_candidate_nodes）——所以丢坏项、
+        // 用节点自身区间补齐、保留决策与评分。
+        var chat = new RecordingChatCompletionClient(
+        [
+            ToolCall("""
+                {"decisions":[{"candidate_id":"candidate-a","decision":"accept","source_spans":[{"node_id":"node-a","start":0,"end":999},{"node_id":"node-ghost","start":0,"end":3}],"scores":{"semantic_completeness":0.9,"information_density":0.7,"narrative_value":0.8,"transferability":0.6,"context_independence":0.7,"technique_distinctiveness":0.6},"tags":{"narrative_functions":["reveal"],"emotion_mechanics":[],"pov":[],"techniques":[],"scene_beat_roles":[],"character_relations":[],"causal_information_roles":[]},"confidence":0.9,"reason_codes":["standalone_reveal"]},{"candidate_id":"candidate-b","decision":"accept","source_spans":[],"scores":{"semantic_completeness":0.5,"information_density":0.5,"narrative_value":0.5,"transferability":0.5,"context_independence":0.5,"technique_distinctiveness":0.5},"tags":{"narrative_functions":[],"emotion_mechanics":[],"pov":[],"techniques":[],"scene_beat_roles":[],"character_relations":[],"causal_information_roles":[]},"confidence":0.5,"reason_codes":["complete_exchange"]}]}
+                """)
+        ]);
+        var qualifier = new ReferenceMaterializationChatCompletionQualifier(chat);
+
+        var result = await qualifier.QualifyAsync(
+            new ReferenceMaterializationQualificationRequest(
+                new ReferenceMaterializationLlmSelection("deepseek", "deepseek-v4-flash", "high"),
+                [Candidate("candidate-a", "node-a", "他说出了真相。"), Candidate("candidate-b", "node-b", "他点了头。")]),
+            CancellationToken.None);
+
+        Assert.Equal(2, result.Decisions.Count);
+        Assert.All(result.Decisions, decision => Assert.Equal(ReferenceMaterializationCandidateDecisions.Accepted, decision.Decision));
+        var repaired = Assert.Single(result.Decisions[0].SourceSpans);
+        Assert.Equal("node-a", repaired.NodeId);
+        // 越界偏移被丢弃、未知节点被忽略后，回落到该节点自身的完整区间。
+        Assert.Equal(0, repaired.Start);
+        Assert.Equal("他说出了真相。".Length, repaired.End);
+        var filled = Assert.Single(result.Decisions[1].SourceSpans);
+        Assert.Equal("node-b", filled.NodeId);
+        Assert.Equal("他点了头。".Length, filled.End);
+    }
+
+    [Fact]
     public async Task QualifyAsyncRejectsStructurallyInvalidDecisions()
     {
         // 决策字段本身（accept/reject/review_required 之外）仍然是硬约束。
@@ -211,6 +245,35 @@ public sealed class ReferenceMaterializationChatCompletionQualifierTests
                 CancellationToken.None));
     }
 
+    [Fact]
+    public async Task QualifyAsyncSplitsTheBatchWhenItKeepsGettingCut()
+    {
+        // 整批恒定被掐：把候选对半拆开分别判定。拆的是批量大小，不是候选内容——
+        // 每条候选的正文与溯源节点完整保留，判定标准与 schema 都不变，质量不动。
+        var chat = new BatchSizeFlakyChatCompletionClient(maxCandidates: 2);
+        var qualifier = new ReferenceMaterializationChatCompletionQualifier(chat);
+        var candidates = Enumerable.Range(1, 4)
+            .Select(index => Candidate($"candidate-{index}", $"node-{index}", "他说出了真相。"))
+            .ToArray();
+
+        var result = await qualifier.QualifyAsync(
+            new ReferenceMaterializationQualificationRequest(
+                new ReferenceMaterializationLlmSelection("deepseek", "deepseek-v4-flash", "high"),
+                candidates),
+            CancellationToken.None);
+
+        // 4 条全部拿到判定；拆批后每次请求的候选数被压到阈值以下。
+        Assert.Equal(4, result.Decisions.Count);
+        Assert.Contains(chat.Requests, request => ReadCandidateCount(request) == 2);
+        Assert.All(chat.Requests, request => Assert.True(ReadCandidateCount(request) <= 4));
+    }
+
+    private static int ReadCandidateCount(ChatCompletionRequest request)
+    {
+        using var document = JsonDocument.Parse(request.Messages[1].Content ?? "{}");
+        return document.RootElement.GetProperty("candidates").GetArrayLength();
+    }
+
     private static ReferenceMaterializationQualificationCandidate Candidate(string candidateId, string nodeId, string text)
     {
         return new ReferenceMaterializationQualificationCandidate(
@@ -218,6 +281,44 @@ public sealed class ReferenceMaterializationChatCompletionQualifierTests
             "dialogue_exchange",
             text,
             [new ReferenceMaterializationQualificationSourceNode(nodeId, text)]);
+    }
+
+    // 只在"整批候选数"偏大时掐流：批量拆小后正常给判定。
+    private sealed class BatchSizeFlakyChatCompletionClient(int maxCandidates) : IChatCompletionClient
+    {
+        public List<ChatCompletionRequest> Requests { get; } = [];
+
+        public ValueTask<string> GenerateTextAsync(ChatCompletionRequest request, CancellationToken cancellationToken) =>
+            throw new NotSupportedException();
+
+        public async IAsyncEnumerable<ChatCompletionStreamEvent> StreamChatAsync(
+            ChatCompletionRequest request,
+            [EnumeratorCancellation] CancellationToken cancellationToken)
+        {
+            Requests.Add(request);
+            using var document = JsonDocument.Parse(request.Messages[1].Content ?? "{}");
+            var candidates = document.RootElement.GetProperty("candidates");
+            await Task.CompletedTask;
+            if (candidates.GetArrayLength() > maxCandidates)
+            {
+                throw new HttpRequestException("The response ended prematurely. (ResponseEnded)");
+            }
+
+            var decisions = candidates.EnumerateArray().Select(candidate =>
+                Decision(
+                    candidate.GetProperty("candidate_id").GetString() ?? string.Empty,
+                    candidate.GetProperty("source_nodes")[0].GetProperty("node_id").GetString() ?? string.Empty));
+            yield return new ChatCompletionStreamEvent(
+                ChatCompletionStreamEventKind.ToolCall,
+                ToolCall: new ChatToolCall(
+                    "call-qualification",
+                    "submit_materialization_qualification",
+                    $"{{\"decisions\":[{string.Join(',', decisions)}]}}"));
+        }
+
+        private static string Decision(string candidateId, string nodeId) => $$"""
+            {"candidate_id":"{{candidateId}}","decision":"accept","source_spans":[{"node_id":"{{nodeId}}","start":0,"end":7}],"scores":{"semantic_completeness":0.5,"information_density":0.5,"narrative_value":0.5,"transferability":0.5,"context_independence":0.5,"technique_distinctiveness":0.5},"tags":{"narrative_functions":[],"emotion_mechanics":[],"pov":[],"techniques":[],"scene_beat_roles":[],"character_relations":[],"causal_information_roles":[]},"confidence":0.5,"reason_codes":["complete_exchange"]}
+            """;
     }
 
     private sealed class RecordingChatCompletionClient(IReadOnlyList<ChatCompletionStreamEvent> events) : IChatCompletionClient

@@ -1178,21 +1178,43 @@ export async function verifyReferenceWorkspaceWorkflow(page) {
   await waitForBridgeCallCountAfter(page, 'EnqueueReferenceMaterialization', rematerializeCount)
   await expectVisible(corpusWorkspace.getByText('向量索引完整'), 'fresh completed run after rematerialize')
 
-  // O8：失败与取消两个终态同样给出「重新材料化」出路；失败还保留「修复后重试」。
+  // O8：失败与取消两个终态同样给出「重新材料化」出路；失败还给出「从失败处继续」。
   for (const status of ['failed', 'cancelled']) {
     await page.evaluate((nextStatus) => {
       const run = window.__appMockState.materializationRuns.at(-1)
       run.status = nextStatus
       if (nextStatus === 'failed') {
-        run.last_error_code = 'materialization_llm_request_failed'
-        run.last_error_message = 'Mock LLM failure for retry coverage'
+        // 与真实失败形态对齐：第 5 章失败、之后章节未开始（mock 的失败章固定为 %7===5）。
+        run.total_chapters = 9
+        run.processed_chapters = 4
+        run.current_batch_start_chapter = 5
+        run.last_error_code = 'materialization_llm_request_interrupted'
+        run.last_error_message = 'The response ended prematurely. (ResponseEnded)'
       }
     }, status)
     await corpusWorkspace.getByRole('button', { name: '刷新材料化状态' }).click()
     await expectVisible(corpusWorkspace.getByTestId('rematerialize-button'), `rematerialize button on ${status} run`)
     if (status === 'failed') {
-      await expectVisible(corpusWorkspace.getByRole('button', { name: '修复后重试' }), 'retry button on failed run')
-      await expectVisible(corpusWorkspace.getByText('materialization_llm_request_failed'), 'failed run error surfaced')
+      // 失败原因讲人话，原始英文 SDK 消息降为折叠诊断；并说明重试的范围。
+      const failurePanel = corpusWorkspace.getByTestId('materialization-failure')
+      await expectVisible(failurePanel, 'failed run failure panel')
+      await expectVisible(failurePanel.getByText('连接在模型生成完成前被切断（响应提前结束），不是额度或鉴权问题。'), 'humanized failure reason')
+      await expectVisible(corpusWorkspace.getByTestId('materialization-resume-scope'), 'resume scope explained')
+      await expectVisible(corpusWorkspace.getByRole('button', { name: '从第 5 章继续' }), 'resume button names the chapter')
+      await expectVisible(corpusWorkspace.getByTestId('resume-from-chapter-5'), 'per-chapter resume entry on the failed row')
+      await expectVisible(
+        corpusWorkspace.locator('ol[aria-label="材料化章节进度"] > li', { hasText: '连接在模型生成完成前被切断' }),
+        'failed chapter row carries the humanized reason',
+      )
+      const rawDiagnostic = failurePanel.getByText('The response ended prematurely. (ResponseEnded)')
+      assert.equal(await rawDiagnostic.count(), 1, 'raw SDK message must be preserved in the folded diagnostic')
+      assert.equal(await rawDiagnostic.isVisible(), false, 'the raw SDK message must stay folded')
+      await page.screenshot({ path: path.join(outputDir, 'reference-resume-after-failure.png'), fullPage: true })
+
+      // 失败章节行上的「从这里继续」与顶部按钮是同一个恢复动作。
+      const resumeCount = await bridgeCallCount(page, 'RetryReferenceMaterialization')
+      await corpusWorkspace.getByTestId('resume-from-chapter-5').click()
+      await waitForBridgeCallCountAfter(page, 'RetryReferenceMaterialization', resumeCount)
     }
   }
 
@@ -1231,6 +1253,39 @@ export async function verifyReferenceWorkspaceWorkflow(page) {
 
   // 收尾：把 run 调回终态，停掉轮询，避免影响后续工作流。
   await corpusWorkspace.getByTestId('progress-failed-filter').click()
+
+  // 心跳三态：整体进度条 + ETA，并把「慢但在跑」与「真的卡住」在视觉上分开。
+  await page.evaluate(() => {
+    const run = window.__appMockState.materializationRuns.at(-1)
+    run.status = 'running'
+    run.total_chapters = 45
+    run.processed_chapters = 20
+    run.started_at = new Date(Date.now() - 20 * 60_000).toISOString()
+  })
+  await corpusWorkspace.getByRole('button', { name: '刷新材料化状态' }).click()
+  const progressOverview = corpusWorkspace.getByTestId('chapter-progress-overview')
+  await expectVisible(progressOverview.getByText('已完成 20 / 45 章'), 'chapter progress overview counts')
+  await expectVisible(progressOverview.getByText('44%'), 'chapter progress overview percentage')
+  await expectVisible(progressOverview.getByRole('progressbar'), 'chapter progress bar')
+  await expectVisible(progressOverview.getByText(/正在处理第 21 章/), 'in-flight chapter surfaced as one sentence')
+  await expectVisible(progressOverview.getByText(/预计还需约/), 'eta estimate while chapters keep landing')
+  await page.screenshot({ path: path.join(outputDir, 'reference-progress-overview.png'), fullPage: true })
+
+  // 快进跨过 90s 慢阈值：数据不再变化 → 文案与配色转为"慢"告警，且不再外推剩余时间。
+  await page.clock.install()
+  await corpusWorkspace.getByRole('button', { name: '刷新材料化状态' }).click()
+  await expectVisible(progressOverview.getByText('已完成 20 / 45 章'), 'overview stays stable under the fake clock')
+  await page.clock.fastForward(120_000)
+  await expectVisible(progressOverview.getByText(/没有新产出/), 'slow heartbeat warning after two idle minutes')
+  await expectHidden(progressOverview.getByText(/预计还需约/), 'eta is withheld while progress is stalled')
+  await page.screenshot({ path: path.join(outputDir, 'reference-progress-slow.png'), fullPage: true })
+
+  // 再快进跨过 10 分钟卡住阈值：文案升级为"可能已卡住"并给出可执行动作。
+  await page.clock.fastForward(600_000)
+  await expectVisible(progressOverview.getByText(/可能已卡住/), 'stuck heartbeat guidance after ten idle minutes')
+  await page.screenshot({ path: path.join(outputDir, 'reference-progress-stuck.png'), fullPage: true })
+  await page.clock.resume()
+
   await page.evaluate(() => {
     const run = window.__appMockState.materializationRuns.at(-1)
     run.status = 'cancelled'
@@ -1266,34 +1321,111 @@ export async function verifyReferenceWorkspaceWorkflow(page) {
   // U15：live region 容器必须常驻——通知清空后仍在 DOM，空闲后的首条通知才能被读屏可靠播报。
   assert.equal(await page.locator('[data-testid="toast-host"]').count(), 1, 'toast host stays mounted when empty (U15)')
 
+  // 失败通知：正文必须是错误码映射的人话，后端原始 SDK 文本不得出现在通知里。
+  // （此前正文无条件渲染 last_error_message，于是"完成"标题下挂着原始报错。）
+  await page.evaluate(() => {
+    const run = window.__appMockState.materializationRuns.at(-1)
+    run.status = 'running'
+    run.last_error_code = null
+    run.last_error_message = null
+  })
+  await clickActivity(page, '章节')
+  await page.waitForTimeout(300)
+  await page.evaluate(() => {
+    const run = window.__appMockState.materializationRuns.at(-1)
+    run.status = 'failed'
+    run.last_error_code = 'materialization_llm_request_interrupted'
+    run.last_error_message = 'The response ended prematurely. (ResponseEnded)'
+  })
+  await clickActivity(page, '素材库')
+  await clickActivity(page, '章节')
+  const failedNotice = page.getByTestId('materialization-notice-failed')
+  await expectVisible(failedNotice, 'failed materialization notice')
+  const failedReason = failedNotice.getByTestId('materialization-notice-reason')
+  await expectVisible(failedReason, 'failed notice carries a reason line')
+  await expectVisible(failedReason.getByText(/不是额度或鉴权问题/), 'failed notice reason is the humanized guide text')
+  assert.equal(
+    await failedReason.getByText('The response ended prematurely. (ResponseEnded)').count(),
+    0,
+    'the raw SDK message must not leak into the notice',
+  )
+  await page.screenshot({ path: path.join(outputDir, 'materialization-failure-notice.png'), fullPage: true })
+  // 回到素材库，后续步骤依赖语料页签。
+  await clickActivity(page, '素材库')
+
   // 蓝图预演已随拼装线退役：右侧恢复 AI 对话，预演面板不再存在。
   await expectHidden(page.getByTestId('blueprint-preview-panel'), 'retired blueprint preview panel')
 
   await corpusTabs.getByRole('tab', { name: '总览' }).click()
   const overview = page.getByTestId('corpus-overview')
   await expectVisible(overview.getByRole('heading', { name: '语料资产总览' }), 'corpus overview heading')
-  await expectVisible(overview.getByText('参考书'), 'corpus overview book card label')
-  await expectVisible(overview.getByText('特征观察'), 'corpus overview observation card label')
-  await expectVisible(overview.getByText('技法标本'), 'corpus overview specimen card label')
-  await expectVisible(overview.getByText('覆盖度地图'), 'corpus coverage map heading')
+  // 资产卡片只统计材料化产物（当前语料实现：整章抽取 + 多维度标签）。
+  await expectVisible(overview.getByText('参考书', { exact: true }), 'corpus overview book card label')
+  await expectVisible(overview.getByText('语料条目', { exact: true }), 'corpus overview material card label')
+  await expectVisible(overview.getByText('素材类型', { exact: true }), 'corpus overview material type card label')
+  await expectVisible(overview.getByText('标签取值', { exact: true }), 'corpus overview tag card label')
+  // 早期分析管线的资产（观察/标本）随实现换代退役：界面不得再露出这两个概念。
+  assert.equal(
+    (await overview.getByText('特征观察', { exact: true }).count()) +
+      (await overview.getByText('技法标本', { exact: true }).count()),
+    0,
+    'retired pipeline assets must not appear in the overview',
+  )
+  await expectVisible(overview.getByText('素材覆盖度地图'), 'corpus coverage map heading')
+  await expectVisible(overview.getByTestId('corpus-card-source-语料条目').getByText(/整章抽取/), 'overview card names where its number comes from')
+  await expectVisible(overview.getByText(/维度是「素材」自己的标签/), 'coverage map states what its dimensions belong to')
   await expectVisible(page.getByTestId('corpus-coverage-map').getByText('rain_threshold').first(), 'corpus coverage facet chip')
   await page.screenshot({ path: path.join(outputDir, 'corpus-overview.png'), fullPage: true })
 
   await corpusTabs.getByRole('tab', { name: '浏览' }).click()
   const browse = page.getByTestId('corpus-browse')
   await expectVisible(browse.getByLabel('选择参考书'), 'corpus browse anchor selector')
-  await expectVisible(browse.getByRole('tab', { name: '特征观察' }), 'corpus browse observations kind')
-  await expectVisible(browse.getByRole('tab', { name: '技法标本' }), 'corpus browse specimens kind')
-  await waitForBridgeCallCountAfter(page, 'ListReferenceCorpusFeatureObservations', 0)
-  // E1：feature_key 词表已中文化（emotion_state → 情绪状态），断言跟随中文标签。
-  await expectVisible(browse.getByRole('button', { name: /情绪状态/ }), 'corpus browse observation family entry')
-  await browse.getByRole('button', { name: /mock-101/ }).first().click()
-  await expectVisible(browse.getByText('证据').first(), 'corpus browse observation evidence')
-  const specimenCount = await bridgeCallCount(page, 'ListReferenceCorpusTechniqueSpecimens')
-  await browse.getByRole('tab', { name: '技法标本' }).click()
-  await waitForBridgeCallCountAfter(page, 'ListReferenceCorpusTechniqueSpecimens', specimenCount)
-  await expectVisible(browse.getByRole('button', { name: /action_as_emotion/ }), 'corpus browse specimen entry')
+  await expectVisible(browse.getByLabel('按关键字筛选素材'), 'corpus browse keyword filter')
+  await expectVisible(browse.getByTestId('corpus-browse-provenance').getByText(/素材来自材料化/), 'browse states which pipeline produced the materials')
+  await waitForBridgeCallCountAfter(page, 'SearchReferenceMaterials', 0)
+  await expectVisible(browse.getByTestId('material-card').first(), 'corpus browse material list')
   await page.screenshot({ path: path.join(outputDir, 'corpus-browse.png'), fullPage: true })
+
+  // 下钻闭环：总览覆盖度地图点取值 → 素材列表 + 该维度筛选。
+  // 数字必须能追到条目，否则"语料化成功却看不到"会以统计口径复现。
+  await corpusTabs.getByRole('tab', { name: '总览' }).click()
+  await page.getByTestId('coverage-drilldown-scene_tag-rain_threshold').click()
+  const drilldownFilter = page.getByTestId('material-drilldown-filter')
+  await expectVisible(drilldownFilter, 'drilldown filter chip from the coverage map')
+  await expectVisible(browse.getByTestId('corpus-browse-provenance').getByText(/素材来自材料化/), 'browse states its own pipeline')
+  await expectVisible(drilldownFilter.getByText(/场景节拍 · rain_threshold/), 'drilldown chip names the facet and its value')
+  const drilledMaterials = page.getByTestId('material-card')
+  await expectVisible(drilledMaterials.first(), 'drilled material card')
+  assert.equal(await drilledMaterials.count(), 1, 'scene_tag=rain_threshold narrows the list to the single seeded material')
+  await page.screenshot({ path: path.join(outputDir, 'corpus-material-drilldown.png'), fullPage: true })
+
+  // 展开取明细：列表与明细都只渲染有界预览，完整素材正文不得进入可见 DOM。
+  await drilledMaterials.first().getByRole('button').first().click()
+  await expectVisible(page.getByText('来源片段（有界预览）'), 'material detail shows the bounded source segment')
+  assert.equal(await page.getByText('__FULL_MATERIAL_SHOULD_NOT_RENDER__').count(), 0, 'full material text must not enter the DOM')
+
+  // 清除筛选 → 回到全部素材（条目数变多），证明之前的 1 条确实是筛选结果而不是列表本身只有 1 条。
+  const drilledSearchCalls = await bridgeCallCount(page, 'SearchReferenceMaterials')
+  await page.getByTestId('material-drilldown-clear').click()
+  await expectHidden(page.getByTestId('material-drilldown-filter'), 'drilldown chip cleared')
+  await waitForBridgeCallCountAfter(page, 'SearchReferenceMaterials', drilledSearchCalls)
+  await expectVisible(page.getByTestId('material-card').nth(1), 'unfiltered material list holds more than the drilled subset')
+
+  // 空态要分清"筛选太窄"与"本来就没有"：混成一句会把上游缺失误报成筛选问题。
+  await browse.getByLabel('按关键字筛选素材').fill('zzz-no-such-material')
+  const browseEmpty = browse.getByTestId('corpus-browse-empty')
+  await expectVisible(browseEmpty, 'browse empty state')
+  await expectVisible(browseEmpty.getByText(/当前筛选没有匹配的素材/), 'with a filter active the empty state blames the filter')
+  const keywordSearchCalls = await bridgeCallCount(page, 'SearchReferenceMaterials')
+  await browse.getByLabel('按关键字筛选素材').fill('')
+  await waitForBridgeCallCountAfter(page, 'SearchReferenceMaterials', keywordSearchCalls)
+  await expectHidden(browseEmpty, 'materials come back once the keyword is cleared')
+  // 覆盖度地图是全书口径，所以「全部参考书」必须可选——否则地图说 N 条、列表 0 条。
+  assert.equal(
+    await browse.getByRole('option', { name: '全部参考书' }).count(),
+    1,
+    'all-books option available for the whole-novel coverage scope',
+  )
 
   await corpusTabs.getByRole('tab', { name: '语料包' }).click()
   const pack = page.getByTestId('corpus-pack')

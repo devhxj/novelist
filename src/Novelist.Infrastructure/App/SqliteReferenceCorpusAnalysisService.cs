@@ -18,6 +18,10 @@ public sealed partial class SqliteReferenceCorpusAnalysisService : IReferenceCor
     private const int MaxAnalysisTextLength = 4_000;
     private const int MaxEvidencePreviewLength = 160;
     private const int MaxStructuredListItems = 20;
+    // 与 SqliteReferenceAnchorService 的覆盖度查询保持同一口径：本作品 + 可见的工作区语料。
+    private const long WorkspaceCorpusNovelId = 0;
+    private const string AssetTotalsNovelPredicate =
+        "(a.novel_id = $novel_id OR ((a.novel_id IS NULL OR a.novel_id = $workspace_corpus_novel_id) AND a.corpus_visibility = $workspace_corpus_visibility))";
     private static readonly string[] SensitiveDiagnosticIdentifiers =
     [
         "node_text",
@@ -306,23 +310,26 @@ public sealed partial class SqliteReferenceCorpusAnalysisService : IReferenceCor
             var databasePath = await DatabasePathAsync(cancellationToken);
             await EnsureSchemaAsync(databasePath, cancellationToken);
             await using var connection = await OpenConnectionAsync(databasePath, cancellationToken);
+            // 书属关系经 reference_anchors 判定：reference_text_nodes 从来没有 novel_id 列
+            // （见 ReferenceCorpusSchemaProvisioner 的建表语句），原先 join 节点表取 n.novel_id
+            // 会在任何库上抛 no such column —— 总览因此恒报 Internal bridge error。
             var observationTotal = await CountByNovelAsync(
                 connection,
-                """
+                $"""
                 SELECT COUNT(*)
                 FROM reference_feature_observations o
-                INNER JOIN reference_text_nodes n ON n.node_id = o.node_id AND n.anchor_id = o.anchor_id
-                WHERE n.novel_id = $novel_id AND o.validity_state = 'active'
+                INNER JOIN reference_anchors a ON a.anchor_id = o.anchor_id
+                WHERE {AssetTotalsNovelPredicate} AND o.validity_state = 'active'
                 """,
                 input.NovelId,
                 cancellationToken);
             var specimenTotal = await CountByNovelAsync(
                 connection,
-                """
+                $"""
                 SELECT COUNT(*)
                 FROM reference_technique_specimens s
-                INNER JOIN reference_text_nodes n ON n.node_id = s.source_node_id AND n.anchor_id = s.source_anchor_id
-                WHERE n.novel_id = $novel_id AND s.validity_state = 'active'
+                INNER JOIN reference_anchors a ON a.anchor_id = s.source_anchor_id
+                WHERE {AssetTotalsNovelPredicate} AND s.validity_state = 'active'
                 """,
                 input.NovelId,
                 cancellationToken);
@@ -343,6 +350,8 @@ public sealed partial class SqliteReferenceCorpusAnalysisService : IReferenceCor
         await using var command = connection.CreateCommand();
         command.CommandText = sql;
         command.Parameters.AddWithValue("$novel_id", novelId);
+        command.Parameters.AddWithValue("$workspace_corpus_novel_id", WorkspaceCorpusNovelId);
+        command.Parameters.AddWithValue("$workspace_corpus_visibility", ReferenceCorpusVisibilities.Workspace);
         var result = await command.ExecuteScalarAsync(cancellationToken);
         return result is long count ? count : Convert.ToInt64(result ?? 0L);
     }

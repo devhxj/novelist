@@ -59,6 +59,41 @@ public sealed class ReferenceCorpusAnalysisServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task AssetTotalsResolveNovelThroughAnchorsOnARealSchema()
+    {
+        // 回归：总览的资产总数曾经 join reference_text_nodes 取 n.novel_id——该列在任何
+        // schema 里都不存在（建表语句就没有它），接口因此在所有安装上恒抛
+        // "no such column: n.novel_id"，前端只看到 Internal bridge error。桩替身与 mock
+        // 前端都绕过真实 SQL，所以这条用例必须打真库。
+        var options = CreateOptions();
+        await InitializeAsync(options);
+        await SeedAnalysisFixtureAsync(options);
+        var service = new SqliteReferenceCorpusAnalysisService(
+            options,
+            new FixedAppSettingsService("fake/fake-model", "medium"),
+            new EmptyObservationFeatureFamilyAnalyzer(tokensPerCall: 1),
+            techniqueSpecimenAnalyzer: new RecordingTechniqueSpecimenAnalyzer(tokensPerCall: 19));
+
+        await service.StartTechniqueSpecimenAnalysisAsync(
+            new StartReferenceCorpusTechniqueSpecimenAnalysisPayload(
+                NovelId: 42,
+                AnchorId: 101,
+                SourceNodeType: ReferenceCorpusNodeTypes.Sentence,
+                MinObservationConfidence: 0.70,
+                RunId: "asset-totals-run-1"),
+            CancellationToken.None);
+
+        var totals = await service.GetAssetTotalsAsync(
+            new GetReferenceCorpusAssetTotalsPayload(42),
+            CancellationToken.None);
+
+        // 查询能跑通本身就是回归点：旧实现在任何库上都抛 no such column: n.novel_id；
+        // 数量大于 0 同时证明书属关系是按 anchor 正确连上的，而不是被错的谓词过滤成 0。
+        Assert.Equal(42, totals.NovelId);
+        Assert.True(totals.SpecimenTotal > 0, "specimens must be counted through the anchor join");
+    }
+
+    [Fact]
     public async Task StartFeatureAnalysisMarksRunFailedWhenAnalyzerThrows()
     {
         var options = CreateOptions();
