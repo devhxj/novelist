@@ -65,12 +65,6 @@ dispatcher.Register("InspectReferenceCorpusTechniqueVectorIndexes", async (conte
  return await service.InspectTechniqueVectorIndexesAsync(input, cancellationToken);
 });
 
-dispatcher.Register("GetReferenceCorpusNodeWindow", async (context, cancellationToken) =>
- {
- var input = ReadObjectArg<GetReferenceCorpusNodeWindowPayload>(context.Payload, 0, "input");
-return await service.GetNodeWindowAsync(input, cancellationToken);
-});
-
  dispatcher.Register("GetReferenceCorpusCascadeImpact", async (context, cancellationToken) =>
  {
  var input = ReadObjectArg<GetReferenceCorpusCascadeImpactPayload>(context.Payload, 0, "input");

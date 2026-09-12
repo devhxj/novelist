@@ -78,6 +78,9 @@ export default function WorkspaceView({ initialNovelId, initialShowHelp, startup
   const [showUpdateDialog, setShowUpdateDialog] = useState(false)
   const [referenceAnchors, setReferenceAnchors] = useState<reference.Anchor[]>([])
   const [selectedReferenceAnchorIds, setSelectedReferenceAnchorIds] = useState<number[]>([])
+  // 「制作」是一本书一条流水线，但左侧勾选是集合：单独立一个"当前制作的书"，
+  // 否则多选时会固定在列表第一本，刚勾选的新书看起来没生效。
+  const [activeReferenceAnchorId, setActiveReferenceAnchorId] = useState<number | null>(null)
   const [referenceRefreshKey, setReferenceRefreshKey] = useState(0)
   const loadedRef = useRef(false)
   const autoUpdateCheckedRef = useRef(false)
@@ -452,6 +455,23 @@ export default function WorkspaceView({ initialNovelId, initialShowHelp, startup
     const validIds = new Set(anchors.map((anchor) => anchor.anchor_id))
     setReferenceAnchors(anchors)
     setSelectedReferenceAnchorIds((current) => current.filter((id) => validIds.has(id)))
+    // 当前制作的书被归档/移出列表后必须失效，否则「制作」会停在一本已不存在的书上。
+    setActiveReferenceAnchorId((current) => (current != null && !validIds.has(current) ? null : current))
+  }, [])
+
+  // 最近一次新勾选的书即"当前制作的书"：新建/导入参考书后自动选中，制作页随之切换。
+  const previousSelectedAnchorIdsRef = useRef<number[]>([])
+  useEffect(() => {
+    const previous = previousSelectedAnchorIdsRef.current
+    previousSelectedAnchorIdsRef.current = selectedReferenceAnchorIds
+    const added = selectedReferenceAnchorIds.find((id) => !previous.includes(id))
+    if (added != null) setActiveReferenceAnchorId(added)
+  }, [selectedReferenceAnchorIds])
+
+  // 制作页下拉选书：顺手补一次勾选，左右两侧始终指向同一本书，不出现"左侧没勾、制作却在做"。
+  const handleActiveReferenceAnchorChange = useCallback((anchorId: number) => {
+    setActiveReferenceAnchorId(anchorId)
+    setSelectedReferenceAnchorIds((current) => (current.includes(anchorId) ? current : [...current, anchorId]))
   }, [])
 
   const handleReferenceMutation = useCallback(() => {
@@ -648,6 +668,8 @@ export default function WorkspaceView({ initialNovelId, initialShowHelp, startup
             refreshKey={referenceRefreshKey}
             anchors={referenceAnchors}
             selectedAnchorIds={selectedReferenceAnchorIds}
+            activeAnchorId={activeReferenceAnchorId}
+            onActiveAnchorChange={handleActiveReferenceAnchorChange}
             onMaterializationChange={handleReferenceMutation}
           />
         ) : activePanel === 'git-history' ? (

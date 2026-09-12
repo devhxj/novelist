@@ -132,9 +132,6 @@ options,
 settingsService,
 chatCompletion: chatCompletionClient,
 packageFilePicker: new PhotinoReferenceCorpusPackageFilePicker(window));
-var referenceCorpusAnalysisScheduler = new SqliteReferenceCorpusAnalysisScheduler(
-new ReferenceCorpusDatabasePathResolver(options),
-settingsService);
 var referenceCorpusAnalysisWorker = new ReferenceCorpusAnalysisWorker(
 new ReferenceCorpusDatabasePathResolver(options),
 new ReferenceCorpusChatCompletionFeatureFamilyAnalyzer(settingsService, chatCompletionClient),
@@ -226,7 +223,6 @@ referenceCorpusService);
             .RegisterReferenceMaterializationHandlers(referenceMaterializationService)
             .RegisterReferenceCorpusHandlers(referenceCorpusService)
 .RegisterReferenceCorpusAnalysisHandlers(referenceCorpusAnalysisService)
-.RegisterReferenceCorpusAnalysisJobHandlers(referenceCorpusAnalysisScheduler)
  .RegisterReferenceCorpusGovernanceHandlers(referenceCorpusGovernanceService)
             .RegisterReferenceStyleProfileHandlers(referenceStyleProfileService)
             .RegisterApprovalHandlers(approvalCoordinator)

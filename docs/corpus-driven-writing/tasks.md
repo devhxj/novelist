@@ -253,7 +253,7 @@
 - [x] technique_abstract / transfer_template 去内容化泄露检测（拒绝原文专名、原文动作短语、长原文片段）
 - [x] Stage 3 仅高置信度节点触发（低于阈值 observation 不进入 analyzer 输入）
 - [x] 真实 LLM analyzer：复用 `IChatCompletionClient`，schema-locked prompt，抽取 fenced JSON，读取 usage tokens
-- [x] 产品触发入口：`StartReferenceCorpusTechniqueSpecimenAnalysis` / `GetReferenceCorpusTechniqueSpecimenAnalysisRun`，返回安全 run 状态
+- [x] 产品触发入口：`StartReferenceCorpusTechniqueSpecimenAnalysis` / `GetReferenceCorpusTechniqueSpecimenAnalysisRun`，返回安全 run 状态（该桥暴露已随早期分析管线物理退役，见桥契约退役清单；后端服务与契约 payload 测试保留）
 - [x] runner 级预算续跑：零预算不调用模型，budget_exhausted 后提高总预算，从最后成功 node 继续；specimen/evidence/token/cursor 同事务
 - [x] Stage 3 后台 job 接入：technique job 要求同 novel/anchor/scope 的已完成 feature job 依赖，冻结 dependency job/run/input snapshot 及 observation evidence 后进入既有异步队列、章节优先级、lease/watchdog、pause/cancel/resume 和 retry 协议；测试证据：`TechniqueEnqueueRequiresCompletedFeatureDependency`、`PumpOnceProcessesTechniqueWorkItemFromCompletedFrozenFeatureDependency`、`TechniqueWorkItemRetriesAfterTransientProviderFailure`。边界：真实 control/lease 时限及 50K 全管线门已通过；Stage 3 仍须持续随常规后台回归覆盖
 
@@ -261,11 +261,11 @@
 
 ### M2.4 分析前端
 
-> **已移出产品范围（`ccb6d2c`，2026-08 重建前端时）。** 下面前两条原以 `CorpusAnalysisJobsPanel` 为"代码证据"并勾选完成；该面板已随专家控制面收缩一并删除，对应浏览器 workflow 证据同时退役。后端 job 调度/控制能力（`Enqueue/Pause/Resume/Cancel/ReprioritizeReferenceCorpusAnalysisJob`、`ListReferenceCorpusAnalysisJobs`）完整保留并有测试，但**当前没有 UI 出口**，属 `docs/full-feature-implementation-review-2026-09-03.md` §2.2 的死表面——不要据此恢复已删除的面板。
+> **已移出产品范围（`ccb6d2c`，2026-08 重建前端时）。** 下面前两条原以 `CorpusAnalysisJobsPanel` 为"代码证据"并勾选完成；该面板已随专家控制面收缩一并删除，对应浏览器 workflow 证据同时退役。后端 job 调度/存储能力（`SqliteReferenceCorpusAnalysisScheduler`、`ReferenceCorpusAnalysisWorker`、job store）与测试仍保留，评测 harness 直接消费调度器；但其**桥暴露**（`Enqueue/Pause/Resume/Cancel/Reprioritize/List...ReferenceCorpusAnalysisJob`）已随早期分析管线物理退役（兼容白名单 191→176，见 `docs/novelist-photino-bridge-contract.md` 退役清单），属 `docs/full-feature-implementation-review-2026-09-03.md` §2.2 的死表面——不要据此恢复已删除的面板或重新引入桥绑定。
 
 - 后台任务面板：（原 `[x]`，代码已删）稳定分页展示 10 个 job 状态、node/work-item 双进度、token、当前章节、重试倒计时和安全诊断；原代码证据 `CorpusAnalysisJobsPanel` 与 `ListReferenceCorpusAnalysisJobs` adapter 均已随 `ccb6d2c` 删除
 - 后台控制交互：（原 `[x]`，代码已删）仅按后端 `allowed_actions[]` 提供暂停/取消/恢复/重试，携带 expected_version，CAS conflict 后刷新；原代码证据 `CorpusAnalysisJobsPanel.runAction` 已删除；后端 CAS 语义仍由 `ControlOperationsUsePersistentCasVersions` 守护
-- [x] 后端列表 API：`ListReferenceCorpusFeatureObservations` / `ListReferenceCorpusTechniqueSpecimens`，分页 `PageResult<T>`、稳定 sort、filter 白名单、默认 active、非法 cursor/filter/pageSize 走 validation error
+- [x] 后端列表 API：`ListReferenceCorpusFeatureObservations` / `ListReferenceCorpusTechniqueSpecimens`，分页 `PageResult<T>`、稳定 sort、filter 白名单、默认 active、非法 cursor/filter/pageSize 走 validation error（该桥暴露已随早期分析管线物理退役，见桥契约退役清单；后端服务与契约 payload 测试保留）
 - [x] 安全展示契约：Observation 不暴露 `value_json`；TechniqueSpecimen 不暴露 `why_it_works_json` 或原始 JSON 字符串，改为 typed `transfer_slots` / 条件列表 / `why_it_works.contributing_factors`
 - [x] evidence trace：TechniqueSpecimen 通过 `reference_specimen_evidence` junction 二次读取，不用 join 放大分页；trace 返回 observation id/family/key/confidence/text_hash/bounded evidence preview/value preview/explanation
 - [x] 当前章节嵌入：章节右侧 `语料驱动草稿` 生成后，按 draft pieces 的 `anchor_id/node_id` 自动加载“节点分析 / 技法标本”，可切换 piece，不把素材库处理入口混进章节使用面板
@@ -430,12 +430,12 @@
 - [x] 视觉层级与可访问性收口：复用现有设计 token、Button 和 Lucide 图标；自动模式避免面板套卡片与信息堆叠，专家信息渐进展开；核心流程支持键盘操作、可见焦点、焦点回位、ARIA 状态播报，并在 1280x720、1440x900、125%/150% 缩放下无重叠、截断或关键操作出屏。相关浏览器截图与 workflow 已通过。
 
   自动路径的用户可见文案统一使用“写作蓝图”，不以“剧本”描述中间产物，避免把小说写作流程误解为镜头/台词式操作；`test:chapter-reference` 断言默认面板不出现该术语。
-- [ ] 素材库工作台使用性收口：`素材库` 左侧必须显示真实参考书籍列表而非空白占位，支持筛选、文件选择、添加、删除和可用状态选择；中间只展示 ready 来源的六维语料覆盖与按需检索（材料类型、叙事功能、情绪张力、场景节点、叙事视角、表达技法），打开工作台不得无条件扫描全部材料；右侧用 `AI 蓝图预演` 替代通用聊天，只能基于左侧显式选择的 ready 参考书调用 `GenerateReferenceCorpusBlueprintCandidates`，展示候选策略、节拍、覆盖度和来源分布。预演是临时比较工具，不创建持久 session、不替代章节默认跨库路径、不写入编辑器或调用 `SaveContent`。`test:reference-workspace` 必须覆盖加载、选择、添加、删除、六维筛选、请求 scope 和无正文写入，并在 1280x720 与窄桌面宽度截图检查后才能勾选。
+- [x] 素材库工作台使用性收口：`素材库` 左侧必须显示真实参考书籍列表而非空白占位，支持筛选、文件选择、添加、删除和可用状态选择；中间只展示 ready 来源的六维语料覆盖与按需检索（素材类型、叙事功能、情绪机制、场景节拍、视角、技法），打开工作台不得无条件扫描全部材料；右侧用 `AI 蓝图预演` 替代通用聊天，只能基于左侧显式选择的 ready 参考书调用 `GenerateReferenceCorpusBlueprintCandidates`，展示候选策略、节拍、覆盖度和来源分布。预演是临时比较工具，不创建持久 session、不替代章节默认跨库路径、不写入编辑器或调用 `SaveContent`。`test:reference-workspace` 必须覆盖加载、选择、添加、删除、六维筛选、请求 scope 和无正文写入，并在 1280x720 与窄桌面宽度截图检查后才能勾选。证据：test:reference-workspace 已覆盖加载、选择、添加、删除、六维下钻与请求 scope、无正文写入，并逐维断言下钻落到对应检索字段且总数追回地图取值计数；截图归档于 output/playwright/phase13/full-vite-reference-workspace/。右侧蓝图预演已随拼装线退役，改为常驻 AI 对话。
 - [ ] 易用性证据：为“导入并启动分析、离开后查看/恢复任务、目标到蓝图、反馈后选正文、blocked 后恢复并插入”5 个任务建立真实浏览器 workflow 和截图；自动化 workflow、截图和故障恢复断言已完成。真实走查让 5 名目标用户逐张阅读任务卡，主持人只能复述任务、不解释界面或下一步；至少 4 人须在不看文档、无旁人提示下完成自动模式主流程。每个任务记录完成/放弃、开始和结束时间、回退次数、首次失败点、使用的恢复动作与 1-5 主观难度；记录只保存脱敏事件和截图，不保存源文或本地路径。`corpus-writing-usability-fixtures-v1` 与 `run-usability-study-evaluation.ps1` 已强制固定任务集、脱敏字段、至少 5 人和至少 4 人无提示全路径完成的判定；两参与者 contract fixture 只验证工具。相同失败点出现两次即转为 UX 修复项和浏览器回归，再安排复测。
 
 任务卡、主持人边界、固定失败/恢复码表和导出规则见[用户走查执行套件](./evaluations/usability-study-kit.md)。该套件只让真实走查可执行，不构成任何参与者或验收数据。
 
-**验收：** 自动模式只要求用户做三类决策：写目标、选蓝图、选正文并明确插入；专家模式按需展开，不占用默认路径。素材库工作台提供独立的参考书管理与临时蓝图预演，不把它伪装成章节写作路径。用户可离开长任务并从同一状态继续，错误不暴露内部实现且给出可执行恢复动作；每片段仍可追溯到源语料、分析依据和 license。章节侧浏览器 workflow、视口/缩放/键盘检查和 `frontend verify` 已通过；素材库工作台的专用 workflow 与小规模目标用户走查仍未完成，因此 M9 维持 `S`，不能以自动化证据宣称“易用好用”或升级为 `P`。
+**验收：** 自动模式只要求用户做三类决策：写目标、选蓝图、选正文并明确插入；专家模式按需展开，不占用默认路径。素材库工作台提供独立的参考书管理与临时蓝图预演，不把它伪装成章节写作路径。用户可离开长任务并从同一状态继续，错误不暴露内部实现且给出可执行恢复动作；每片段仍可追溯到源语料、分析依据和 license。章节侧浏览器 workflow、视口/缩放/键盘检查和 `frontend verify` 已通过；素材库工作台的专用 workflow 已完成，仅小规模目标用户走查仍未完成，因此 M9 维持 `S`，不能以自动化证据宣称“易用好用”或升级为 `P`。
 
 ---
 

@@ -19,6 +19,7 @@ import SettingsDialog from '@/components/settings/SettingsDialog'
 import { BridgeError } from '@/lib/novelist/bridge'
 import { bridgeErrorGuide, describeBridgeError } from '@/lib/novelist/bridgeErrors'
 import { FEATURE_VALUE_LABELS, RUN_STATUS_LABELS, taxonomyLabel } from '@/lib/novelist/corpusTaxonomy'
+import { describeAnchorStatus } from '@/lib/novelist/referenceAnchorStates'
 import ReferenceErrorStrip from './ReferenceErrorStrip'
 import type { reference } from '@/lib/novelist/types'
 
@@ -27,6 +28,9 @@ type Props = {
   refreshKey: number
   anchors: reference.Anchor[]
   selectedAnchorIds: number[]
+  /** 当前要制作的参考书；为 null 或已取消勾选时回落到第一本选中的书。 */
+  activeAnchorId: number | null
+  onActiveAnchorChange: (anchorId: number) => void
   onMaterializationChange: () => void
 }
 
@@ -162,6 +166,8 @@ export default function ReferenceCorpusWorkspace({
   refreshKey,
   anchors,
   selectedAnchorIds,
+  activeAnchorId,
+  onActiveAnchorChange,
   onMaterializationChange,
 }: Props) {
   const app = useApp()
@@ -192,10 +198,20 @@ export default function ReferenceCorpusWorkspace({
   const notifiedCompletedRunRef = useRef<string | null>(null)
   const loadedRunIdRef = useRef<string | null>(null)
 
+  const usableAnchors = useMemo(
+    () => anchors.filter((anchor) => describeAnchorStatus(anchor.status).usable),
+    [anchors],
+  )
+
+  // 一本书一条流水线，所以这里只认一本：优先取"当前制作的书"，
+  // 它被取消勾选后回落到第一本选中的书，避免制作页停在一本已经没被选中的书上。
   const selectedAnchor = useMemo(() => {
     const selected = new Set(selectedAnchorIds)
-    return anchors.find((anchor) => selected.has(anchor.anchor_id)) ?? null
-  }, [anchors, selectedAnchorIds])
+    const active = activeAnchorId != null && selected.has(activeAnchorId)
+      ? anchors.find((anchor) => anchor.anchor_id === activeAnchorId) ?? null
+      : null
+    return active ?? anchors.find((anchor) => selected.has(anchor.anchor_id)) ?? null
+  }, [anchors, selectedAnchorIds, activeAnchorId])
 
   // 消解"黑盒"：把"正在处理哪一章、走到哪一步"提炼成一句人话，
   // 作者不必逐行读取进度表、也不依赖原始英文枚举才能判断系统是否在推进。
@@ -709,16 +725,37 @@ export default function ReferenceCorpusWorkspace({
             <h1 className="mt-1 truncate text-base font-semibold text-foreground">{selectedAnchor.title}</h1>
             <p className="mt-1 text-xs text-muted-foreground">先冻结章节边界，再以大模型准入和向量索引生成可用材料。</p>
           </div>
-          <button
-            type="button"
-            onClick={() => { setError(null); void loadRun(selectedAnchor) }}
-            disabled={isBusy}
-            className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-border text-muted-foreground hover:bg-secondary hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50"
-            aria-label="刷新材料化状态"
-            title="刷新材料化状态"
-          >
-            <RefreshCcw className="h-3.5 w-3.5" aria-hidden="true" />
-          </button>
+          <div className="flex shrink-0 items-center gap-2">
+            {/* 制作页自己也能换书：否则多选时只能靠左侧列表猜"现在做的是哪一本"。 */}
+            {usableAnchors.length > 1 && (
+              <label className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                参考书
+                <select
+                  value={selectedAnchor.anchor_id}
+                  onChange={(event) => { onActiveAnchorChange(Number(event.target.value)) }}
+                  disabled={isBusy}
+                  data-testid="reference-corpus-anchor-select"
+                  className="h-8 max-w-[13rem] rounded-md border border-border bg-background px-2 text-xs text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
+                  aria-label="选择要制作的参考书"
+                  title="切换要制作材料的参考书"
+                >
+                  {usableAnchors.map((anchor) => (
+                    <option key={anchor.anchor_id} value={anchor.anchor_id}>{anchor.title}</option>
+                  ))}
+                </select>
+              </label>
+            )}
+            <button
+              type="button"
+              onClick={() => { setError(null); void loadRun(selectedAnchor) }}
+              disabled={isBusy}
+              className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-border text-muted-foreground hover:bg-secondary hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50"
+              aria-label="刷新材料化状态"
+              title="刷新材料化状态"
+            >
+              <RefreshCcw className="h-3.5 w-3.5" aria-hidden="true" />
+            </button>
+          </div>
         </header>
 
         {error && (

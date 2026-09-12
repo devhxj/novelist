@@ -186,6 +186,19 @@ GetNarrativePatternRun, GetNarrativePatternTrace,
 SearchStoryMemory, SaveSettings, SetChatPanelWidth
 ```
 
+Retired from the bridge whitelist with the early corpus-analysis pipeline (observation/specimen browsing, node-window inspection, asset totals, and the background analysis-job controls); whitelist 191→176. The corpus-analysis services, scheduler, worker, and their contract payload tests are retained per the refocus proposal §5, and the evaluation harness keeps consuming the scheduler directly:
+
+```text
+StartReferenceCorpusFeatureAnalysis, GetReferenceCorpusFeatureAnalysisRun,
+StartReferenceCorpusTechniqueSpecimenAnalysis, GetReferenceCorpusTechniqueSpecimenAnalysisRun,
+ListReferenceCorpusFeatureObservations, ListReferenceCorpusTechniqueSpecimens,
+GetReferenceCorpusAssetTotals, GetReferenceCorpusNodeWindow,
+EnqueueReferenceCorpusAnalysisJob, GetReferenceCorpusAnalysisJob,
+ListReferenceCorpusAnalysisJobs, PauseReferenceCorpusAnalysisJob,
+ResumeReferenceCorpusAnalysisJob, CancelReferenceCorpusAnalysisJob,
+ReprioritizeReferenceCorpusAnalysisJob
+```
+
 These methods live in the current `.NET 10 + Photino.NET + React/Vite` architecture. The legacy `goink-master` tree remains a read-only behavior reference; do not add new implementations under legacy `app/`, `internal/`, `python-master/`, or `frontend/src/lib/wailsjs/`, and do not reintroduce Go/Wails build commands for Phase 15 behavior.
 
 Runtime-only desktop methods stay under the `runtime.*` namespace and are not app data methods:

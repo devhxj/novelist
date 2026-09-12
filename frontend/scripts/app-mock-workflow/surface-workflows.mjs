@@ -1142,6 +1142,17 @@ export async function verifyReferenceSmoke(page) {
   assert.equal(await corpusTabs.getByRole('tab', { name: '制作' }).getAttribute('aria-selected'), 'true', 'corpus area should default to the make tab')
 }
 
+// 六维语料维度：展示标签（与 corpusTaxonomy.COVERAGE_FACET_LABELS 对齐），
+// 以及它在 SearchReferenceMaterials 契约上的对应字段。两端词表漂移时这里先炸。
+const CORPUS_FACET_DIMENSIONS = [
+  { key: 'material_type', label: '素材类型', field: 'material_types' },
+  { key: 'function_tag', label: '叙事功能', field: 'function_tags' },
+  { key: 'emotion_tag', label: '情绪机制', field: 'emotion_tags' },
+  { key: 'scene_tag', label: '场景节拍', field: 'scene_tags' },
+  { key: 'pov_tag', label: '视角', field: 'pov_tags' },
+  { key: 'technique_tag', label: '技法', field: 'technique_tags' },
+]
+
 export async function verifyReferenceWorkspaceWorkflow(page) {
   await clickActivity(page, '素材库')
 
@@ -1155,6 +1166,37 @@ export async function verifyReferenceWorkspaceWorkflow(page) {
 
   await referenceBooks.getByRole('button', { name: '选择《全局雨夜参考》' }).click()
   await expectVisible(corpusWorkspace.getByRole('heading', { name: '全局雨夜参考' }), 'selected materialization source')
+
+  // 「制作」是一本书一条流水线：既能自己换书，也不能在多选时固定在列表第一本。
+  const makeSelect = corpusWorkspace.getByLabel('选择要制作的参考书')
+  await expectVisible(makeSelect, 'materialization book switcher')
+
+  await makeSelect.selectOption({ label: '重启恢复参考' })
+  await expectVisible(corpusWorkspace.getByRole('heading', { name: '重启恢复参考' }), 'switcher moves materialization to another book')
+  await expectVisible(referenceBooks.getByText('已选 2 本'), 'switcher selection mirrored in the book list')
+  await page.screenshot({ path: path.join(outputDir, 'reference-corpus-book-switcher.png'), fullPage: true })
+
+  await makeSelect.selectOption({ label: '全局雨夜参考' })
+  await expectVisible(corpusWorkspace.getByRole('heading', { name: '全局雨夜参考' }), 'switcher returns to the first book')
+
+  // 新加的参考书直接成为当前书，不必再去左侧猜"制作在做哪一本"。
+  await referenceBooks.getByRole('button', { name: '添加参考书籍' }).click()
+  await referenceBooks.getByLabel('参考书标题').fill('新书切换参考')
+  await referenceBooks.getByLabel('参考书文件路径').fill('D:\\books\\switcher-new-book.md')
+  const switcherCreateCount = await bridgeCallCount(page, 'RegisterReferenceMaterializationSource')
+  await referenceBooks.getByRole('button', { name: /^添加参考书$/ }).click()
+  await waitForBridgeCallCountAfter(page, 'RegisterReferenceMaterializationSource', switcherCreateCount)
+  await expectVisible(corpusWorkspace.getByRole('heading', { name: '新书切换参考' }), 'newly imported book becomes the book under materialization')
+
+  const switcherDeleteCount = await bridgeCallCount(page, 'DeleteReferenceAnchor')
+  await referenceBooks.getByRole('button', { name: '删除《新书切换参考》' }).click()
+  await referenceBooks.getByRole('button', { name: '确认删除《新书切换参考》' }).click()
+  await waitForBridgeCallCountAfter(page, 'DeleteReferenceAnchor', switcherDeleteCount)
+  await expectVisible(corpusWorkspace.getByRole('heading', { name: '全局雨夜参考' }), 'materialization falls back after the current book is removed')
+
+  await referenceBooks.getByRole('button', { name: '取消选择《重启恢复参考》' }).click()
+  await expectVisible(referenceBooks.getByText('已选 1 本'), 'book list back to a single selected book')
+  await expectVisible(corpusWorkspace.getByRole('heading', { name: '全局雨夜参考' }), 'unchecking the switched book falls back to the remaining selection')
 
   const analyzeCount = await bridgeCallCount(page, 'AnalyzeReferenceChapterSplit')
   await corpusWorkspace.getByRole('button', { name: '自动分析前 50K' }).click()
@@ -1384,6 +1426,20 @@ export async function verifyReferenceWorkspaceWorkflow(page) {
   await expectVisible(browse.getByTestId('corpus-browse-provenance').getByText(/素材来自材料化/), 'browse states which pipeline produced the materials')
   await waitForBridgeCallCountAfter(page, 'SearchReferenceMaterials', 0)
   await expectVisible(browse.getByTestId('material-card').first(), 'corpus browse material list')
+  // 请求 scope：浏览是"点哪本取哪本"的有界分页，不是把全部材料无条件拉进来。
+  const browseAnchorId = Number(await browse.getByLabel('选择参考书').inputValue())
+  const browseRequest = await page.evaluate(() =>
+    window.__appMockState.calls.filter((call) => call.method === 'SearchReferenceMaterials').at(-1) ?? null)
+  assert(browseRequest, 'corpus browse must issue a SearchReferenceMaterials request')
+  assert.equal(browseRequest.args[0].size, 10, 'corpus browse must page the material scan instead of loading the whole corpus')
+  assert.equal(browseRequest.args[0].page, 1, 'corpus browse starts on the first page')
+  assert.equal(browseRequest.args[0].ready_only, true, 'corpus browse must only scan ready sources')
+  assert.equal(browseRequest.args[0].archive_filter, 'active', 'corpus browse must stay on active materials')
+  assert.deepEqual(
+    browseRequest.args[0].anchor_ids,
+    browseAnchorId > 0 ? [browseAnchorId] : [],
+    'corpus browse must scope the scan to the selected reference book',
+  )
   await page.screenshot({ path: path.join(outputDir, 'corpus-browse.png'), fullPage: true })
 
   // 下钻闭环：总览覆盖度地图点取值 → 素材列表 + 该维度筛选。
@@ -1426,6 +1482,95 @@ export async function verifyReferenceWorkspaceWorkflow(page) {
     1,
     'all-books option available for the whole-novel coverage scope',
   )
+
+  // 六维筛选：覆盖度地图的六个维度都是检索入口。每一维都要能下钻到自己的请求字段上，
+  // 并且下钻后的条目总数必须能追回地图上该取值的计数——否则"语料化成功却检索不到"
+  // 会以统计口径复现（地图说 N 条、列表 0 条）。
+  const coverageCallsBefore = await bridgeCallCount(page, 'GetReferenceMaterialCoverage')
+  await corpusTabs.getByRole('tab', { name: '总览' }).click()
+  await waitForBridgeCallCountAfter(page, 'GetReferenceMaterialCoverage', coverageCallsBefore)
+  const coverageScope = await page.evaluate(() =>
+    window.__appMockState.calls.filter((call) => call.method === 'GetReferenceMaterialCoverage').at(-1)?.result ?? null)
+  assert(coverageScope, 'the coverage map must come from GetReferenceMaterialCoverage')
+  const coverageMap = page.getByTestId('corpus-coverage-map')
+  for (const dimension of CORPUS_FACET_DIMENSIONS) {
+    const facet = coverageScope.facets.find((item) => item.key === dimension.key)
+    assert(facet, `the coverage map must expose the ${dimension.key} dimension`)
+    assert(facet.values.length > 0, `the coverage map must expose values for ${dimension.label}`)
+    await expectVisible(
+      coverageMap.getByText(`${dimension.label} · ${facet.distinct_value_count} 类`, { exact: true }),
+      `coverage map dimension ${dimension.label}`,
+    )
+  }
+
+  for (const dimension of CORPUS_FACET_DIMENSIONS) {
+    const facet = coverageScope.facets.find((item) => item.key === dimension.key)
+    const [drillValue] = facet.values
+    await corpusTabs.getByRole('tab', { name: '总览' }).click()
+    const drilldownCallsBefore = await bridgeCallCount(page, 'SearchReferenceMaterials')
+    await page.getByTestId(`coverage-drilldown-${dimension.key}-${drillValue.value}`).click()
+    await waitForBridgeCallCountAfter(page, 'SearchReferenceMaterials', drilldownCallsBefore)
+    const drilldownRequest = await page.evaluate(() =>
+      window.__appMockState.calls.filter((call) => call.method === 'SearchReferenceMaterials').at(-1) ?? null)
+    assert(drilldownRequest, `drilling into ${dimension.label} must search materials`)
+    assert.deepEqual(
+      drilldownRequest.args[0][dimension.field],
+      [drillValue.value],
+      `drilling into ${dimension.label} must filter through the ${dimension.field} contract field`,
+    )
+    for (const other of CORPUS_FACET_DIMENSIONS) {
+      if (other.key === dimension.key) continue
+      assert.deepEqual(
+        drilldownRequest.args[0][other.field],
+        [],
+        `drilling into ${dimension.label} must not smuggle a ${other.label} filter`,
+      )
+    }
+    assert.deepEqual(
+      drilldownRequest.args[0].anchor_ids,
+      [],
+      `drilling into ${dimension.label} must cover the whole-novel coverage scope`,
+    )
+    assert.equal(drilldownRequest.args[0].ready_only, true, `drilling into ${dimension.label} must only scan ready sources`)
+    assert.equal(
+      drilldownRequest.result.total,
+      drillValue.material_count,
+      `drilling into ${dimension.label} must land on the ${drillValue.material_count} materials the map counted for ${drillValue.value}`,
+    )
+    await expectVisible(
+      page.getByTestId('material-drilldown-filter').getByText(new RegExp(`来自覆盖度地图：${dimension.label} · `)),
+      `drilldown chip for ${dimension.label}`,
+    )
+    await page.getByTestId('material-drilldown-clear').click()
+    await expectHidden(page.getByTestId('material-drilldown-filter'), `drilldown chip cleared for ${dimension.label}`)
+  }
+  await page.screenshot({ path: path.join(outputDir, 'corpus-six-dimension-drilldown.png'), fullPage: true })
+
+  // 1280x720 与窄桌面宽度：素材库的关键操作（六维覆盖地图下钻、素材列表）必须留在屏内
+  // （不出屏、不重叠），并截图留档。
+  const corpusTabsSurface = ['[data-testid="corpus-area-tabs"]', '语料视图页签']
+  const bookSidebarSurface = ['[data-testid="reference-book-sidebar"]', '参考书籍侧栏']
+
+  await corpusTabs.getByRole('tab', { name: '总览' }).click()
+  await page.setViewportSize({ width: 1280, height: 720 })
+  await expectVisible(coverageMap, 'coverage map at 1280x720')
+  await assertCorpusWorkspaceFitsViewport(page, 'reference workspace at 1280x720', [
+    corpusTabsSurface,
+    bookSidebarSurface,
+    ['[data-testid="corpus-overview"]', '语料总览'],
+  ])
+  await page.screenshot({ path: path.join(outputDir, 'corpus-reference-workspace-1280x720.png'), fullPage: true })
+
+  await corpusTabs.getByRole('tab', { name: '浏览' }).click()
+  await page.setViewportSize({ width: 1024, height: 720 })
+  await expectVisible(browse.getByTestId('material-card').first(), 'material list at narrow desktop width')
+  await assertCorpusWorkspaceFitsViewport(page, 'reference workspace at narrow desktop width', [
+    corpusTabsSurface,
+    bookSidebarSurface,
+    ['[data-testid="corpus-browse"]', '素材列表'],
+  ])
+  await page.screenshot({ path: path.join(outputDir, 'corpus-reference-workspace-narrow.png'), fullPage: true })
+  await page.setViewportSize({ width: 1440, height: 1100 })
 
   await corpusTabs.getByRole('tab', { name: '语料包' }).click()
   const pack = page.getByTestId('corpus-pack')
@@ -1482,6 +1627,34 @@ export async function verifyReferenceWorkspaceWorkflow(page) {
   await referenceBooks.getByRole('button', { name: '确认删除《元数据编辑测试书·修订》' }).click()
   await waitForBridgeCallCountAfter(page, 'DeleteReferenceAnchor', metadataDeleteCount)
   await expectHidden(referenceBooks.getByText('元数据编辑测试书·修订'), 'edited reference book cleaned up')
+}
+
+// 窄桌面宽度下的可读性下限：给定的素材库面板必须全部落在视口内，且页面本身不出现横向滚动。
+async function assertCorpusWorkspaceFitsViewport(page, description, surfaces) {
+  const result = await page.evaluate((expectedSurfaces) => {
+    const viewportWidth = window.innerWidth
+    const documentOverflow = document.documentElement.scrollWidth - viewportWidth
+    if (documentOverflow > 1) {
+      return { ok: false, reason: `页面横向滚动 ${Math.round(documentOverflow)}px` }
+    }
+    const problems = []
+    for (const [selector, label] of expectedSurfaces) {
+      const element = document.querySelector(selector)
+      if (!element) {
+        problems.push(`${label}未渲染`)
+        continue
+      }
+      const box = element.getBoundingClientRect()
+      if (box.width <= 0 || box.height <= 0) {
+        problems.push(`${label}尺寸为 0`)
+        continue
+      }
+      if (box.left < -1) problems.push(`${label}左侧出屏 ${Math.round(-box.left)}px`)
+      if (box.right > viewportWidth + 1) problems.push(`${label}右侧出屏 ${Math.round(box.right - viewportWidth)}px`)
+    }
+    return problems.length === 0 ? { ok: true, reason: '' } : { ok: false, reason: problems.join('；') }
+  }, surfaces)
+  assert.equal(result.ok, true, `${description} must keep the corpus workspace inside the viewport: ${result.reason}`)
 }
 
 export async function verifyCompactViewportSmoke(browser, url, consoleErrors, pageErrors) {

@@ -17,6 +17,9 @@ type Props = {
   refreshKey: number
   anchors: reference.Anchor[]
   selectedAnchorIds: number[]
+  /** 「制作」当前在做的参考书；null 时回落到第一本选中的书。 */
+  activeAnchorId: number | null
+  onActiveAnchorChange: (anchorId: number) => void
   onMaterializationChange: () => void
 }
 
@@ -58,7 +61,7 @@ function facetValueLabel(facetKey: string, value: string): string {
     : taxonomyLabel(FEATURE_VALUE_LABELS, value)
 }
 
-export default function CorpusAreaView({ novelId, refreshKey, anchors, selectedAnchorIds, onMaterializationChange }: Props) {
+export default function CorpusAreaView({ novelId, refreshKey, anchors, selectedAnchorIds, activeAnchorId, onActiveAnchorChange, onMaterializationChange }: Props) {
   const [tab, setTab] = useState<CorpusTab>('make')
   const [drilldown, setDrilldown] = useState<MaterialDrilldown | null>(null)
 
@@ -108,6 +111,8 @@ export default function CorpusAreaView({ novelId, refreshKey, anchors, selectedA
           refreshKey={refreshKey}
           anchors={anchors}
           selectedAnchorIds={selectedAnchorIds}
+          activeAnchorId={activeAnchorId}
+          onActiveAnchorChange={onActiveAnchorChange}
           onMaterializationChange={onMaterializationChange}
         />
       )}

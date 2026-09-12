@@ -135,10 +135,9 @@ public sealed class BridgeHandlerRegistrationTests
     [Fact]
     public void CompatibilityAppMethodListHasExpectedCoverage()
     {
-        // I6 补入 Inspect/Pump/ScheduleReferenceCorpusTechniqueVectorMaintenance 三件套后为 191。
-        Assert.Equal(191, BridgeCompatibilityAppMethods.MethodNames.Count);
+        // I6 三件套后为 191；退役早期分析管线桥暴露 15 个方法后为 176。
+        Assert.Equal(176, BridgeCompatibilityAppMethods.MethodNames.Count);
         Assert.Contains("GetChapterCorpusCoverage", BridgeCompatibilityAppMethods.MethodNames);
-        Assert.Contains("GetReferenceCorpusAssetTotals", BridgeCompatibilityAppMethods.MethodNames);
         Assert.Contains("AdvanceChapterPlan", BridgeCompatibilityAppMethods.MethodNames);
         Assert.Contains("ExportReferenceCorpusPackage", BridgeCompatibilityAppMethods.MethodNames);
         Assert.Contains("ImportReferenceCorpusPackage", BridgeCompatibilityAppMethods.MethodNames);
@@ -169,13 +168,7 @@ public sealed class BridgeHandlerRegistrationTests
         Assert.Contains("GetReferenceSourceSegmentDetail", BridgeCompatibilityAppMethods.MethodNames);
         Assert.Contains("SearchReferenceCorpusCandidates", BridgeCompatibilityAppMethods.MethodNames);
         Assert.Contains("BackfillReferenceCorpusTechniqueVectorIndex", BridgeCompatibilityAppMethods.MethodNames);
-        Assert.Contains("StartReferenceCorpusFeatureAnalysis", BridgeCompatibilityAppMethods.MethodNames);
-        Assert.Contains("GetReferenceCorpusFeatureAnalysisRun", BridgeCompatibilityAppMethods.MethodNames);
-        Assert.Contains("StartReferenceCorpusTechniqueSpecimenAnalysis", BridgeCompatibilityAppMethods.MethodNames);
-        Assert.Contains("GetReferenceCorpusTechniqueSpecimenAnalysisRun", BridgeCompatibilityAppMethods.MethodNames);
-        Assert.Contains("ListReferenceCorpusFeatureObservations", BridgeCompatibilityAppMethods.MethodNames);
-        Assert.Contains("ListReferenceCorpusTechniqueSpecimens", BridgeCompatibilityAppMethods.MethodNames);
- Assert.Contains("GetReferenceCorpusCascadeImpact", BridgeCompatibilityAppMethods.MethodNames);
+        Assert.Contains("GetReferenceCorpusCascadeImpact", BridgeCompatibilityAppMethods.MethodNames);
  Assert.Contains("GetReferenceCorpusGovernance", BridgeCompatibilityAppMethods.MethodNames);
         Assert.Contains("DeleteReferenceMaterials", BridgeCompatibilityAppMethods.MethodNames);
         Assert.Contains("RestoreReferenceMaterials", BridgeCompatibilityAppMethods.MethodNames);

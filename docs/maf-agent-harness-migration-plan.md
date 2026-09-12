@@ -136,7 +136,7 @@ OpenAI 客户端——那会同时丢掉双方言、provider 钩子和 key 脱�
 ### 3.3 桥方法台账与安全层
 
 - `tests/Novelist.Tests/Bridge/BridgeHandlerRegistrationTests.cs:139` 钉死
-  `Assert.Equal(191, BridgeCompatibilityAppMethods.MethodNames.Count)`，
+  `Assert.Equal(176, BridgeCompatibilityAppMethods.MethodNames.Count)`，
   `:199` 钉死运行时 6 个方法。
 - `tests/Novelist.Tests/Bridge/BridgeFrontendContractTests.cs:13` 断言 C# 白名单与
   从 `api.ts` 正则抓取的方法名**集合相等**。新增/改名任一桥方法，必须同一提交改两边。
@@ -356,7 +356,7 @@ S2 既然要动 `FileSystemChatSessionService`，顺手收敛成一处共享实�
 | S4 | 同上 | 子代理 `memory`/`review` 各自的转录平价 |
 | S5 | 同上 | 审批规则矩阵（manual/auto × file_edit/delete）；遥测无外发验证 |
 
-全阶段共同的守卫：`BridgeHandlerRegistrationTests.cs:139`（191 个方法）与
+全阶段共同的守卫：`BridgeHandlerRegistrationTests.cs:139`（176 个方法）与
 `BridgeFrontendContractTests.cs:13`（C# 白名单 ≡ `api.ts` 抓取集合）必须保持绿；
 若确需新增桥方法，同一提交内改两侧。语料驱动写作的 50K 闸门（
 `docs/corpus-driven-writing/development-plan.md`）不受本改造影响，但 S3 合并前需复跑一次。

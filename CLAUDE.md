@@ -85,7 +85,7 @@ The app uses a **Photino bridge** as the IPC layer between .NET and the React fr
 
 ### Reference anchoring and corpus-driven writing
 
-`SqliteReferenceAnchorService` owns the established material/provenance boundary; corpus-driven writing adds cross-library retrieval, multi-blueprint selection, source-locked candidates, and the analysis scheduler. Use `docs/reference-anchor-layer-plan.md` for the historical technical baseline and `docs/corpus-driven-writing/development-plan.md` plus `tasks.md` for the active plan/status. Preserve the evidence tiers: 1K job-store micro-benchmark, required 50K full pipeline (already passed), optional 2M long run. M9 chapter-default accessibility and recovery closure is complete; the Corpus Library reference-book and blueprint-preview workflow still needs focused browser acceptance, while real-user validation remains open. Expert-feature expansion is out of scope.
+`SqliteReferenceAnchorService` owns the established material/provenance boundary; corpus-driven writing adds cross-library retrieval, multi-blueprint selection, source-locked candidates, and the analysis scheduler. Use `docs/reference-anchor-layer-plan.md` for the historical technical baseline and `docs/corpus-driven-writing/development-plan.md` plus `tasks.md` for the active plan/status. Preserve the evidence tiers: 1K job-store micro-benchmark, required 50K full pipeline (already passed), optional 2M long run. M9 chapter-default accessibility and recovery closure is complete; the Corpus Library reference-book workflow has focused browser acceptance, while real-user validation remains open. Expert-feature expansion is out of scope.
 
 ## Coding Conventions
 

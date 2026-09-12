@@ -28,7 +28,7 @@ Do not revive retired legacy implementations: do not add new code under legacy `
 
 Prefer focused unit tests in `tests/Novelist.Tests` for pure bridge/tool behavior and integration tests in `tests/Novelist.IntegrationTests` for filesystem, SQLite, Git, migration, and app-host behavior. Add tests for storage, path safety, migrations, version history, bridge contracts, and user-facing workflow changes. UI changes require build, lint, the focused browser workflow, and screenshots for changed states; verify keyboard/focus, narrow desktop layouts, long-task recovery, and error recovery when relevant.
 
-For corpus-driven writing, follow `docs/corpus-driven-writing/development-plan.md`: keep the 1,000-item job-store micro-benchmark, use 50K as the required full scheduler/builder/worker/fake-analyzer gate, and reserve 2M for explicit non-blocking long runs. The formal 50K gate has passed; future changes must preserve it. M9 chapter-default, accessibility, and recovery evidence is complete; the Corpus Library reference-book and blueprint-preview workflow still needs focused browser acceptance, and real-user validation remains open. Do not expand the expert control surface.
+For corpus-driven writing, follow `docs/corpus-driven-writing/development-plan.md`: keep the 1,000-item job-store micro-benchmark, use 50K as the required full scheduler/builder/worker/fake-analyzer gate, and reserve 2M for explicit non-blocking long runs. The formal 50K gate has passed; future changes must preserve it. M9 chapter-default, accessibility, and recovery evidence is complete; the Corpus Library reference-book workflow has focused browser acceptance, and real-user validation remains open. Do not expand the expert control surface.
 
 ## Commit & Pull Request Guidelines
 
