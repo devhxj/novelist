@@ -422,6 +422,71 @@ public sealed class ReferenceMaterializationChapterSplitTests : IDisposable
         Assert.Equal(ReferenceChapterSplitProfileStates.Stale, await ReadProfileStatusAsync(options, preview.SplitProfileId));
     }
 
+    [Fact]
+    public async Task AnalyzeAutoSplitMergesDuplicateTitleLinesInsteadOfRejectingTheWholeSource()
+    {
+        var options = CreateOptions();
+        await InitializeAsync(options);
+        var novels = new FileSystemNovelService(options, new FileSystemAppSettingsService(options));
+        var novel = await novels.CreateNovelAsync(new CreateNovelPayload("重复标题排版", "", ""), CancellationToken.None);
+        // 来源文件的真实排版噪声：抓取时同一标题行被写了两次（第二次常带正文缩进），
+        // 两行标题之间没有正文。旧实现把它算成"空章"并否决整本书的分析。
+        var content =
+            "第1章 缘起\n\n雨声压住窗沿。\n\n" +
+            "第2章 逻辑\n\n    第2章 逻辑\n\n门外响起第三次敲门。\n\n" +
+            "第3章 收束\n\n灯影停顿收尾。\n";
+        var sourcePath = CreateSourceFile("duplicate-title.txt", content);
+        var anchors = new SqliteReferenceAnchorService(options, novels);
+        var anchor = await anchors.CreateAnchorAsync(
+            new CreateReferenceAnchorPayload(novel.Id, "重复标题来源", null, sourcePath, "text", "user_provided"),
+            CancellationToken.None);
+        var service = new SqliteReferenceMaterializationService(
+            options,
+            new RecordingChapterSplitAnalyzer(new ReferenceChapterSplitModelResult(
+                "chapter_template",
+                "第{number}章 {title}",
+                0.93,
+                [0])));
+
+        var result = await service.AnalyzeChapterSplitAsync(
+            new AnalyzeReferenceChapterSplitPayload(novel.Id, anchor.AnchorId),
+            CancellationToken.None);
+
+        Assert.Equal(3, result.ChapterCount);
+        Assert.Equal(["缘起", "逻辑", "收束"], result.Boundaries.Select(boundary => boundary.Title).ToArray());
+        // 章节头落在首次出现的标题行上，重复标题行既不单独成章、也不进正文。
+        Assert.Equal(content.IndexOf("第2章 逻辑", StringComparison.Ordinal), result.Boundaries[1].HeadingStart);
+        Assert.Equal(
+            "门外响起第三次敲门。",
+            content[result.Boundaries[1].ContentStart..result.Boundaries[1].ContentEnd]);
+    }
+
+    [Fact]
+    public async Task PreviewManualSplitDropsHeadingsWithoutBodyText()
+    {
+        var options = CreateOptions();
+        await InitializeAsync(options);
+        var novels = new FileSystemNovelService(options, new FileSystemAppSettingsService(options));
+        var novel = await novels.CreateNovelAsync(new CreateNovelPayload("无正文标题", "", ""), CancellationToken.None);
+        // 第二种排版噪声：标题行后面没有正文（残留标题），以及文末只剩标题行的尾部目录残留。
+        var sourcePath = CreateSourceFile(
+            "heading-without-body.txt",
+            "第1章 开端\n\n雨声压住窗沿。\n\n第2章 残留标题\n\n第3章 收束\n\n灯影停顿收尾。\n\n第4章 文末残留标题");
+        var anchors = new SqliteReferenceAnchorService(options, novels);
+        var anchor = await anchors.CreateAnchorAsync(
+            new CreateReferenceAnchorPayload(novel.Id, "无正文标题来源", null, sourcePath, "text", "user_provided"),
+            CancellationToken.None);
+        var service = new SqliteReferenceMaterializationService(options, new RecordingChapterSplitAnalyzer(ReferenceChapterSplitModelResult.Empty));
+
+        var result = await service.PreviewChapterSplitAsync(
+            new PreviewReferenceChapterSplitPayload(novel.Id, anchor.AnchorId, "第{number}章 {title}"),
+            CancellationToken.None);
+
+        Assert.Equal(ReferenceChapterSplitProfileStates.Validated, result.Status);
+        Assert.Equal(["开端", "收束"], result.Boundaries.Select(boundary => boundary.Title).ToArray());
+        Assert.All(result.Boundaries, boundary => Assert.True(boundary.ContentEnd > boundary.ContentStart));
+    }
+
     public void Dispose()
     {
         if (Directory.Exists(_root))

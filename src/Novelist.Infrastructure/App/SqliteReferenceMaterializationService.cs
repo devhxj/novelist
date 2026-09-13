@@ -464,36 +464,78 @@ public sealed partial class SqliteReferenceMaterializationService : IReferenceMa
         string patternKind,
         string delimiterTemplate)
     {
-        var headings = ExcludeLeadingTableOfContentsHeadings(
+        var sections = MergeHeadingsWithoutBodyText(
             source,
-            FindHeadings(source, patternKind, delimiterTemplate));
-        if (headings.Count < 2)
+            ExcludeLeadingTableOfContentsHeadings(
+                source,
+                FindHeadings(source, patternKind, delimiterTemplate)));
+        if (sections.Count < 2)
         {
-            throw new ArgumentException("Chapter split must produce at least two valid chapter boundaries.", nameof(delimiterTemplate));
+            throw new ArgumentException("Chapter split must produce at least two chapter boundaries with body text.");
         }
 
-        var boundaries = new List<ChapterBoundary>(headings.Count);
-        for (var index = 0; index < headings.Count; index++)
+        var boundaries = new List<ChapterBoundary>(sections.Count);
+        for (var index = 0; index < sections.Count; index++)
         {
-            var heading = headings[index];
-            var nextStart = index + 1 < headings.Count ? headings[index + 1].HeadingStart : source.Length;
-            var contentStart = SkipLeadingWhitespace(source, heading.LineEnd);
+            var section = sections[index];
+            var nextStart = index + 1 < sections.Count ? sections[index + 1].HeadingStart : source.Length;
             var contentEnd = TrimTrailingWhitespace(source, nextStart);
-            if (contentEnd <= contentStart)
+            if (contentEnd <= section.ContentStart)
             {
-                throw new ArgumentException("Chapter split produced an empty chapter.", nameof(delimiterTemplate));
+                // 合并后不应再出现空章；保留兜底是为了不把零正文的章节写进待确认的切分。
+                throw new ArgumentException("Chapter split produced a chapter without body text.");
             }
 
             boundaries.Add(new ChapterBoundary(
                 index + 1,
-                heading.Title,
-                heading.HeadingStart,
-                contentStart,
+                section.Title,
+                section.HeadingStart,
+                section.ContentStart,
                 contentEnd,
-                HashText(source[contentStart..contentEnd])));
+                HashText(source[section.ContentStart..contentEnd])));
         }
 
         return boundaries;
+    }
+
+    /// <summary>
+    /// 归一化相邻的标题行，让"排版噪声"不再否决整本书的切分：
+    /// 同一章节的标题行被重复排版（站点抓取常见）时并回一个章节，正文从重复标题行之后开始；
+    /// 标题行之后到下一个标题之间没有正文的伪章节（残留标题、文末尾部目录）直接丢弃。
+    /// </summary>
+    private static List<HeadingSection> MergeHeadingsWithoutBodyText(string source, List<Heading> headings)
+    {
+        var sections = new List<HeadingSection>(headings.Count);
+        foreach (var heading in headings)
+        {
+            // 上一个标题到此标题之间只有空白：两个标题行之间没有正文。
+            if (sections.Count > 0 && sections[^1].ContentStart >= heading.HeadingStart)
+            {
+                var previous = sections[^1];
+                if (string.Equals(previous.Title, heading.Title, StringComparison.Ordinal))
+                {
+                    // 重复标题：章节头保留首次出现的标题行，重复行只作为正文起点前的空白被跳过。
+                    sections[^1] = previous with { ContentStart = SkipLeadingWhitespace(source, heading.LineEnd) };
+                    continue;
+                }
+
+                // 无正文的伪章节：丢弃它，上一章的正文继续延伸到下一个真正的章节头。
+                sections.RemoveAt(sections.Count - 1);
+            }
+
+            sections.Add(new HeadingSection(
+                heading.HeadingStart,
+                heading.Title,
+                SkipLeadingWhitespace(source, heading.LineEnd)));
+        }
+
+        // 文末只剩标题行时同样不成章。
+        if (sections.Count > 0 && sections[^1].ContentStart >= source.Length)
+        {
+            sections.RemoveAt(sections.Count - 1);
+        }
+
+        return sections;
     }
 
     private static List<Heading> ExcludeLeadingTableOfContentsHeadings(
@@ -900,6 +942,7 @@ public sealed partial class SqliteReferenceMaterializationService : IReferenceMa
     private sealed record AnchorSource(string SourcePath, string SourceHash);
     private sealed record SourceSnapshot(string NormalizedText, string Hash);
     private sealed record Heading(int HeadingStart, int LineEnd, string Title);
+    private sealed record HeadingSection(int HeadingStart, string Title, int ContentStart);
     private sealed record SourceLine(int Start, int End, int NextStart);
     private sealed record ChapterBoundary(
         int ChapterIndex,
