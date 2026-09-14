@@ -214,6 +214,7 @@ public sealed class FileSystemChatSessionService : IChatSessionService, ISubagen
     private readonly IVersionControlService _versionControl;
     private readonly IReferenceAnchorService? _referenceAnchors;
     private readonly IPlanningService? _planning;
+    private readonly IReferenceAdvancedMaterialService? _advancedMaterials;
     private readonly TimeProvider _timeProvider;
     private readonly SemaphoreSlim _mutex = new(1, 1);
     private readonly ConcurrentDictionary<string, ActiveChatOperation> _activeChats = new(StringComparer.Ordinal);
@@ -231,6 +232,7 @@ public sealed class FileSystemChatSessionService : IChatSessionService, ISubagen
         IVersionControlService? versionControl = null,
         IReferenceAnchorService? referenceAnchors = null,
         IPlanningService? planning = null,
+        IReferenceAdvancedMaterialService? advancedMaterials = null,
         TimeProvider? timeProvider = null)
     {
         _options = options ?? new AppInitializationOptions();
@@ -245,6 +247,7 @@ public sealed class FileSystemChatSessionService : IChatSessionService, ISubagen
         _versionControl = versionControl ?? new GitVersionControlService(_options);
         _referenceAnchors = referenceAnchors;
         _planning = planning;
+        _advancedMaterials = advancedMaterials;
         _timeProvider = timeProvider ?? TimeProvider.System;
     }
 
@@ -2075,7 +2078,7 @@ public sealed class FileSystemChatSessionService : IChatSessionService, ISubagen
 
     private const int MaxChapterNumber = 999_999;
     private const int CorpusInjectionMaxMaterials = 5;
-    private const int CorpusInjectionQueryMaxLength = 160;
+    private const int CorpusInjectionMaxAdvancedMaterials = 4;
     private const int CorpusInjectionPreviewMaxLength = 160;
     private const int CorpusInjectionTitleMaxLength = 200;
     private const string CorpusInjectionMarker = "<reference-corpus>";
@@ -2111,17 +2114,13 @@ public sealed class FileSystemChatSessionService : IChatSessionService, ISubagen
             return null;
         }
 
-        var query = plan.Content.Replace(LineBreak, " ").Trim();
-        if (query.Length > CorpusInjectionQueryMaxLength)
-        {
-            query = query[..CorpusInjectionQueryMaxLength];
-        }
-
+        // T9：结构化需求代替"截断 160 字文本"当 query（duty 词表见 CorpusNeedBuilder）。
+        var need = CorpusNeedBuilder.FromPlanText(plan.Content);
         var page = await _referenceAnchors.SearchMaterialsAsync(
             new SearchReferenceMaterialsPayload(
                 novelId,
                 AnchorIds: [],
-                Query: query,
+                Query: need.Query,
                 MaterialTypes: [],
                 EmotionTags: [],
                 FunctionTags: [],
@@ -2129,6 +2128,8 @@ public sealed class FileSystemChatSessionService : IChatSessionService, ISubagen
                 TechniqueTags: [],
                 Page: 1,
                 Size: CorpusInjectionMaxMaterials,
+                NarrativeDuties: need.NarrativeDuties.Count == 0 ? null : need.NarrativeDuties,
+                ProseDuties: need.ProseDuties.Count == 0 ? null : need.ProseDuties,
                 ReadyOnly: true),
             cancellationToken);
 
@@ -2164,20 +2165,84 @@ public sealed class FileSystemChatSessionService : IChatSessionService, ISubagen
             corpusLines.Add($"[{usage.Count}] 《{anchorTitle}》{(tags.Length > 0 ? "（" + string.Join(" / ", tags) + "）" : string.Empty)}{LineBreak}{preview}");
         }
 
+        // T10/T11：L2 高级素材（仅 confirmed + active）与 L1 语料混合注入。
+        var mechanismLines = await BuildAdvancedMaterialLinesAsync(anchorTitles, usage, cancellationToken);
+
         if (usage.Count == 0)
         {
             return null;
         }
 
+        var mechanismSection = mechanismLines.Count == 0
+            ? string.Empty
+            : "【写法参考·仅作方法】以下为“为什么这样写”的机理，可迁移的是方法与骨架；禁止复制具体表述、专名与设定。" + ParagraphBreak
+                + string.Join(ParagraphBreak, mechanismLines) + ParagraphBreak;
         var systemMessage = $"""
             <reference-corpus>
-            以下是为第 {chapterNumber} 章检索到的参考语料（来自已导入参考书，检索词取自本章计划）。
-            写作时借鉴其细节质感、节奏与手法，不要逐句复用原文；可在正文之外向作者说明借鉴了哪些处理方式。
+            以下是为第 {chapterNumber} 章检索到的参考材料（来自已导入参考书，检索需求取自本章计划）。
+            {mechanismSection}【语料范例】以下为原文范例，借鉴其细节质感、节奏与手法，不要逐句复用原文。
             {string.Join(ParagraphBreak, corpusLines)}
+            可在正文之外向作者说明借鉴了哪些处理方式。
             </reference-corpus>
             """;
 
-        return new ChapterCorpusInjection(query, systemMessage, usage);
+        return new ChapterCorpusInjection(need.Query, systemMessage, usage);
+    }
+
+    // L2 高级素材按"每书一套 + 仅 confirmed + active"取，机理类（specimen）优先，按置信度取前若干条。
+    private async ValueTask<List<string>> BuildAdvancedMaterialLinesAsync(
+        IReadOnlyDictionary<long, string> anchorTitles,
+        List<ChatCorpusUsageItemPayload> usage,
+        CancellationToken cancellationToken)
+    {
+        var lines = new List<string>();
+        if (_advancedMaterials is null || anchorTitles.Count == 0)
+        {
+            return lines;
+        }
+
+        var candidates = new List<ReferenceAdvancedMaterialSummaryPayload>();
+        foreach (var anchorId in anchorTitles.Keys)
+        {
+            var page = await _advancedMaterials.ListAsync(
+                new ListReferenceAdvancedMaterialsPayload(
+                    anchorId,
+                    Family: null,
+                    Layer: ReferenceAdvancedMaterialLayers.Specimen,
+                    ReviewState: ReferenceAdvancedMaterialReviewStates.Confirmed,
+                    IncludeSuperseded: false,
+                    PageRequest: new PageRequestPayload(null, 2, "confidence", "desc")),
+                cancellationToken);
+            candidates.AddRange(page.Items);
+        }
+
+        foreach (var item in candidates
+            .OrderByDescending(candidate => candidate.Confidence)
+            .ThenBy(candidate => candidate.MaterialId, StringComparer.Ordinal)
+            .Take(CorpusInjectionMaxAdvancedMaterials))
+        {
+            if (!anchorTitles.TryGetValue(item.AnchorId, out var anchorTitle))
+            {
+                continue;
+            }
+
+            var title = anchorTitle.Length > CorpusInjectionTitleMaxLength
+                ? anchorTitle[..CorpusInjectionTitleMaxLength]
+                : anchorTitle;
+            var summary = string.IsNullOrWhiteSpace(item.ValueText)
+                ? item.FeatureKey
+                : item.ValueText!;
+            if (summary.Length > CorpusInjectionPreviewMaxLength)
+            {
+                summary = summary[..CorpusInjectionPreviewMaxLength];
+            }
+
+            var tags = new[] { $"高级素材·{item.Family}", item.Layer };
+            usage.Add(new ChatCorpusUsageItemPayload(item.MaterialId, item.AnchorId, title, summary, tags));
+            lines.Add($"[{usage.Count}] 《{title}》{item.Family}·{item.FeatureKey}{LineBreak}{summary}");
+        }
+
+        return lines;
     }
 
     private async ValueTask<int> EmitAgentEventAsync(

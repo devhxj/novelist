@@ -10,6 +10,7 @@ import {
   MATERIAL_TYPE_LABELS,
   taxonomyLabel,
 } from '@/lib/novelist/corpusTaxonomy'
+import AdvancedMaterialPanel from './AdvancedMaterialPanel'
 import ReferenceCorpusWorkspace from './ReferenceCorpusWorkspace'
 
 type Props = {
@@ -247,6 +248,8 @@ function CorpusOverview({ novelId, anchors, refreshKey, onOpenMaterials }: {
       ) : (
         <p className="mt-2 text-xs text-muted-foreground">暂无语料覆盖数据。先在「制作」完成一本书的材料化。</p>
       )}
+
+      <AdvancedMaterialPanel novelId={novelId} anchors={anchors} refreshKey={refreshKey} />
 
       <button
         type="button"

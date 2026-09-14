@@ -1,4 +1,3 @@
-using System.Text.RegularExpressions;
 using Novelist.Contracts.App;
 using Novelist.Core.App;
 
@@ -9,12 +8,11 @@ namespace Novelist.Infrastructure.App;
 /// 与聊天写作注入同源（同一检索实现、同一 Ready 过滤，轻量化聚焦方案 §3 覆盖度信号）。
 /// 单次计算只做一次材料全量读取；结果按细纲内容短 TTL 缓存，材料变化由手动刷新兜底。
 /// </summary>
-public sealed partial class ChapterCorpusCoverageService : IChapterCorpusCoverageService
+public sealed class ChapterCorpusCoverageService : IChapterCorpusCoverageService
 {
     private const string PlanScope = "next";
     private const int MaxBeats = 40;
-    private const int QueryMaxLength = 48;
-    // U9（未标定常量）：0.5 是 v1 未校准取值，单 beat 也按"任意命中即覆盖"（见 BuildQuery 注释）。
+    // U9（未标定常量）：0.5 是 v1 未校准取值，单 beat 也按"任意命中即覆盖"（见 CorpusNeedBuilder）。
     // 标定流程与数据要求见 docs/corpus-driven-writing/evaluations/coverage-threshold-calibration.md；
     // 行为边界（恰好 0.5 判足）由 ComputeCoverageTreatsExactHalfAsSufficientUntilCalibrated 钉死。
     private const double SufficientRatio = 0.5;
@@ -88,12 +86,12 @@ public sealed partial class ChapterCorpusCoverageService : IChapterCorpusCoverag
 
         // 与注入同口径：ReadyOnly 让"已覆盖"只统计会被实际注入的语料。
         // 空 query 的 beat 与原实现一致：直接判未覆盖，不进入检索。
-        var queries = beats.Select(BuildQuery).ToArray();
+        var needs = beats.Select(CorpusNeedBuilder.FromBeat).ToArray();
         var batchInputs = new List<SearchReferenceMaterialsPayload>(beats.Length);
         var batchBeatIndexes = new List<int>(beats.Length);
         for (var index = 0; index < beats.Length; index++)
         {
-            if (queries[index].Length == 0)
+            if (needs[index].Query.Length == 0)
             {
                 continue;
             }
@@ -101,7 +99,7 @@ public sealed partial class ChapterCorpusCoverageService : IChapterCorpusCoverag
             batchInputs.Add(new SearchReferenceMaterialsPayload(
                 input.NovelId,
                 AnchorIds: [],
-                Query: queries[index],
+                Query: needs[index].Query,
                 MaterialTypes: [],
                 EmotionTags: [],
                 FunctionTags: [],
@@ -109,6 +107,8 @@ public sealed partial class ChapterCorpusCoverageService : IChapterCorpusCoverag
                 TechniqueTags: [],
                 Page: 1,
                 Size: 1,
+                NarrativeDuties: needs[index].NarrativeDuties.Count == 0 ? null : needs[index].NarrativeDuties,
+                ProseDuties: needs[index].ProseDuties.Count == 0 ? null : needs[index].ProseDuties,
                 ReadyOnly: true));
             batchBeatIndexes.Add(index);
         }
@@ -184,13 +184,6 @@ public sealed partial class ChapterCorpusCoverageService : IChapterCorpusCoverag
         return components is null || components.Count == 0 ? null : components.Values.Sum();
     }
 
-    private static string BuildQuery(string beat)
-    {
-        var query = BeatQueryRegex().Replace(beat, " ").Trim();
-        // v1 阈值：检索返回任意命中即视为该 beat 已覆盖；相关度分数阈值待真实语料校准（开放问题 3）。
-        return query.Length > QueryMaxLength ? query[..QueryMaxLength] : query;
-    }
-
     internal static IReadOnlyList<string> SplitBeats(string? planContent)
     {
         if (string.IsNullOrWhiteSpace(planContent))
@@ -230,7 +223,4 @@ public sealed partial class ChapterCorpusCoverageService : IChapterCorpusCoverag
     private static DateTimeOffset UtcNow() => DateTimeOffset.UtcNow;
 
     private sealed record CacheEntry(long NovelId, string PlanContent, ChapterCorpusCoveragePayload Payload, DateTimeOffset CreatedAt);
-
-    [GeneratedRegex(@"\s+")]
-    private static partial Regex BeatQueryRegex();
 }

@@ -1,6 +1,7 @@
 using System.Net.Http;
 using System.Diagnostics;
 using System.Text.Json;
+using Novelist.Contracts.App;
 using Novelist.Core.App;
 using Novelist.Core.Bridge;
 
@@ -19,6 +20,9 @@ public sealed class ReferenceCorpusAnalysisWorker : IAsyncDisposable
  private readonly IReferenceCorpusDatabasePathResolver _databasePathResolver;
  private readonly ReferenceCorpusFeatureWorkItemProcessor _featureProcessor;
  private readonly ReferenceCorpusTechniqueWorkItemProcessor _techniqueProcessor;
+ // 高级素材生产并入调度：语料分析作业完成后顺带产出（增强项，失败不影响分析作业）。
+ private readonly IReferenceAdvancedMaterialPipelineService? _advancedMaterialPipeline;
+ private readonly IReferenceAdvancedMaterialService? _advancedMaterialService;
  private readonly ReferenceCorpusFeatureObservationPersistence _featurePersistence = new();
  private readonly ReferenceCorpusTechniqueSpecimenPersistence _techniquePersistence = new();
  private readonly ReferenceCorpusAnalysisRetryPolicy _retryPolicy = new();
@@ -40,8 +44,10 @@ private string? _boundDatabasePath;
  IReferenceCorpusFeatureFamilyAnalyzer featureAnalyzer,
  IReferenceCorpusTechniqueSpecimenAnalyzer techniqueAnalyzer,
  string? workerId = null,
- TimeSpan? idleDelay = null)
- : this(databasePathResolver, featureAnalyzer, techniqueAnalyzer, workerId, idleDelay, DefaultOptions)
+ TimeSpan? idleDelay = null,
+ IReferenceAdvancedMaterialPipelineService? advancedMaterialPipeline = null,
+ IReferenceAdvancedMaterialService? advancedMaterialService = null)
+ : this(databasePathResolver, featureAnalyzer, techniqueAnalyzer, workerId, idleDelay, DefaultOptions, advancedMaterialPipeline, advancedMaterialService)
  {
  }
 
@@ -51,11 +57,15 @@ private string? _boundDatabasePath;
  IReferenceCorpusTechniqueSpecimenAnalyzer techniqueAnalyzer,
  string? workerId,
  TimeSpan? idleDelay,
- ReferenceCorpusAnalysisWorkerOptions options)
+ ReferenceCorpusAnalysisWorkerOptions options,
+ IReferenceAdvancedMaterialPipelineService? advancedMaterialPipeline = null,
+ IReferenceAdvancedMaterialService? advancedMaterialService = null)
  {
  _databasePathResolver = databasePathResolver ?? throw new ArgumentNullException(nameof(databasePathResolver));
  _featureProcessor = new(featureAnalyzer ?? throw new ArgumentNullException(nameof(featureAnalyzer)));
 _techniqueProcessor = new(techniqueAnalyzer ?? throw new ArgumentNullException(nameof(techniqueAnalyzer)));
+ _advancedMaterialPipeline = advancedMaterialPipeline;
+ _advancedMaterialService = advancedMaterialService;
  _workerId = string.IsNullOrWhiteSpace(workerId) ? $"analysis-worker:{Environment.ProcessId}:{Guid.NewGuid():N}" : workerId;
  _idleDelay = idleDelay ?? TimeSpan.FromSeconds(1);
  if (_idleDelay <= TimeSpan.Zero) throw new ArgumentOutOfRangeException(nameof(idleDelay));
@@ -442,7 +452,7 @@ private async ValueTask<ReferenceCorpusAnalysisJob> FinalizeRecordedCompletionAs
  ReferenceCorpusAnalysisCompletionEnvelope completion,
  CancellationToken cancellationToken)
  {
- return await store.FinalizeCompletionAsync(
+ var finalizedJob = await store.FinalizeCompletionAsync(
  completion,
  DateTimeOffset.UtcNow,
  async (connection, transaction, persisted, token) =>
@@ -468,6 +478,47 @@ private async ValueTask<ReferenceCorpusAnalysisJob> FinalizeRecordedCompletionAs
  }
  },
  cancellationToken);
+ await TryProduceAdvancedMaterialsAsync(finalizedJob, cancellationToken);
+ return finalizedJob;
+ }
+
+ // 语料分析作业完成 → 顺带产出该书的高级素材（幂等：已有记录则跳过）。增强项，异常不外抛，
+ // 保证"高级素材生产"的任何失败都不会把语料分析作业本身带坏。
+ private async ValueTask TryProduceAdvancedMaterialsAsync(
+ ReferenceCorpusAnalysisJob job,
+ CancellationToken cancellationToken)
+ {
+ if (_advancedMaterialPipeline is null ||
+ !string.Equals(job.Status, ReferenceCorpusAnalysisJobStatuses.Completed, StringComparison.Ordinal) ||
+ !string.Equals(job.JobKind, ReferenceCorpusAnalysisJobKinds.FeatureAnalysis, StringComparison.Ordinal))
+ {
+ return;
+ }
+
+ try
+ {
+ if (_advancedMaterialService is not null)
+ {
+ var existing = await _advancedMaterialService.ListAsync(
+ new ListReferenceAdvancedMaterialsPayload(
+ job.AnchorId,
+ PageRequest: new PageRequestPayload(null, 1, "created_at", "desc")),
+ cancellationToken);
+ if (existing.Total > 0)
+ {
+ return;
+ }
+ }
+
+ await _advancedMaterialPipeline.ProcessAnchorAsync(
+ job.AnchorId,
+ $"advm-{Guid.NewGuid():N}",
+ cancellationToken);
+ }
+ catch
+ {
+ // 增强项：静默失败，不改变语料分析作业的完成语义。
+ }
  }
 
  private static ReferenceCorpusAnalysisCompletionEnvelope CreateCompletion(

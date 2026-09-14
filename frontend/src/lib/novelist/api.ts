@@ -104,6 +104,10 @@ export interface NovelistAppApi {
  RebuildReferenceCorpusDedupGroups: AppMethod<[{ library_id?: string | null }], { members_scanned: number; groups_assigned: number }>
  BuildReferenceCorpusAggregates: AppMethod<[{ library_ids: string[]; run_id?: string | null }], reference.CorpusAggregate[]>
  ListReferenceCorpusAggregates: AppMethod<[{ aggregate_type?: string | null }], reference.CorpusAggregate[]>
+ ListReferenceAdvancedMaterials: AppMethod<[reference.ListAdvancedMaterialsInput], storage.PageResult_reference_AdvancedMaterialSummary_>
+ GetReferenceAdvancedMaterialDetail: AppMethod<[reference.GetAdvancedMaterialDetailInput], reference.AdvancedMaterialDetail | null>
+ ReviewReferenceAdvancedMaterial: AppMethod<[reference.ReviewAdvancedMaterialInput], reference.AdvancedMaterialReviewResult>
+ StartReferenceAdvancedMaterialAnalysis: AppMethod<[reference.StartAdvancedMaterialAnalysisInput], reference.AdvancedMaterialPipelineResult>
  RefreshReferenceCorpusReviewQueue: AppMethod<[{ confidence_threshold: number }], number>
  ListReferenceCorpusReviewQueue: AppMethod<[{ page_request: { cursor?: string | null; page_size: number; sort_by: string; sort_dir: string } }], reference.CorpusReviewQueuePage>
  ReviewReferenceCorpusItems: AppMethod<[{ queue_ids: string[]; review_state: string }], number>
@@ -309,6 +313,10 @@ export const appApi: NovelistAppApi = {
 RebuildReferenceCorpusDedupGroups: appMethod<NovelistAppApi['RebuildReferenceCorpusDedupGroups']>('RebuildReferenceCorpusDedupGroups'),
  BuildReferenceCorpusAggregates: appMethod<NovelistAppApi['BuildReferenceCorpusAggregates']>('BuildReferenceCorpusAggregates'),
  ListReferenceCorpusAggregates: appMethod<NovelistAppApi['ListReferenceCorpusAggregates']>('ListReferenceCorpusAggregates'),
+ ListReferenceAdvancedMaterials: appMethod<NovelistAppApi['ListReferenceAdvancedMaterials']>('ListReferenceAdvancedMaterials'),
+ GetReferenceAdvancedMaterialDetail: appMethod<NovelistAppApi['GetReferenceAdvancedMaterialDetail']>('GetReferenceAdvancedMaterialDetail'),
+ ReviewReferenceAdvancedMaterial: appMethod<NovelistAppApi['ReviewReferenceAdvancedMaterial']>('ReviewReferenceAdvancedMaterial'),
+ StartReferenceAdvancedMaterialAnalysis: ((...args) => invokeAppArgs('StartReferenceAdvancedMaterialAnalysis', args, { timeoutMs: null })) as NovelistAppApi['StartReferenceAdvancedMaterialAnalysis'],
  RefreshReferenceCorpusReviewQueue: appMethod<NovelistAppApi['RefreshReferenceCorpusReviewQueue']>('RefreshReferenceCorpusReviewQueue'),
  ListReferenceCorpusReviewQueue: appMethod<NovelistAppApi['ListReferenceCorpusReviewQueue']>('ListReferenceCorpusReviewQueue'),
  ReviewReferenceCorpusItems: appMethod<NovelistAppApi['ReviewReferenceCorpusItems']>('ReviewReferenceCorpusItems'),

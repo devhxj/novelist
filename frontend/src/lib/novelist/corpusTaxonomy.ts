@@ -35,6 +35,28 @@ export const COVERAGE_FACET_LABELS: Record<string, string> = {
   technique_tag: '技法',
 }
 
+// 高级写作素材（L2，reference_advanced_materials）的展示词表。
+// 真值来源：src/Novelist.Contracts/App/ReferenceAdvancedMaterialPayloads.cs（词表冻结）。
+export const ADVANCED_MATERIAL_FAMILY_LABELS: Record<string, string> = {
+  world: '世界观',
+  style: '文风',
+  craft: '写法',
+  technique: '技巧',
+  structure: '结构',
+}
+
+export const ADVANCED_MATERIAL_LAYER_LABELS: Record<string, string> = {
+  observation: '事实',
+  specimen: '机理',
+  strategy: '策略',
+}
+
+export const ADVANCED_MATERIAL_REVIEW_STATE_LABELS: Record<string, string> = {
+  unverified: '未复核',
+  confirmed: '已确认',
+  rejected: '已驳回',
+}
+
 export const FAMILY_LABELS: Record<string, string> = {
   // 句子级
   syntax: '句法',

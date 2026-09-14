@@ -127,6 +127,16 @@ public static PhotinoWebMessageBridge CreateBridge(
             embeddingClient,
             sqliteVecProvider,
             sqliteVecProvider);
+        // 高级写作素材（L2）：只读 + 复核统一外壳表 reference_advanced_materials。
+        var referenceAdvancedMaterialService = new SqliteReferenceAdvancedMaterialService(
+            materializationDatabasePathResolver);
+        // 生产管线：观测 → 机理 → 策略（LLM 分析器 + 校验落库 + 策略聚合）。
+        var referenceAdvancedMaterialPipeline = new ReferenceAdvancedMaterialPipelineService(
+            materializationDatabasePathResolver,
+            new ReferenceAdvancedMaterialChatCompletionAnalyzer(settingsService, chatCompletionClient),
+            new ReferenceAdvancedMaterialSpecimenChatCompletionAnalyzer(settingsService, chatCompletionClient),
+            new SqliteReferenceAdvancedMaterialIngestionService(materializationDatabasePathResolver),
+            new SqliteReferenceAdvancedMaterialStrategyService(materializationDatabasePathResolver));
 var referenceCorpusAnalysisService = new SqliteReferenceCorpusAnalysisService(
 options,
 settingsService,
@@ -135,7 +145,9 @@ packageFilePicker: new PhotinoReferenceCorpusPackageFilePicker(window));
 var referenceCorpusAnalysisWorker = new ReferenceCorpusAnalysisWorker(
 new ReferenceCorpusDatabasePathResolver(options),
 new ReferenceCorpusChatCompletionFeatureFamilyAnalyzer(settingsService, chatCompletionClient),
-new ReferenceCorpusChatCompletionTechniqueSpecimenAnalyzer(settingsService, chatCompletionClient));
+new ReferenceCorpusChatCompletionTechniqueSpecimenAnalyzer(settingsService, chatCompletionClient),
+advancedMaterialPipeline: referenceAdvancedMaterialPipeline,
+advancedMaterialService: referenceAdvancedMaterialService);
 var referenceCorpusTechniqueVectorMaintenanceLoop = new ReferenceCorpusTechniqueVectorMaintenanceLoop(
 referenceCorpusService);
  var initializationService = new CoordinatedAppInitializationService(
@@ -180,7 +192,8 @@ referenceCorpusService);
             chapterContentService,
             versionControl,
             referenceAnchors: referenceAnchorService,
-            planning: planningService);
+            planning: planningService,
+            advancedMaterials: referenceAdvancedMaterialService);
         var chapterCorpusCoverageService = new ChapterCorpusCoverageService(
             referenceAnchorService,
             planningService);
@@ -222,6 +235,7 @@ referenceCorpusService);
             .RegisterReferenceAnchorHandlers(referenceAnchorService)
             .RegisterReferenceMaterializationHandlers(referenceMaterializationService)
             .RegisterReferenceCorpusHandlers(referenceCorpusService)
+            .RegisterReferenceAdvancedMaterialHandlers(referenceAdvancedMaterialService, referenceAdvancedMaterialPipeline)
 .RegisterReferenceCorpusAnalysisHandlers(referenceCorpusAnalysisService)
  .RegisterReferenceCorpusGovernanceHandlers(referenceCorpusGovernanceService)
             .RegisterReferenceStyleProfileHandlers(referenceStyleProfileService)

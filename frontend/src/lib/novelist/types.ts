@@ -780,6 +780,90 @@ export namespace reader {
 }
 
 export namespace reference {
+  export interface ListAdvancedMaterialsInput {
+    anchor_id: number
+    family?: string | null
+    layer?: string | null
+    review_state?: string | null
+    include_superseded?: boolean
+    page_request?: storage.PageRequest | null
+  }
+
+  export interface GetAdvancedMaterialDetailInput {
+    anchor_id: number
+    material_id: string
+  }
+
+  export interface ReviewAdvancedMaterialInput {
+    anchor_id: number
+    material_id: string
+    decision: string
+    note?: string | null
+  }
+
+  export interface AdvancedMaterialSummary {
+    material_id: string
+    anchor_id: number
+    layer: string
+    family: string
+    feature_key: string
+    value_text?: string | null
+    confidence: number
+    review_state: string
+    validity_state: string
+    created_at: string
+  }
+
+  export interface AdvancedMaterialEvidence {
+    node_id: string
+    material_id?: string | null
+    start_offset: number
+    end_offset: number
+    text?: string | null
+  }
+
+  export interface AdvancedMaterialDetail {
+    material_id: string
+    anchor_id: number
+    layer: string
+    family: string
+    feature_key: string
+    source_ref: string
+    value_text?: string | null
+    value_json?: string | null
+    rationale_json?: string | null
+    boundary_json?: string | null
+    transfer_template?: string | null
+    transfer_slots_json?: string | null
+    confidence: number
+    review_state: string
+    validity_state: string
+    extractor_version: string
+    evidence: AdvancedMaterialEvidence[]
+    created_at: string
+    updated_at: string
+  }
+
+  export interface AdvancedMaterialReviewResult {
+    material_id: string
+    review_state: string
+    reviewed_at: string
+  }
+
+  export interface StartAdvancedMaterialAnalysisInput {
+    anchor_id: number
+    run_id?: string | null
+  }
+
+  export interface AdvancedMaterialPipelineResult {
+    run_id: string
+    observation_accepted: number
+    observation_rejected: number
+    specimen_accepted: number
+    specimen_rejected: number
+    strategy_groups: number
+  }
+
  export interface CorpusGovernanceMember {
  anchor_id: number
  title: string
@@ -2093,6 +2177,17 @@ export namespace storage {
 
   export interface PageResult_reference_CorpusCandidate_ {
     items: reference.CorpusCandidate[]
+    total: number
+    page: number
+    size: number
+    total_pages: number
+    next_cursor?: string | null
+    has_more?: boolean
+    total_estimate?: number | null
+  }
+
+  export interface PageResult_reference_AdvancedMaterialSummary_ {
+    items: reference.AdvancedMaterialSummary[]
     total: number
     page: number
     size: number

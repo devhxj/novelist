@@ -135,8 +135,8 @@ public sealed class BridgeHandlerRegistrationTests
     [Fact]
     public void CompatibilityAppMethodListHasExpectedCoverage()
     {
-        // I6 三件套后为 191；退役早期分析管线桥暴露 15 个方法后为 176。
-        Assert.Equal(176, BridgeCompatibilityAppMethods.MethodNames.Count);
+        // I6 三件套后为 191；退役早期分析管线桥暴露 15 个方法后为 176；高级写作素材三件套 +3、生产触发 +1 后为 180。
+        Assert.Equal(180, BridgeCompatibilityAppMethods.MethodNames.Count);
         Assert.Contains("GetChapterCorpusCoverage", BridgeCompatibilityAppMethods.MethodNames);
         Assert.Contains("AdvanceChapterPlan", BridgeCompatibilityAppMethods.MethodNames);
         Assert.Contains("ExportReferenceCorpusPackage", BridgeCompatibilityAppMethods.MethodNames);
@@ -167,6 +167,9 @@ public sealed class BridgeHandlerRegistrationTests
         Assert.Contains("GetReferenceMaterialTagReviewQueue", BridgeCompatibilityAppMethods.MethodNames);
         Assert.Contains("GetReferenceSourceSegmentDetail", BridgeCompatibilityAppMethods.MethodNames);
         Assert.Contains("SearchReferenceCorpusCandidates", BridgeCompatibilityAppMethods.MethodNames);
+        Assert.Contains("ListReferenceAdvancedMaterials", BridgeCompatibilityAppMethods.MethodNames);
+        Assert.Contains("GetReferenceAdvancedMaterialDetail", BridgeCompatibilityAppMethods.MethodNames);
+        Assert.Contains("ReviewReferenceAdvancedMaterial", BridgeCompatibilityAppMethods.MethodNames);
         Assert.Contains("BackfillReferenceCorpusTechniqueVectorIndex", BridgeCompatibilityAppMethods.MethodNames);
         Assert.Contains("GetReferenceCorpusCascadeImpact", BridgeCompatibilityAppMethods.MethodNames);
  Assert.Contains("GetReferenceCorpusGovernance", BridgeCompatibilityAppMethods.MethodNames);

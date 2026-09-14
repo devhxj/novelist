@@ -734,6 +734,7 @@ export function installConfigurableAppMockBridge(options = {}) {
     createdReferenceAnchors: [],
     referenceAnchors: options.referenceAnchors ?? defaultReferenceAnchors,
     referenceMaterials: options.referenceMaterials ?? defaultReferenceMaterials,
+    advancedMaterials: options.advancedMaterials ?? defaultAdvancedMaterials(),
     materializationProfiles: {},
     materializationRuns: [],
     referenceBuildStatuses: options.referenceBuildStatuses ?? {},
@@ -1259,6 +1260,17 @@ export function installConfigurableAppMockBridge(options = {}) {
       case 'ListActiveReferenceMaterializationMaterials': return listActiveReferenceMaterializationMaterials(args[0])
       case 'SearchReferenceMaterials': return searchReferenceMaterials(args[0])
       case 'GetReferenceMaterialCoverage': return getReferenceMaterialCoverage(args[0])
+      case 'StartReferenceAdvancedMaterialAnalysis': return {
+        run_id: String(args[0]?.run_id ?? 'mock-advm-run'),
+        observation_accepted: 2,
+        observation_rejected: 0,
+        specimen_accepted: 1,
+        specimen_rejected: 0,
+        strategy_groups: 1,
+      }
+      case 'ListReferenceAdvancedMaterials': return listReferenceAdvancedMaterials(args[0])
+      case 'GetReferenceAdvancedMaterialDetail': return getReferenceAdvancedMaterialDetail(args[0])
+      case 'ReviewReferenceAdvancedMaterial': return reviewReferenceAdvancedMaterial(args[0])
       case 'GetReferenceMaterialTagReviewQueue': return getReferenceMaterialTagReviewQueue(args[0])
       case 'GetReferenceMaterialDetail': return getReferenceMaterialDetail(args[0])
       case 'GetReferenceSourceSegmentDetail': return getReferenceSourceSegmentDetail(args[0])
@@ -4132,6 +4144,110 @@ function referenceAnchors() {
       vector_count: 1,
       last_error: '',
       updated_at: now,
+    }
+  }
+
+  function defaultAdvancedMaterials() {
+    const createdAt = '2026-09-14T00:00:00Z'
+    return [
+      {
+        material_id: 'mock-adv-craft-001', anchor_id: 101, layer: 'specimen', family: 'craft',
+        feature_key: 'information_delivery', source_ref: 'mock-obs-1',
+        value_text: '推门先用动作，再让环境回响，压低信息投放速度。',
+        value_json: '{"trigger_context":"人物入场"}',
+        rationale_json: '{"why_it_works":["先动作后环境更贴近视角"],"effect_on_reader":"读者先感到压迫"}',
+        boundary_json: '{"world_context_dependencies":["雨夜"],"failure_modes":["环境描写过长"],"anti_patterns":["堆砌感官"]}',
+        transfer_template: '主体[动作]后接[环境回响]', transfer_slots_json: '{"action":"推门"}',
+        confidence: 0.82, review_state: 'unverified', validity_state: 'active',
+        evidence: [{ node_id: 'mock-node-rain-001', start_offset: 0, end_offset: 12, text: '他推门而入，屋里安静。' }],
+        created_at: createdAt,
+      },
+      {
+        material_id: 'mock-adv-world-001', anchor_id: 101, layer: 'observation', family: 'world',
+        feature_key: 'world_introduction', source_ref: 'mock-obs-2',
+        value_text: '设定在动作里顺带交代。',
+        value_json: '{"explanation":"不插入说明段"}', rationale_json: null, boundary_json: null,
+        transfer_template: null, transfer_slots_json: null,
+        confidence: 0.7, review_state: 'confirmed', validity_state: 'active',
+        evidence: [{ node_id: 'mock-node-rain-001', start_offset: 0, end_offset: 12, text: '他推门而入，屋里安静。' }],
+        created_at: createdAt,
+      },
+    ]
+  }
+
+  function toAdvancedMaterialSummary(item) {
+    return {
+      material_id: item.material_id,
+      anchor_id: item.anchor_id,
+      layer: item.layer,
+      family: item.family,
+      feature_key: item.feature_key,
+      value_text: item.value_text ?? null,
+      confidence: item.confidence,
+      review_state: item.review_state,
+      validity_state: item.validity_state,
+      created_at: item.created_at,
+    }
+  }
+
+  function listReferenceAdvancedMaterials(input = {}) {
+    const source = Array.isArray(state.advancedMaterials) ? state.advancedMaterials : []
+    const anchorId = Number(input.anchor_id ?? 0)
+    const family = input.family ? String(input.family) : null
+    const layer = input.layer ? String(input.layer) : null
+    const reviewState = input.review_state ? String(input.review_state) : null
+    const pageSize = Math.max(1, Number(input?.page_request?.page_size ?? 10))
+    const filtered = source.filter((item) => {
+      if (anchorId > 0 && Number(item.anchor_id) !== anchorId) return false
+      if (family && item.family !== family) return false
+      if (layer && item.layer !== layer) return false
+      if (reviewState && item.review_state !== reviewState) return false
+      if (input.include_superseded !== true && item.validity_state === 'superseded') return false
+      return true
+    })
+    const cursorOffset = Number(input?.page_request?.cursor ?? 0) || 0
+    const slice = filtered.slice(cursorOffset, cursorOffset + pageSize)
+    const nextOffset = cursorOffset + slice.length
+    const hasMore = nextOffset < filtered.length
+    return {
+      items: slice.map(toAdvancedMaterialSummary),
+      total: filtered.length,
+      page: Math.floor(cursorOffset / pageSize) + 1,
+      size: pageSize,
+      total_pages: Math.max(1, Math.ceil(filtered.length / pageSize)),
+      next_cursor: hasMore ? String(nextOffset) : null,
+      has_more: hasMore,
+      total_estimate: null,
+    }
+  }
+
+  function getReferenceAdvancedMaterialDetail(input = {}) {
+    const source = Array.isArray(state.advancedMaterials) ? state.advancedMaterials : []
+    const item = source.find((entry) => entry.material_id === String(input.material_id ?? ''))
+    if (!item) return null
+    return {
+      ...toAdvancedMaterialSummary(item),
+      source_ref: item.source_ref ?? '',
+      value_json: item.value_json ?? null,
+      rationale_json: item.rationale_json ?? null,
+      boundary_json: item.boundary_json ?? null,
+      transfer_template: item.transfer_template ?? null,
+      transfer_slots_json: item.transfer_slots_json ?? null,
+      extractor_version: 'mock-v1',
+      evidence: Array.isArray(item.evidence) ? item.evidence : [],
+      updated_at: item.created_at,
+    }
+  }
+
+  function reviewReferenceAdvancedMaterial(input = {}) {
+    const source = Array.isArray(state.advancedMaterials) ? state.advancedMaterials : []
+    const item = source.find((entry) => entry.material_id === String(input.material_id ?? ''))
+    const reviewState = input.decision === 'confirm' ? 'confirmed' : 'rejected'
+    if (item) item.review_state = reviewState
+    return {
+      material_id: String(input.material_id ?? ''),
+      review_state: reviewState,
+      reviewed_at: '2026-09-14T00:00:00Z',
     }
   }
 

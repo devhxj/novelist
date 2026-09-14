@@ -63,6 +63,8 @@
 
 **D1 结论**：五类命名为 `world / style / craft / technique / structure`，`craft` 与 `technique` 分列。词表冻结后，分析器、复核 UI、检索过滤、覆盖度地图均按它实现。
 
+**feature_key 词表（已冻结，2026-09-14）**：代码真值在 `src/Novelist.Contracts/App/ReferenceAdvancedMaterialVocabularies.cs`。`world`（`world_introduction` / `world_pressure` / `world_consistency`）、`craft`（`information_delivery` / `viewpoint_control` / `scene_progression` / `emotion_externalization`）、`structure`（`hook_type` / `payoff_type` / `pacing_shape` / `transition_mode`）为新增键；`technique` 复用材料化既有技法词表（单一键 `technique_kind`）；`style` 由 `ReferenceStyleTaxonomy` 直接派生（26 键）。
+
 **文风不重造**：`style` 类直接复用已建成的 `ReferenceStyleProfile`（含确定性基线 + LLM 分析 + 证据 span + 比较/归档/恢复，Bridge 已通）。高级素材层不新建文风表，只把风格画像纳入统一外壳与统一检索。
 
 ### 2.3 统一外壳新表（D2 已定）
@@ -202,6 +204,9 @@ need
   - `GetReferenceAdvancedMaterialDetail`(material_id) → 明细，含 `evidence_refs` 解析后的证据原文片段与偏移；
   - `ReviewReferenceAdvancedMaterial`(material_id, decision, note?) → 写 `review_state`；
   - 文风：继续复用既有 `GetReferenceStyleProfile(s)` / `BuildReferenceStyleProfile`，不重复造。
+  - 生产触发：两条路径，共用同一 `IReferenceAdvancedMaterialPipelineService`，不新建调度：
+    - ① 显式按需：`StartReferenceAdvancedMaterialAnalysis`(anchor_id, run_id?) —— 单本书一趟跑完观测→机理→策略（LLM 长任务，前端按长超时调用）。
+    - ② **并入既有语料分析调度**：`ReferenceCorpusAnalysisWorker` 在 `feature_analysis` 作业完成时顺带跑一趟管线；幂等（该书已有高级素材则跳过），失败静默、不影响分析作业本身。
 - 新增方法须同步：`BridgeCompatibilityAppMethods.MethodNames`、`frontend/src/lib/novelist/api.ts`、`types.ts`、bridge 注册测试（见 `overview-architecture-map.md` Bridge Model）。
 - **前端入口**：并入现有语料区四视图，不新增顶级入口。建议在"总览"展示高级素材的 N/M/K（沿用 refocus §六"成长可感知"）+ 在"浏览"增 family/layer 筛选与复核；**不新增专家控制面**。
 - 写作侧：注入用量卡（`CorpusUsageCard`）扩展为同时展示 L2 条目与出处，保持"用后可见"。
@@ -240,7 +245,7 @@ need
 ### 数据与契约
 
 - **T1 统一外壳表**：新增 `reference_advanced_materials`（第 2.3 节字段）+ 索引（`anchor_id` / `family` / `layer` / `review_state`）；随 `ReferenceCorpusSchemaProvisioner` 走 additive migration，旧表不动。
-- **T2 family 词表与 schema**：为 `world / craft / technique / structure` 新增 `ReferenceCorpusFeatureSchemas/*.json` 并在 `ReferenceCorpusFeatureFamilySchemas.cs` 注册；`technique` 复用既有 `AllowedTechniques`；`style` 挂 `ReferenceStyleTaxonomy`。**五类词表冻结**。
+- **T2 family 词表与 feature schema**：feature_key 词表冻结于 `src/Novelist.Contracts/App/ReferenceAdvancedMaterialVocabularies.cs`（`world/craft/structure` 新键、`technique` 复用既有技法词表、`style` 由 `ReferenceStyleTaxonomy` 派生）。实现改用 C# 词表而非 JSON schema——统一外壳的记录形状（rationale/boundary/transfer）与既有 node-observation 校验器不同，硬塞会破坏其启动期不变量（"每个 family 必须有 schema + node_type 强匹配"）。**五类词表 + 各 family feature_key 冻结**。
 - **T3 契约与 Bridge 方法**：新增 L2 DTO（`src/Novelist.Contracts/App/`）；新增 `ListReferenceAdvancedMaterials` / `GetReferenceAdvancedMaterialDetail` / `ReviewReferenceAdvancedMaterial`；同步 `BridgeCompatibilityAppMethods.MethodNames`、`api.ts`、`types.ts`、注册测试。
 
 ### 生产管线（复用 `ReferenceCorpusAnalysis*`，不新建调度）
@@ -248,7 +253,7 @@ need
 - **T4 事实观测抽取**：按 family 分趟抽取 `observation`，强制 evidence span；未知词丢弃 + 漂移告警。
 - **T5 机理归纳**：由 observation 归纳 `specimen`，产出 `rationale` / `boundary` / `transfer`；`boundary` 三字段非空为硬门。
 - **T6 书级策略聚合**：由 ①② 归纳 `strategy`，**直写新表**，逐条挂 evidence。
-- **T7 投影与证据校验**：旧表 → 新表投影（沿用 `SqliteReferenceMaterializationLibraryProjection` 范式）；`evidence_refs` 解析失败即整条作废，计入失败率。
+- **T7 投影与证据校验**：旧表 → 新表投影（`SqliteReferenceAdvancedMaterialProjectionService`）。family 映射：`syntax/rhythm/sensory/emotion/rhetoric/narrative/pov/action/character → craft`，`commercial/scene/trope → structure`，技法标本 `→ technique`，`style` 由风格画像提供。旧行保留原 `feature_key` 并标 `extractor_version='legacy-projection-v1'`（冻结词表只约束新管线产出）。证据解析失败即整条作废并计入 `InvalidEvidenceCount`。
 
 ### 复核与消费
 

@@ -431,6 +431,46 @@ internal static class ReferenceCorpusSchemaProvisioner
               FOREIGN KEY(anchor_id) REFERENCES reference_anchors(anchor_id) ON DELETE CASCADE
             );
 
+            -- 高级写作素材（L2）统一外壳：三层（observation/specimen/strategy）× 五类
+            -- （world/style/craft/technique/structure），每书一套。
+            -- strategy 层直写本表；observation/specimen 由生产侧明细表
+            -- （reference_feature_observations / reference_technique_specimens）随代次投影进来。
+            -- 对外读取、复核与写作注入一律只读本表；evidence_refs_json 必须能解析到真实 L1 证据。
+            CREATE TABLE IF NOT EXISTS reference_advanced_materials (
+              material_id TEXT PRIMARY KEY,
+              anchor_id INTEGER NOT NULL,
+              layer TEXT NOT NULL,
+              family TEXT NOT NULL,
+              feature_key TEXT NOT NULL,
+              source_ref TEXT NOT NULL DEFAULT '',
+              value_text TEXT,
+              value_json TEXT,
+              rationale_json TEXT,
+              boundary_json TEXT,
+              transfer_template TEXT,
+              transfer_slots_json TEXT,
+              evidence_refs_json TEXT NOT NULL,
+              confidence REAL NOT NULL,
+              review_state TEXT NOT NULL DEFAULT 'unverified',
+              validity_state TEXT NOT NULL DEFAULT 'active',
+              superseded_by_run_id TEXT,
+              analysis_run_id TEXT,
+              extractor_version TEXT NOT NULL,
+              created_at TEXT NOT NULL,
+              updated_at TEXT NOT NULL,
+              FOREIGN KEY(anchor_id) REFERENCES reference_anchors(anchor_id) ON DELETE CASCADE,
+              FOREIGN KEY(analysis_run_id) REFERENCES reference_analysis_runs(run_id) ON DELETE SET NULL
+            );
+
+            CREATE UNIQUE INDEX IF NOT EXISTS ux_reference_advanced_materials_source
+              ON reference_advanced_materials(anchor_id, layer, family, feature_key, source_ref);
+
+            CREATE INDEX IF NOT EXISTS idx_reference_advanced_materials_anchor_list
+              ON reference_advanced_materials(anchor_id, validity_state, family, layer, created_at, material_id);
+
+            CREATE INDEX IF NOT EXISTS idx_reference_advanced_materials_review
+              ON reference_advanced_materials(anchor_id, review_state, validity_state);
+
             CREATE TABLE IF NOT EXISTS reference_corpus_libraries (
               library_id TEXT PRIMARY KEY,
               scope TEXT NOT NULL,
