@@ -26,6 +26,7 @@ Phases 0-16 have implementation and regression evidence at their recorded thin-s
 - [Boundaries and pipeline decisions](reference-anchor-implementation/decisions-boundaries-and-pipeline.md)
 - [Blueprint quality decisions](reference-anchor-implementation/decisions-blueprint-quality.md)
 - [Materials and audit decisions](reference-anchor-implementation/decisions-materials-and-audit.md)
+- [Advanced writing materials plan](reference-anchor-implementation/advanced-materials-plan.md): per-book advanced materials (observation/specimen/strategy across world/style/craft/technique/structure), unified into the `reference_advanced_materials` shell, evidence-linked, review-gated, consumed by automatic L1+L2 retrieval at prose generation time.
 - [Database schema](reference-anchor-implementation/schema-database.md)
 - [Bridge API surface](reference-anchor-implementation/schema-bridge-api.md)
 - [Desktop and agent integration](reference-anchor-implementation/schema-desktop-and-agent.md)
