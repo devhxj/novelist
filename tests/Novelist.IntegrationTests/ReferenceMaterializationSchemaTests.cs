@@ -33,7 +33,7 @@ public sealed class ReferenceMaterializationSchemaTests : IDisposable
     }
 
     [Fact]
-    public async Task MaterializationRunSchemaRejectsUnsupportedBatchSizesAndDuplicateGenerationKeys()
+    public async Task MaterializationRunSchemaAcceptsAdjustableBatchSizesAndRejectsDuplicateGenerationKeys()
     {
         var options = CreateOptions();
         var anchor = await CreateAnchorAsync(options);
@@ -43,9 +43,9 @@ public sealed class ReferenceMaterializationSchemaTests : IDisposable
             CancellationToken.None);
 
         await InsertRunAsync(options, anchor.AnchorId, profile.SplitProfileId, "run-1", "generation-1", 1);
-        var invalidBatch = await Assert.ThrowsAsync<SqliteException>(() =>
-            InsertRunAsync(options, anchor.AnchorId, profile.SplitProfileId, "run-invalid", "generation-invalid", 7).AsTask());
-        Assert.Equal(19, invalidBatch.SqliteErrorCode);
+        // 批大小已是可调参数：schema 上的 (1, 5, 10) 白名单已移除，
+        // 7 这类值现在可以直接写入（范围由服务层守住，不靠 CHECK）。
+        await InsertRunAsync(options, anchor.AnchorId, profile.SplitProfileId, "run-custom", "generation-custom", 7);
 
         var duplicateGeneration = await Assert.ThrowsAsync<SqliteException>(() =>
             InsertRunAsync(options, anchor.AnchorId, profile.SplitProfileId, "run-duplicate", "generation-1", 1).AsTask());

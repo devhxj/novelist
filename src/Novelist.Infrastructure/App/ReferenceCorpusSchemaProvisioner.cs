@@ -127,7 +127,7 @@ internal static class ReferenceCorpusSchemaProvisioner
               embedding_model_id TEXT NOT NULL,
               embedding_dimensions INTEGER NOT NULL CHECK(embedding_dimensions > 0),
               status TEXT NOT NULL,
-              chapter_batch_size INTEGER NOT NULL CHECK(chapter_batch_size IN (1, 5, 10)),
+              chapter_batch_size INTEGER NOT NULL,
               total_chapters INTEGER NOT NULL DEFAULT 0 CHECK(total_chapters >= 0),
               processed_chapters INTEGER NOT NULL DEFAULT 0 CHECK(processed_chapters >= 0),
               total_chapter_batches INTEGER NOT NULL DEFAULT 0 CHECK(total_chapter_batches >= 0),
@@ -894,7 +894,7 @@ await command.ExecuteNonQueryAsync(cancellationToken);
               embedding_model_id TEXT NOT NULL,
               embedding_dimensions INTEGER NOT NULL CHECK(embedding_dimensions > 0),
               status TEXT NOT NULL,
-              chapter_batch_size INTEGER NOT NULL CHECK(chapter_batch_size IN (1, 5, 10)),
+              chapter_batch_size INTEGER NOT NULL,
               total_chapters INTEGER NOT NULL DEFAULT 0 CHECK(total_chapters >= 0),
               processed_chapters INTEGER NOT NULL DEFAULT 0 CHECK(processed_chapters >= 0),
               total_chapter_batches INTEGER NOT NULL DEFAULT 0 CHECK(total_chapter_batches >= 0),
@@ -953,10 +953,12 @@ await command.ExecuteNonQueryAsync(cancellationToken);
  createSql = await read.ExecuteScalarAsync(cancellationToken) as string;
  }
 
+ // 命中任何"批大小仍带 CHECK"的旧形状：(5, 10) 与 (1, 5, 10) 都要重建到无约束版本。
+ // 批大小已是可调参数（滑块可选 1–5），旧白名单会拒绝 2/3/4，故这里一步到位去掉。
  if (createSql is null ||
- !createSql.Contains("chapter_batch_size IN (5, 10)", StringComparison.Ordinal))
+     !createSql.Contains("chapter_batch_size INTEGER NOT NULL CHECK", StringComparison.Ordinal))
  {
- return;
+     return;
  }
 
  var suffix = $"{DateTimeOffset.UtcNow:yyyyMMddHHmmss}_{Guid.NewGuid():N}";
@@ -999,7 +1001,7 @@ await command.ExecuteNonQueryAsync(cancellationToken);
               embedding_model_id TEXT NOT NULL,
               embedding_dimensions INTEGER NOT NULL CHECK(embedding_dimensions > 0),
               status TEXT NOT NULL,
-              chapter_batch_size INTEGER NOT NULL CHECK(chapter_batch_size IN (1, 5, 10)),
+              chapter_batch_size INTEGER NOT NULL,
               total_chapters INTEGER NOT NULL DEFAULT 0 CHECK(total_chapters >= 0),
               processed_chapters INTEGER NOT NULL DEFAULT 0 CHECK(processed_chapters >= 0),
               total_chapter_batches INTEGER NOT NULL DEFAULT 0 CHECK(total_chapter_batches >= 0),
@@ -1054,6 +1056,132 @@ await command.ExecuteNonQueryAsync(cancellationToken);
  "runs-rebuild",
  "chapter_batch_size CHECK relaxed from (5, 10) to (1, 5, 10) for chapter-wise processing; table renamed copy-first, rows carried over unchanged, and the table recreated.",
  cancellationToken);
+ }
+
+ // v8 批大小可调：runs 表的 chapter_batch_size 去掉 CHECK。
+ //
+ // 该约束是批处理时代的遗留白名单（只允许 1/5/10）。批大小现在是可调参数，
+ // 白名单让"任意选择批大小"无法实现——取 4 会直接 SQLite Error 19。
+ // CHECK 属于表定义，ADD COLUMN 改不了——copy-first：旧表改名备份、
+ // 原样回填全部行、按新形状重建并写 manifest。行数据逐字保留，不引入默认值。
+ private static async ValueTask DropMaterializationBatchSizeConstraintAsync(
+ SqliteConnection connection,
+ CancellationToken cancellationToken)
+ {
+ string? createSql = null;
+ await using (var read = connection.CreateCommand())
+ {
+ read.CommandText = "SELECT sql FROM sqlite_master WHERE type='table' AND name='reference_materialization_runs';";
+ createSql = await read.ExecuteScalarAsync(cancellationToken) as string;
+ }
+
+ if (createSql is null ||
+ !createSql.Contains("chapter_batch_size IN (1, 5, 10)", StringComparison.Ordinal))
+ {
+ return;
+ }
+
+ var suffix = $"{DateTimeOffset.UtcNow:yyyyMMddHHmmss}_{Guid.NewGuid():N}";
+ var backupTable = $"reference_materialization_runs_legacy_{suffix}";
+ var foreignKeysEnabled = await ScalarPragmaAsync(connection, "PRAGMA foreign_keys;", cancellationToken);
+ await using (var pragma = connection.CreateCommand())
+ {
+ pragma.CommandText = "PRAGMA foreign_keys=OFF; PRAGMA legacy_alter_table=ON;";
+ await pragma.ExecuteNonQueryAsync(cancellationToken);
+ }
+
+ await using (var rename = connection.CreateCommand())
+ {
+ rename.CommandText = $"ALTER TABLE reference_materialization_runs RENAME TO {backupTable};";
+ await rename.ExecuteNonQueryAsync(cancellationToken);
+ }
+
+ await using (var create = connection.CreateCommand())
+ {
+ create.CommandText = """
+ CREATE TABLE reference_materialization_runs (
+  run_id TEXT PRIMARY KEY,
+  anchor_id INTEGER NOT NULL,
+  split_profile_id TEXT NOT NULL,
+  generation_id TEXT NOT NULL,
+  policy_version TEXT NOT NULL,
+  candidate_version TEXT NOT NULL,
+  qualifier_version TEXT NOT NULL,
+  model_provider TEXT NOT NULL,
+  model_id TEXT NOT NULL,
+  embedding_provider TEXT NOT NULL,
+  embedding_model_id TEXT NOT NULL,
+  embedding_dimensions INTEGER NOT NULL CHECK(embedding_dimensions > 0),
+  status TEXT NOT NULL,
+  chapter_batch_size INTEGER NOT NULL,
+  total_chapters INTEGER NOT NULL DEFAULT 0 CHECK(total_chapters >= 0),
+  processed_chapters INTEGER NOT NULL DEFAULT 0 CHECK(processed_chapters >= 0),
+  total_chapter_batches INTEGER NOT NULL DEFAULT 0 CHECK(total_chapter_batches >= 0),
+  completed_chapter_batches INTEGER NOT NULL DEFAULT 0 CHECK(completed_chapter_batches >= 0),
+  current_batch_index INTEGER,
+  current_batch_start_chapter INTEGER,
+  current_batch_end_chapter INTEGER,
+  candidate_count INTEGER NOT NULL DEFAULT 0 CHECK(candidate_count >= 0),
+  accepted_count INTEGER NOT NULL DEFAULT 0 CHECK(accepted_count >= 0),
+  rejected_count INTEGER NOT NULL DEFAULT 0 CHECK(rejected_count >= 0),
+  review_count INTEGER NOT NULL DEFAULT 0 CHECK(review_count >= 0),
+  vector_count INTEGER NOT NULL DEFAULT 0 CHECK(vector_count >= 0),
+  tokens_spent INTEGER NOT NULL DEFAULT 0 CHECK(tokens_spent >= 0),
+  last_error_code TEXT,
+  last_error_message TEXT,
+  started_at TEXT NOT NULL,
+  completed_at TEXT,
+  activated_at TEXT,
+  FOREIGN KEY(anchor_id) REFERENCES reference_anchors(anchor_id) ON DELETE CASCADE,
+  FOREIGN KEY(split_profile_id) REFERENCES reference_chapter_split_profiles(split_profile_id) ON DELETE RESTRICT
+ );
+ """;
+ await create.ExecuteNonQueryAsync(cancellationToken);
+ }
+
+ // 回填在外键恢复前执行（同 v6/v7 重建：FK 开启时 prepare 阶段解析父表会误报缺失）。
+ await using (var copy = connection.CreateCommand())
+ {
+ copy.CommandText = $"""
+ INSERT INTO reference_materialization_runs
+ SELECT run_id, anchor_id, split_profile_id, generation_id, policy_version, candidate_version,
+   qualifier_version, model_provider, model_id, embedding_provider, embedding_model_id,
+   embedding_dimensions, status, chapter_batch_size, total_chapters, processed_chapters,
+   total_chapter_batches, completed_chapter_batches, current_batch_index,
+   current_batch_start_chapter, current_batch_end_chapter, candidate_count, accepted_count,
+   rejected_count, review_count, vector_count, tokens_spent, last_error_code,
+   last_error_message, started_at, completed_at, activated_at
+ FROM {backupTable};
+ """;
+ await copy.ExecuteNonQueryAsync(cancellationToken);
+ }
+
+ // 重建表会连同索引一起消失：必须按新表把两个索引补回来，
+ // 否则 generation 唯一约束与 anchor/status 查询索引都会丢。
+ await using (var indexes = connection.CreateCommand())
+ {
+  indexes.CommandText = """
+   CREATE UNIQUE INDEX IF NOT EXISTS ux_reference_materialization_runs_generation
+     ON reference_materialization_runs(generation_id);
+
+   CREATE INDEX IF NOT EXISTS idx_reference_materialization_runs_anchor_status
+     ON reference_materialization_runs(anchor_id, status, started_at DESC);
+   """;
+  await indexes.ExecuteNonQueryAsync(cancellationToken);
+ }
+
+ await using (var restore = connection.CreateCommand())
+ {
+  restore.CommandText = $"PRAGMA legacy_alter_table=OFF; PRAGMA foreign_keys={(foreignKeysEnabled != 0 ? "ON" : "OFF")};";
+  await restore.ExecuteNonQueryAsync(cancellationToken);
+ }
+
+ await WriteRebuildManifestAsync(
+  connection,
+  backupTable,
+  "runs-rebuild",
+  "chapter_batch_size CHECK dropped: batch size is now an adjustable parameter, and the legacy (1, 5, 10) whitelist rejected every other value.",
+  cancellationToken);
  }
 
  // pre-v6 归档形状的 reference_materials（metadata_json 承载，无 material_type/tag 列）无法用

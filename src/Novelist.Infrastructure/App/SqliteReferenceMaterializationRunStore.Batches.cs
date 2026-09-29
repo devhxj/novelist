@@ -1,3 +1,4 @@
+using System.Globalization;
 using Microsoft.Data.Sqlite;
 using Novelist.Contracts.App;
 using Novelist.Core.App;
@@ -6,6 +7,10 @@ namespace Novelist.Infrastructure.App;
 
 internal sealed partial class SqliteReferenceMaterializationRunStore
 {
+    // 批大小已成为可调参数（schema 上的 (1, 5, 10) 白名单已移除）。
+    // 界面滑块给到 5；这里留出余量到 10 以兼容历史值（旧库回填过 10）。
+    private const int MaxChapterBatchSize = 10;
+
     public async ValueTask<string?> ReadNextRunnableRunIdAsync(CancellationToken cancellationToken)
     {
         var databasePath = await EnsureSchemaAsync(cancellationToken);
@@ -265,6 +270,180 @@ internal sealed partial class SqliteReferenceMaterializationRunStore
 
         await DeleteLeaseAsync(connection, transaction, normalizedRunId, claim.LeaseToken, cancellationToken);
         await transaction.CommitAsync(cancellationToken);
+    }
+
+    // 章级失败隔离：只挂这一章，不动同批其余章，也不终结整个 run。
+    // 并发下若沿用 FailCurrentBatchAsync，一次单章故障会把同批其余章节一并
+    // 标记 failed 并让整个 run 转 Failed——故障被放大成整批报废，而这正是
+    // 当年废除批次、退回逐章处理的理由。
+    // 这里刻意不删租约、不改 run 状态：批内其余章继续跑，run 的终局交给
+    // PromoteIfReadyAsync 依据各章终态统一裁决。
+    public async ValueTask FailChapterAsync(
+        ReferenceMaterializationBatchClaim claim,
+        int chapterIndex,
+        string errorCode,
+        string errorMessage,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(claim);
+        var normalizedRunId = NormalizeRunId(claim.RunId);
+        if (string.IsNullOrWhiteSpace(errorCode) || errorCode.Length > 128 ||
+            string.IsNullOrWhiteSpace(errorMessage) || errorMessage.Length > 1_200)
+        {
+            throw new ArgumentException("Materialization failure details are invalid.", nameof(errorCode));
+        }
+
+        var databasePath = await EnsureSchemaAsync(cancellationToken);
+        await using var connection = await OpenConnectionAsync(databasePath, cancellationToken);
+        await using var transaction = (SqliteTransaction)await connection.BeginTransactionAsync(cancellationToken);
+        if (!await IsClaimLeaseOwnedAsync(connection, transaction, claim, cancellationToken))
+        {
+            await transaction.RollbackAsync(cancellationToken);
+            return;
+        }
+
+        await using (var chapter = connection.CreateCommand())
+        {
+            chapter.Transaction = transaction;
+            chapter.CommandText = """
+                UPDATE reference_materialization_chapter_progress
+                SET status = $failed,
+                    current_stage = $failed,
+                    last_error_code = $error_code,
+                    last_error_message = $error_message,
+                    row_version = row_version + 1
+                WHERE run_id = $run_id
+                  AND chapter_index = $chapter_index
+                  AND status <> $completed;
+                """;
+            chapter.Parameters.AddWithValue("$failed", ReferenceMaterializationChapterStates.Failed);
+            chapter.Parameters.AddWithValue("$error_code", errorCode);
+            chapter.Parameters.AddWithValue("$error_message", errorMessage);
+            chapter.Parameters.AddWithValue("$run_id", normalizedRunId);
+            chapter.Parameters.AddWithValue("$chapter_index", chapterIndex);
+            chapter.Parameters.AddWithValue("$completed", ReferenceMaterializationChapterStates.Completed);
+            await chapter.ExecuteNonQueryAsync(cancellationToken);
+        }
+
+        await transaction.CommitAsync(cancellationToken);
+    }
+
+    /// <summary>
+    /// 重新分组尚未开始的章节。
+    ///
+    /// 批大小在建 run 时冻结进 chapter_progress.batch_index，于是 M1 之前创建的
+    /// run（值为 1）永远跑不了并发——只剩"重跑整本"或"一直串行"两条路。
+    /// 这里只重排 status = pending 的章节：已完成的保留原批号，因此无需重跑任何一章。
+    ///
+    /// 新批号从当前最大批号 +1 起算，避免与已完成章节的批号撞车。
+    /// 批推进（FindFirstIncompleteBatchIndexAsync）是按数据查第一个有未完成章节的批，
+    /// 不依赖批号连续，所以重排后推进依然正确。
+    /// </summary>
+    public async ValueTask<ReferenceMaterializationRebatchResult> RebatchPendingChaptersAsync(
+        string runId,
+        int chapterBatchSize,
+        CancellationToken cancellationToken)
+    {
+        var normalizedRunId = NormalizeRunId(runId);
+        // 批大小已是可调参数：schema 上的 (1, 5, 10) 白名单已移除，
+        // 这里守住"必须为正、且不能大到把一批撑成整本书"的边界即可。
+        // 上界留到 10 以兼容历史值（旧库回填过 10）。
+        if (chapterBatchSize < ReferenceMaterializationBatchSizes.ChapterWise || chapterBatchSize > MaxChapterBatchSize)
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(chapterBatchSize),
+                $"Chapter batch size must be between {ReferenceMaterializationBatchSizes.ChapterWise} and {MaxChapterBatchSize}.");
+        }
+
+        var databasePath = await EnsureSchemaAsync(cancellationToken);
+        await using var connection = await OpenConnectionAsync(databasePath, cancellationToken);
+        await using var transaction = (SqliteTransaction)await connection.BeginTransactionAsync(cancellationToken);
+        var run = await ReadBatchRunAsync(connection, transaction, normalizedRunId, cancellationToken)
+            ?? throw new ArgumentException("Materialization run does not exist.", nameof(runId));
+        if (run.Status != ReferenceMaterializationRunStates.Running &&
+            run.Status != ReferenceMaterializationRunStates.Queued)
+        {
+            await transaction.RollbackAsync(cancellationToken);
+            return new ReferenceMaterializationRebatchResult(false, 0, 0);
+        }
+
+        var pending = new List<int>();
+        await using (var read = connection.CreateCommand())
+        {
+            read.Transaction = transaction;
+            read.CommandText = """
+                SELECT chapter_index
+                FROM reference_materialization_chapter_progress
+                WHERE run_id = $run_id AND status = $pending
+                ORDER BY chapter_index;
+                """;
+            read.Parameters.AddWithValue("$run_id", normalizedRunId);
+            read.Parameters.AddWithValue("$pending", ReferenceMaterializationChapterStates.Pending);
+            await using var reader = await read.ExecuteReaderAsync(cancellationToken);
+            while (await reader.ReadAsync(cancellationToken))
+            {
+                pending.Add(reader.GetInt32(0));
+            }
+        }
+
+        if (pending.Count == 0)
+        {
+            await transaction.RollbackAsync(cancellationToken);
+            return new ReferenceMaterializationRebatchResult(false, 0, 0);
+        }
+
+        int maxBatch;
+        await using (var maxCommand = connection.CreateCommand())
+        {
+            maxCommand.Transaction = transaction;
+            maxCommand.CommandText = """
+                SELECT MAX(batch_index)
+                FROM reference_materialization_chapter_progress
+                WHERE run_id = $run_id;
+                """;
+            maxCommand.Parameters.AddWithValue("$run_id", normalizedRunId);
+            var value = await maxCommand.ExecuteScalarAsync(cancellationToken);
+            maxBatch = value is null || value is DBNull ? -1 : Convert.ToInt32(value, CultureInfo.InvariantCulture);
+        }
+
+        var startBatchIndex = maxBatch + 1;
+        var addedBatches = (pending.Count + chapterBatchSize - 1) / chapterBatchSize;
+        for (var index = 0; index < pending.Count; index++)
+        {
+            await using var update = connection.CreateCommand();
+            update.Transaction = transaction;
+            update.CommandText = """
+                UPDATE reference_materialization_chapter_progress
+                SET batch_index = $batch_index,
+                    row_version = row_version + 1
+                WHERE run_id = $run_id
+                  AND chapter_index = $chapter_index
+                  AND status = $pending;
+                """;
+            update.Parameters.AddWithValue("$batch_index", startBatchIndex + (index / chapterBatchSize));
+            update.Parameters.AddWithValue("$run_id", normalizedRunId);
+            update.Parameters.AddWithValue("$chapter_index", pending[index]);
+            update.Parameters.AddWithValue("$pending", ReferenceMaterializationChapterStates.Pending);
+            await update.ExecuteNonQueryAsync(cancellationToken);
+        }
+
+        await using (var runUpdate = connection.CreateCommand())
+        {
+            runUpdate.Transaction = transaction;
+            runUpdate.CommandText = """
+                UPDATE reference_materialization_runs
+                SET chapter_batch_size = $chapter_batch_size,
+                    total_chapter_batches = $total_chapter_batches
+                WHERE run_id = $run_id;
+                """;
+            runUpdate.Parameters.AddWithValue("$chapter_batch_size", chapterBatchSize);
+            runUpdate.Parameters.AddWithValue("$total_chapter_batches", startBatchIndex + addedBatches);
+            runUpdate.Parameters.AddWithValue("$run_id", normalizedRunId);
+            await runUpdate.ExecuteNonQueryAsync(cancellationToken);
+        }
+
+        await transaction.CommitAsync(cancellationToken);
+        return new ReferenceMaterializationRebatchResult(true, pending.Count, addedBatches);
     }
 
     public async ValueTask CompleteEmptyQualificationAsync(

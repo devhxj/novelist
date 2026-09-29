@@ -172,6 +172,14 @@ public sealed class ReferenceMaterializationBridgeHandlerTests
 
         public Exception? SplitProfileException { get; init; }
 
+        public ValueTask<ReferenceMaterializationRebatchResultPayload> RebatchMaterializationAsync(
+            RebatchReferenceMaterializationPayload input,
+            CancellationToken cancellationToken)
+        {
+            Calls.Add($"rebatch:{input.NovelId}:{input.AnchorId}:{input.ChapterBatchSize}");
+            return ValueTask.FromResult(new ReferenceMaterializationRebatchResultPayload(true, 2, 1));
+        }
+
         public ValueTask<ReferenceChapterSplitProfilePayload> AnalyzeChapterSplitAsync(
             AnalyzeReferenceChapterSplitPayload input,
             CancellationToken cancellationToken)

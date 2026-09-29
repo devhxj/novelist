@@ -39,6 +39,9 @@ type Action = 'analyze' | 'manual-preview' | 'confirm' | 'enqueue' | 'retry' | '
 const numberFormatter = new Intl.NumberFormat('zh-CN')
 
 const PROGRESS_PAGE_SIZE = 30
+// 剩余时间估算的采样窗口：只统计最近这段时间内的章节增量。
+// 太短会被单次长章节带偏，太长则重新纳入空闲期；15 分钟对"每章数十秒"的量级够稳。
+const THROUGHPUT_WINDOW_MS = 15 * 60 * 1000
 const CANDIDATE_PAGE_SIZE = 12
 
 // 心跳阈值：只看总耗时无法分辨"慢"与"卡住"，因此单独记录"最近一次产出变化的时刻"。
@@ -161,6 +164,12 @@ function chapterSplitErrorMessage(error: unknown): string {
   return '自动章节分析失败。请检查当前大模型配置和来源文件后重试。'
 }
 
+// 判定"这一章正在处理"。进度列表分页后，活跃章节不再保证出现在当前页里，
+// 因此判定逻辑被抽出来，供"当前页"与"当前批所在页"两处复用。
+function isInFlightProgressItem(item: reference.MaterializationChapterProgress): boolean {
+  return chapterStateLabel(item.status) === '进行中'
+}
+
 export default function ReferenceCorpusWorkspace({
   novelId,
   refreshKey,
@@ -191,7 +200,65 @@ export default function ReferenceCorpusWorkspace({
   const [progressPage, setProgressPage] = useState(1)
   const [progressTotal, setProgressTotal] = useState(0)
   const [loadingMoreProgress, setLoadingMoreProgress] = useState(false)
+  // 活跃章节单独维护：进度列表现在是分页的，正在处理的那一章通常不在
+  // 作者翻开的那一页里，不能再从 progress 里 find。
+  const [activeProgressItem, setActiveProgressItem] = useState<reference.MaterializationChapterProgress | null>(null)
   const [failedProgressOnly, setFailedProgressOnly] = useState(false)
+ const [rebatchSize, setRebatchSize] = useState<number | null>(null)
+ // 滑块的拖动值：拖动过程中不发请求，点「应用」才真正重排，
+ // 否则每移动一格都会触发一次重新分组。
+ const [rebatchDraft, setRebatchDraft] = useState<number | null>(null)
+ const [rebatchBusy, setRebatchBusy] = useState(false)
+ const [rebatchMessage, setRebatchMessage] = useState<string | null>(null)
+ const currentBatchSize = rebatchDraft ?? rebatchSize ?? run?.chapter_batch_size ?? 1
+
+ // 重新分组：让批大小已冻结的 run 改用新的批大小。只重排"尚未开始"的章节，
+ // 已完成的保留原批号，所以不必重跑——这是旧 run（批大小 1）启用并发的入口。
+ const applyRebatch = useCallback(async (size: number) => {
+  if (!run || !novelId) return
+  setRebatchBusy(true)
+  setRebatchMessage(null)
+  try {
+   const result = await app.RebatchReferenceMaterialization({
+    novel_id: novelId,
+    anchor_id: run.anchor_id,
+    chapter_batch_size: size,
+   })
+   setRebatchMessage(result.applied
+    ? `已重新分组 ${formatCount(result.rebatched_chapters)} 章：新分组从下一批开始生效，已完成的章节不会重跑。`
+    : '没有可重新分组的章节——它们都已开始或已完成。')
+   if (result.applied) {
+    setRebatchSize(size)
+    setStatusTick((tick) => tick + 1)
+   }
+  } catch (err) {
+   showError(err, '重新分组失败。')
+  } finally {
+   setRebatchBusy(false)
+  }
+ }, [app, novelId, run, showError])
+
+ // 制作流程的第三步：材料化完成后生成高级写作素材（事实 / 机理 / 策略）。
+ // 后端 pipeline 早已可用，但「制作」页一直没有入口，流程走不到头——
+ // 作者能看到 1 章节切分、2 材料化，却找不到下一步在哪里。
+ const [advancedGenerating, setAdvancedGenerating] = useState(false)
+ const [advancedMessage, setAdvancedMessage] = useState<string | null>(null)
+
+ const startAdvancedAnalysis = useCallback(async () => {
+  if (!run || advancedGenerating) return
+  setAdvancedGenerating(true)
+  setAdvancedMessage(null)
+  try {
+   const outcome = await app.StartReferenceAdvancedMaterialAnalysis({ anchor_id: run.anchor_id })
+   setAdvancedMessage(
+    `已生成：事实 ${formatCount(outcome.observation_accepted)} 条 · 机理 ${formatCount(outcome.specimen_accepted)} 条 · 策略 ${formatCount(outcome.strategy_groups)} 组。到「浏览」页可复核与查看。`,
+   )
+  } catch (err) {
+   showError(err, '高级素材生成失败。')
+  } finally {
+   setAdvancedGenerating(false)
+  }
+ }, [app, run, advancedGenerating, showError])
   const [candidateRefreshTick, setCandidateRefreshTick] = useState(0)
   const [showModelSettings, setShowModelSettings] = useState(false)
   const requestIdRef = useRef(0)
@@ -217,13 +284,14 @@ export default function ReferenceCorpusWorkspace({
   // 作者不必逐行读取进度表、也不依赖原始英文枚举才能判断系统是否在推进。
   const activeChapter = useMemo(() => {
     if (!run || (run.status !== 'running' && run.status !== 'queued')) return null
-    const inFlight = progress.find((item) => chapterStateLabel(item.status) === '进行中')
-    const chapterIndex = inFlight?.chapter_index ?? run.current_batch_start_chapter ?? null
+    const chapterIndex = activeProgressItem?.chapter_index ?? run.current_batch_start_chapter ?? null
     if (chapterIndex == null) return null
-    return { chapterIndex, item: inFlight ?? null }
-  }, [run, progress])
+    return { chapterIndex, item: activeProgressItem }
+  }, [run, activeProgressItem])
 
   const isActiveRun = !!run && (run.status === 'queued' || run.status === 'running')
+
+  const progressPageCount = Math.max(1, Math.ceil(progressTotal / PROGRESS_PAGE_SIZE))
 
   // 时间基准放在 state 里由定时器推进：渲染期间读 Date.now() 是副作用，
   // 会让同一份数据在两次渲染间漂移（React 纯净渲染规则）。
@@ -239,12 +307,51 @@ export default function ReferenceCorpusWorkspace({
   // 心跳只随 run 的写入一起更新（事件/异步回调里改状态），不在 effect 中同步 setState。
   const heartbeatRef = useRef<{ signature: string; at: number } | null>(null)
   const [heartbeatAt, setHeartbeatAt] = useState<number | null>(null)
+
+  // 吞吐采样（仅供剩余时间估算）：记录 (已处理章数, 时刻) 序列。
+  //
+  // 全程平均会被污染：应用关闭、手动暂停、系统休眠的空闲时间都被算成了
+  // "处理时间"，于是作者看到一个被高估数倍的剩余时间（实测出现过 258 小时）。
+  // 这里只取最近窗口内的增量速率——空闲期不产生章数增长，自然被排除；
+  // 并发度变化也会自动反映在速率里，无需前端知道并发参数。
+  const throughputSamplesRef = useRef<Array<{ processed: number; at: number }>>([])
+  const throughputRunIdRef = useRef<string | null>(null)
+  const [chaptersPerMs, setChaptersPerMs] = useState<number | null>(null)
+
   const applyRun = useCallback((status: reference.MaterializationStatus | null) => {
     setRun(status)
     if (!status || (status.status !== 'queued' && status.status !== 'running')) {
       heartbeatRef.current = null
       setHeartbeatAt(null)
+      throughputSamplesRef.current = []
+      throughputRunIdRef.current = null
+      setChaptersPerMs(null)
       return
+    }
+
+    // 换 run 后旧采样不再可比，必须整体丢弃。
+    if (throughputRunIdRef.current !== status.run_id) {
+      throughputRunIdRef.current = status.run_id
+      throughputSamplesRef.current = []
+      setChaptersPerMs(null)
+    }
+
+    const samples = throughputSamplesRef.current
+    const previous = samples.at(-1)
+    // 只在章数真的增长时采样：3s 轮询本身不是进展，采进去只会稀释速率。
+    if (!previous || previous.processed !== status.processed_chapters) {
+      samples.push({ processed: status.processed_chapters, at: Date.now() })
+      if (samples.length > 64) {
+        samples.splice(0, samples.length - 64)
+      }
+    }
+
+    const newest = samples.at(-1)
+    const oldest = samples.find((sample) => newest!.at - sample.at <= THROUGHPUT_WINDOW_MS) ?? samples[0]
+    if (newest && oldest) {
+      const gained = newest.processed - oldest.processed
+      const span = newest.at - oldest.at
+      setChaptersPerMs(gained > 0 && span > 0 ? gained / span : null)
     }
     const signature = [
       status.processed_chapters,
@@ -264,15 +371,24 @@ export default function ReferenceCorpusWorkspace({
     ? Math.min(100, Math.round((Math.min(run.processed_chapters, run.total_chapters) / run.total_chapters) * 100))
     : 0
 
-  // 剩余时间按"已处理章节的平均耗时"线性外推：粗糙但足以回答"还要等多久"。
-  // 首章未完成前没有基准，不做估算，避免给出无依据的数字。
+  // 剩余时间优先按"近期吞吐速率"外推。
+  //
+  // 旧的全程平均有实质缺陷：应用关闭、手动暂停、系统休眠的空闲时间都被算成
+  // 处理时间，作者会看到一个被高估数倍的剩余时间（实测 258 小时）。
+  // 近期速率不含空闲期，也自动反映并发度；只有在样本不足时才回落到全程平均，
+  // 并明确标注它含中途停顿，避免作者把它当成可信承诺。
   const etaText = (() => {
     if (!run || !isActiveRun) return ''
     const remaining = run.total_chapters - run.processed_chapters
-    if (remaining <= 0 || run.processed_chapters <= 0) return ''
+    if (remaining <= 0) return ''
+    if (chaptersPerMs !== null && chaptersPerMs > 0) {
+      return `预计还需约 ${formatElapsedMs(remaining / chaptersPerMs)}`
+    }
     const startedMs = parseTimestampMs(run.started_at)
-    if (startedMs === null || nowMs <= startedMs) return ''
-    return `预计还需约 ${formatElapsedMs(((nowMs - startedMs) / run.processed_chapters) * remaining)}`
+    if (startedMs === null || nowMs <= startedMs || run.processed_chapters <= 0) {
+      return '正在估算剩余时间'
+    }
+    return `预计还需约 ${formatElapsedMs(((nowMs - startedMs) / run.processed_chapters) * remaining)}（含中途停顿，粗略）`
   })()
 
   const stallLevel: 'fresh' | 'slow' | 'stuck' =
@@ -291,7 +407,13 @@ export default function ReferenceCorpusWorkspace({
     if (stallLevel === 'slow') {
       return `已 ${formatElapsedMs(stalledMs)}没有新产出${chapterClause ? `，${chapterClause}仍在${stageClause || '处理中'}` : ''}，比预期慢，暂不估算剩余时间`
     }
-    return `正在${chapterClause ? `处理${chapterClause}` : '按章推进'}${stageClause ? ` · ${stageClause}` : ''}${etaText ? ` · ${etaText}` : ''}`
+    // 并发提示：批大小在建 run 时冻结，旧 run 仍是逐章（值 1）。
+    // 明确写出来，作者才能判断"为什么这一轮还是一章一章地爬"，
+    // 而不是怀疑进度显示出错。
+    const batchClause = run && run.chapter_batch_size > 1
+      ? ` · ${run.chapter_batch_size} 章并行`
+      : ''
+    return `正在${chapterClause ? `处理${chapterClause}` : '按章推进'}${stageClause ? ` · ${stageClause}` : ''}${batchClause}${etaText ? ` · ${etaText}` : ''}`
   })()
 
   // 失败说明与"从哪里继续"：后端恢复点永远是当前批次（逐章模式下即失败的那一章），
@@ -341,7 +463,7 @@ export default function ReferenceCorpusWorkspace({
     }
 
     // 锚点或 run 切换：所有分页状态归位，候选/进度都从第一页重来。
-    const pagesToLoad = options.resetPages ? 1 : Math.max(1, progressPage)
+    const targetPage = options.resetPages ? 1 : Math.max(1, progressPage)
     if (options.resetPages) {
       loadedRunIdRef.current = status.run_id
       setProgressPage(1)
@@ -353,17 +475,31 @@ export default function ReferenceCorpusWorkspace({
     }
 
     try {
-      // 非重置刷新（轮询）按已加载页数整段重拉：运行中的 run 进度会增长，
-      // 但不能因此把作者已经翻到的章节进度截回第一页。
-      const progressRequests = Array.from({ length: pagesToLoad }, (_, index) => (
-        app.ListReferenceMaterializationChapterProgress({
-          novel_id: novelId,
-          anchor_id: status.anchor_id,
-          run_id: status.run_id,
-          page: index + 1,
-          size: PROGRESS_PAGE_SIZE,
-        })
-      ))
+      // 列表页与当前批所在页分开取：
+      // - 列表页：作者正在翻的那一页，决定渲染内容；
+      // - 批页：只用来定位"正在处理第几章"，不混进列表——
+      //   混进去会让章节跳序（第 1 页和第 5 页的条目排在同一个列表里）。
+      const batchStart = status.current_batch_start_chapter
+      const batchPage = batchStart != null && batchStart > 0
+        ? Math.floor((batchStart - 1) / PROGRESS_PAGE_SIZE) + 1
+        : null
+
+      const listRequest = app.ListReferenceMaterializationChapterProgress({
+        novel_id: novelId,
+        anchor_id: status.anchor_id,
+        run_id: status.run_id,
+        page: targetPage,
+        size: PROGRESS_PAGE_SIZE,
+      })
+      const batchRequest = batchPage !== null && batchPage !== targetPage
+        ? app.ListReferenceMaterializationChapterProgress({
+            novel_id: novelId,
+            anchor_id: status.anchor_id,
+            run_id: status.run_id,
+            page: batchPage,
+            size: PROGRESS_PAGE_SIZE,
+          })
+        : null
       // run 切换后的首次加载同时取候选第一页；轮询刷新不动候选列表（O12）。
       const candidateRequest = options.resetPages
         ? app.ListReferenceMaterializationCandidates({
@@ -375,21 +511,21 @@ export default function ReferenceCorpusWorkspace({
             size: CANDIDATE_PAGE_SIZE,
           })
         : null
-      const [progressResults, candidateResult] = await Promise.all([
-        Promise.all(progressRequests),
+      const [listResult, batchResult, candidateResult] = await Promise.all([
+        listRequest,
+        batchRequest,
         candidateRequest,
       ])
-      const mergedProgress: reference.MaterializationChapterProgress[] = []
-      const seenChapters = new Set<number>()
-      for (const result of progressResults) {
-        for (const item of result.items ?? []) {
-          if (seenChapters.has(item.chapter_index)) continue
-          seenChapters.add(item.chapter_index)
-          mergedProgress.push(item)
-        }
-      }
-      setProgress(mergedProgress)
-      setProgressTotal(progressResults.at(-1)?.total ?? mergedProgress.length)
+
+      const listItems = listResult.items ?? []
+      setProgress(listItems)
+      setProgressTotal(listResult.total)
+      // 活跃章节优先取列表页里的（作者正看着它），否则取批页里的（它在别处）。
+      setActiveProgressItem(
+        listItems.find(isInFlightProgressItem)
+          ?? (batchResult?.items ?? []).find(isInFlightProgressItem)
+          ?? null,
+      )
       if (candidateResult) {
         setCandidates(candidateResult.items ?? [])
         setCandidateTotal(candidateResult.total)
@@ -458,31 +594,36 @@ export default function ReferenceCorpusWorkspace({
     }
   }, [showError, app, novelId, run, loadingMore, candidatePage])
 
-  // 章节进度分页（O13）：同样追加式续拉，配合"仅看失败"筛选定位卡住的章节。
-  const loadMoreProgress = useCallback(async () => {
+  // 章节进度：翻页式（作者反馈"一直往下拉太累"），整页替换而非追加续拉。
+  const loadProgressPage = useCallback(async (page: number) => {
     if (!run || !novelId || loadingMoreProgress) return
+    const target = Math.max(1, page)
     setLoadingMoreProgress(true)
     try {
-      const next = await app.ListReferenceMaterializationChapterProgress({
+      const result = await app.ListReferenceMaterializationChapterProgress({
         novel_id: novelId,
         anchor_id: run.anchor_id,
         run_id: run.run_id,
-        page: progressPage + 1,
+        page: target,
         size: PROGRESS_PAGE_SIZE,
       })
-      setProgress((current) => {
-        const seen = new Set(current.map((item) => item.chapter_index))
-        return [...current, ...next.items.filter((item) => !seen.has(item.chapter_index))]
-      })
-      setProgressTotal(next.total)
-      setProgressPage((current) => current + 1)
+      const items = result.items ?? []
+      setProgress(items)
+      setProgressTotal(result.total)
+      setProgressPage(target)
+      // 只有当前页真的含活跃章节时才覆盖；否则保留批页那一份，
+      // 免得翻到别处后"正在处理第 N 章"的阶段信息又消失。
+      const inFlight = items.find(isInFlightProgressItem)
+      if (inFlight) {
+        setActiveProgressItem(inFlight)
+      }
     } catch (err) {
       showError(err, '章节进度加载失败。')
-      setErrorRetry(() => () => { void loadMoreProgress() })
+      setErrorRetry(() => () => { void loadProgressPage(target) })
     } finally {
       setLoadingMoreProgress(false)
     }
-  }, [showError, app, novelId, run, loadingMoreProgress, progressPage])
+  }, [showError, app, novelId, run, loadingMoreProgress])
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
@@ -1007,6 +1148,44 @@ export default function ReferenceCorpusWorkspace({
                 仅看失败章节
               </button>
             </div>
+            {isActiveRun && (
+              <div className="mt-2 flex flex-wrap items-center gap-2" data-testid="rebatch-control">
+                <label htmlFor="rebatch-size" className="text-[11px] text-muted-foreground">
+                  并行批大小
+                </label>
+                <input
+                  id="rebatch-size"
+                  type="range"
+                  min={1}
+                  max={5}
+                  step={1}
+                  value={currentBatchSize}
+                  disabled={rebatchBusy}
+                  onChange={(event) => { setRebatchDraft(Number(event.target.value)) }}
+                  className="h-1.5 w-32 accent-primary"
+                  aria-describedby="rebatch-size-value"
+                  data-testid="rebatch-size-slider"
+                />
+                <span id="rebatch-size-value" className="text-[11px] tabular-nums text-foreground">
+                  {currentBatchSize === 1 ? '逐章' : `${currentBatchSize} 章并行`}
+                </span>
+                <button
+                  type="button"
+                  onClick={() => { void applyRebatch(currentBatchSize) }}
+                  disabled={rebatchBusy}
+                  className="inline-flex h-6 items-center rounded-md border border-border px-2 text-[11px] font-medium text-foreground hover:bg-secondary disabled:cursor-not-allowed disabled:opacity-50"
+                  data-testid="rebatch-apply"
+                >
+                  应用
+                </button>
+                {rebatchBusy && <span className="text-[11px] text-muted-foreground">处理中…</span>}
+              </div>
+            )}
+            {rebatchMessage && (
+              <p className="mt-2 text-[11px] text-muted-foreground" data-testid="rebatch-message">
+                {rebatchMessage}
+              </p>
+            )}
             <div className="mt-3 rounded-md border border-border bg-muted/20 px-3 py-2.5" data-testid="chapter-progress-overview">
               <div className="flex items-center justify-between gap-3 text-[11px]">
                 <span className="text-muted-foreground">
@@ -1091,24 +1270,70 @@ export default function ReferenceCorpusWorkspace({
                     </ol>
                   )
                 })()}
-                {!failedProgressOnly && progress.length < progressTotal && (
-                  <button
-                    type="button"
-                    onClick={() => { void loadMoreProgress() }}
-                    disabled={loadingMoreProgress}
-                    className="mt-2 inline-flex h-8 items-center rounded-md border border-border px-3 text-xs font-medium text-foreground hover:bg-secondary disabled:cursor-not-allowed disabled:opacity-50"
-                    data-testid="load-more-progress"
+                {!failedProgressOnly && progressPageCount > 1 && (
+                  <nav
+                    className="mt-3 flex items-center justify-between gap-3"
+                    aria-label="章节进度翻页"
+                    data-testid="progress-pagination"
                   >
-                    {loadingMoreProgress ? '加载中…' : `加载更多章节（还有 ${formatCount(progressTotal - progress.length)} 章）`}
-                  </button>
+                    <button
+                      type="button"
+                      onClick={() => { void loadProgressPage(progressPage - 1) }}
+                      disabled={loadingMoreProgress || progressPage <= 1}
+                      className="inline-flex h-8 items-center rounded-md border border-border px-3 text-xs font-medium text-foreground hover:bg-secondary disabled:cursor-not-allowed disabled:opacity-50"
+                      data-testid="progress-prev-page"
+                    >
+                      上一页
+                    </button>
+                    <span className="text-[11px] text-muted-foreground">
+                      第 {formatCount(progressPage)} / {formatCount(progressPageCount)} 页
+                      {loadingMoreProgress ? ' · 加载中…' : ''}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => { void loadProgressPage(progressPage + 1) }}
+                      disabled={loadingMoreProgress || progressPage >= progressPageCount}
+                      className="inline-flex h-8 items-center rounded-md border border-border px-3 text-xs font-medium text-foreground hover:bg-secondary disabled:cursor-not-allowed disabled:opacity-50"
+                      data-testid="progress-next-page"
+                    >
+                      下一页
+                    </button>
+                  </nav>
                 )}
                 {failedProgressOnly && (
                   <p className="mt-2 text-[11px] text-muted-foreground">
-                    筛选范围：已加载的前 {formatCount(progress.length)} 章；全部 {formatCount(progressTotal)} 章里还有未加载的部分时，先取消筛选点「加载更多章节」。
+                    筛选范围：当前第 {formatCount(progressPage)} 页的 {formatCount(progress.length)} 章。翻页可查看其他章节，或取消筛选。
                   </p>
                 )}
               </>
             )}
+          </section>
+        )}
+
+        {run && run.status === 'completed' && (
+          <section className="border-t border-border py-4" aria-labelledby="advanced-material-heading">
+            <div className="flex items-center gap-2">
+              <h2 id="advanced-material-heading" className="text-sm font-semibold text-foreground">3. 高级写作素材</h2>
+            </div>
+            <p className="mt-1 text-xs text-muted-foreground">
+              材料化已完成。生成高级素材（事实 / 机理 / 策略）后到「浏览」页复核；未复核的素材不进入写作注入。
+            </p>
+            <div className="mt-2 flex flex-wrap items-center gap-2">
+              <button
+                type="button"
+                onClick={() => { void startAdvancedAnalysis() }}
+                disabled={advancedGenerating || !run}
+                className="inline-flex h-8 items-center gap-1.5 rounded-md border border-border px-3 text-xs font-medium text-foreground hover:bg-secondary disabled:cursor-not-allowed disabled:opacity-50"
+                data-testid="start-advanced-material-analysis-from-workspace"
+              >
+                {advancedGenerating ? '分析中…' : '生成高级素材'}
+              </button>
+              {advancedMessage && (
+                <span className="text-[11px] text-muted-foreground" role="status">
+                  {advancedMessage}
+                </span>
+              )}
+            </div>
           </section>
         )}
 

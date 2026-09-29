@@ -131,6 +131,34 @@ export default function AdvancedMaterialPanel({ novelId, anchors, refreshKey }: 
     }
   }, [app, anchorId])
 
+  // 生成入口：后端 pipeline 早已注册（StartReferenceAdvancedMaterialAnalysis），
+  // 但前端一直没有调用点——于是这里永远 0 条，而文案却写着"制作完成后再回来看"，
+  // 实际没有任何地方会触发它。这个按钮把断掉的线接上。
+  //
+  // 注意：整本书的分析是逐节点串行调用模型的长任务，见方案 §15.8。
+  const [generating, setGenerating] = useState(false)
+  const [generateMessage, setGenerateMessage] = useState<string | null>(null)
+
+  const startAnalysis = useCallback(async () => {
+    if (anchorId == null || generating) return
+    setGenerating(true)
+    setGenerateMessage(null)
+    try {
+      const outcome = await app.StartReferenceAdvancedMaterialAnalysis({ anchor_id: anchorId })
+      setGenerateMessage(
+        `已生成：事实 ${outcome.observation_accepted} 条（驳回 ${outcome.observation_rejected}）` +
+          ` · 机理 ${outcome.specimen_accepted} 条（驳回 ${outcome.specimen_rejected}）` +
+          ` · 策略 ${outcome.strategy_groups} 组。`,
+      )
+      setError(null)
+      await load()
+    } catch (caught) {
+      setError(describeBridgeError(caught, '高级素材生成失败。').message)
+    } finally {
+      setGenerating(false)
+    }
+  }, [app, anchorId, generating, load])
+
   if (usableAnchors.length === 0) {
     return (
       <div className="mt-4 rounded-md border border-border bg-background px-3 py-3" data-testid="advanced-material-panel">
@@ -161,6 +189,20 @@ export default function AdvancedMaterialPanel({ novelId, anchors, refreshKey }: 
             ))}
           </select>
         </label>
+        <button
+          type="button"
+          onClick={() => { void startAnalysis() }}
+          disabled={generating || anchorId == null}
+          className="inline-flex h-8 items-center gap-1 rounded-md border border-border px-2.5 text-xs font-medium text-foreground hover:bg-secondary disabled:cursor-not-allowed disabled:opacity-50"
+          data-testid="start-advanced-material-analysis"
+        >
+          {generating ? '分析中…' : '生成高级素材'}
+        </button>
+        {generateMessage && (
+          <span className="text-[11px] text-muted-foreground" data-testid="advanced-material-generate-message" role="status">
+            {generateMessage}
+          </span>
+        )}
         <label className="flex items-center gap-1.5 text-xs text-muted-foreground">
           类别
           <select

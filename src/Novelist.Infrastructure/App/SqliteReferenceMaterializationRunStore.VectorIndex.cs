@@ -375,17 +375,46 @@ internal sealed partial class SqliteReferenceMaterializationRunStore
             """;
         command.Parameters.AddWithValue("$processed_chapters", processedChapterCount);
         command.Parameters.AddWithValue("$completed_chapter_batches", completedBatchCount);
+        // 批内章节范围按批里的实际章节取，不要用 batch_index × chapter_batch_size 推算：
+        // 重新分组（RebatchPendingChaptersAsync）之后批号不再与章号成固定比例，
+        // 用公式会算出根本不存在的章号（例如第 711 章 / 共 404 章）。
+        var batchRange = nextBatchIndex is null
+            ? null
+            : await ReadBatchChapterRangeAsync(connection, transaction, run.RunId, nextBatchIndex.Value, cancellationToken);
         command.Parameters.AddWithValue("$current_batch_index", nextBatchIndex is null ? DBNull.Value : nextBatchIndex.Value);
-        command.Parameters.AddWithValue("$current_batch_start_chapter", nextBatchIndex is null ? DBNull.Value : nextBatchIndex.Value * run.ChapterBatchSize + 1);
-        command.Parameters.AddWithValue("$current_batch_end_chapter", nextBatchIndex is null
-            ? DBNull.Value
-            : Math.Min((nextBatchIndex.Value + 1) * run.ChapterBatchSize, run.TotalChapters));
+        command.Parameters.AddWithValue("$current_batch_start_chapter", batchRange is null ? DBNull.Value : batchRange.Value.StartChapter);
+        command.Parameters.AddWithValue("$current_batch_end_chapter", batchRange is null ? DBNull.Value : batchRange.Value.EndChapter);
         command.Parameters.AddWithValue("$run_id", run.RunId);
         command.Parameters.AddWithValue("$expected_batch_index", run.CurrentBatchIndex!.Value);
         if (await command.ExecuteNonQueryAsync(cancellationToken) != 1)
         {
             throw new InvalidOperationException("Materialization run changed while completing the vector index.");
         }
+    }
+
+    private static async ValueTask<(int StartChapter, int EndChapter)?> ReadBatchChapterRangeAsync(
+        SqliteConnection connection,
+        SqliteTransaction transaction,
+        string runId,
+        int batchIndex,
+        CancellationToken cancellationToken)
+    {
+        await using var command = connection.CreateCommand();
+        command.Transaction = transaction;
+        command.CommandText = """
+            SELECT MIN(chapter_index), MAX(chapter_index)
+            FROM reference_materialization_chapter_progress
+            WHERE run_id = $run_id AND batch_index = $batch_index;
+            """;
+        command.Parameters.AddWithValue("$run_id", runId);
+        command.Parameters.AddWithValue("$batch_index", batchIndex);
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        if (!await reader.ReadAsync(cancellationToken) || reader.IsDBNull(0))
+        {
+            return null;
+        }
+
+        return (reader.GetInt32(0), reader.GetInt32(1));
     }
 
     private static void ValidateIndexWorkItem(
@@ -437,3 +466,12 @@ public sealed record ReferenceMaterializationVectorIndexResult(
     int CompletedChapterCount,
     int VectorCount,
     int? NextBatchIndex);
+
+/// <summary>
+/// 重新分组的结果。<see cref="Applied"/> 为 false 表示无章可重排（全部已开始/已完成），
+/// 这不是错误——调用方据此提示"当前没有可重新分组的章节"。
+/// </summary>
+public sealed record ReferenceMaterializationRebatchResult(
+    bool Applied,
+    int RebatchedChapters,
+    int AddedBatches);

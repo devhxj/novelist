@@ -1,3 +1,5 @@
+using System.Collections.Concurrent;
+using System.Diagnostics;
 using Novelist.Contracts.App;
 using Novelist.Core.App;
 
@@ -17,6 +19,29 @@ public sealed class ReferenceMaterializationWorker : IAsyncDisposable
     private readonly TimeSpan _idleDelay;
     private readonly SemaphoreSlim _lifecycleGate = new(1, 1);
     private readonly SemaphoreSlim _pumpGate = new(1, 1);
+
+    // 受控并发（M1）：起步 2，连续无故障推进则 +1，上限 4；任一章失败立即 -1
+    //（下限 1）并进入冷却，避免在限流边缘来回抖动。
+    //
+    // 全部是内部自适应，不暴露为设置项——AGENTS.md 明确禁止扩张专家控制面。
+    // 上限压在 4 而非更高，是因为源码注释实测过：并发整章请求会直接触发
+    // 服务商 429，且网关约 2 分钟会掐断长生成。
+    private const int MinimumConcurrency = 1;
+    private const int InitialConcurrency = 2;
+    private const int MaximumConcurrency = 4;
+    private const int SuccessesBeforeRaise = 4;
+    private static readonly TimeSpan ConcurrencyCooldown = TimeSpan.FromSeconds(30);
+
+    // 章级失败后的全局冷却：批内多章同时失败几乎必然是瞬时突发撞了限流，
+    // 此时只降并发是不够的——worker 会立刻开始下一批，继续以同样节奏撞上去，
+    // 于是"处理十几章就限流"变成持续雪崩。冷却期内整轮暂停，给配额恢复的时间。
+    private static readonly TimeSpan ChapterFailureCooldown = TimeSpan.FromSeconds(60);
+    private readonly object _concurrencyGate = new();
+    private int _concurrency = InitialConcurrency;
+    private int _consecutiveSuccesses;
+    private DateTimeOffset _raiseBlockedUntil;
+    private DateTimeOffset _coolDownUntil;
+
     private CancellationTokenSource? _loopCancellation;
     private Task? _loopTask;
     private bool _disposed;
@@ -186,6 +211,9 @@ public sealed class ReferenceMaterializationWorker : IAsyncDisposable
 
     public async ValueTask<bool> ProcessRunOnceAsync(string runId, CancellationToken cancellationToken)
     {
+        // 先等冷却结束再领批：失败后立即领下一批等于以同样节奏再撞一次限流。
+        // 放在领租约之前，冷却期间不占用租约。
+        await WaitForFailureCoolDownAsync(cancellationToken);
         var store = new SqliteReferenceMaterializationRunStore(_databasePathResolver);
         var claim = await store.ClaimCurrentBatchAsync(runId, _workerId, _leaseDuration, cancellationToken);
         if (claim is null)
@@ -216,21 +244,48 @@ public sealed class ReferenceMaterializationWorker : IAsyncDisposable
                     batchCancellation.Token);
             }
 
-            // 批内章节依次调用模型：并发整章请求会直接触发服务商限流（429），
-            // 且先失败的一章会取消其余章节的在途请求；串行让请求节奏跟随服务商限额。
+            // 批内章节受控并发：并发度由 AIMD 自适应决定，不再固定串行。
+            // 单章失败只挂该章（FailChapterAsync），不牵连同批其余章——这正是
+            // 当年退回逐章处理的原因，上并发前必须先消除它。
+            var sinks = new ConcurrentBag<(int ChapterIndex, ReferenceMaterializationChapterDiagnosticsSink Sink)>();
+            var concurrency = CurrentConcurrency();
+            using var concurrencyGate = new SemaphoreSlim(concurrency, concurrency);
+            var chapterTasks = new List<Task>(claim.ChapterIndexes.Count);
             foreach (var chapterIndex in claim.ChapterIndexes)
             {
-                ThrowIfLeaseLost(leaseLost);
-                await ProcessChapterAsync(
+                chapterTasks.Add(ProcessChapterWithIsolationAsync(
                     store,
-                    claim.RunId,
+                    claim,
                     chapterIndex,
                     legacyBuilds.GetValueOrDefault(chapterIndex),
-                    batchCancellation.Token);
+                    sinks,
+                    concurrencyGate,
+                    leaseLost,
+                    batchCancellation.Token));
             }
 
+            await Task.WhenAll(chapterTasks);
             ThrowIfLeaseLost(leaseLost);
+            var chapterSinks = sinks.ToArray();
+            var indexStarted = Stopwatch.GetTimestamp();
             var indexed = await _indexer.IndexCurrentBatchAsync(claim.RunId, batchCancellation.Token);
+            var indexMs = Stopwatch.GetElapsedTime(indexStarted).TotalMilliseconds;
+
+            // 索引是批级的（一批多章），按实际参与的章数均摊，
+            // 才能与章级阶段放在同一尺度上比较。
+            if (chapterSinks.Length > 0)
+            {
+                var perChapterIndexMs = indexMs / chapterSinks.Length;
+                var databasePath = await _databasePathResolver.ResolveAsync(CancellationToken.None);
+                foreach (var (chapterIndex, sink) in chapterSinks)
+                {
+                    sink.AddIndex(perChapterIndexMs);
+                    ReferenceMaterializationDiagnosticsWriter.Append(
+                        databasePath,
+                        sink.Complete(claim.RunId, chapterIndex));
+                }
+            }
+
             ThrowIfLeaseLost(leaseLost);
             await store.ReleaseBatchLeaseAsync(claim, cancellationToken);
             if (indexed.NextBatchIndex is null)
@@ -329,6 +384,143 @@ public sealed class ReferenceMaterializationWorker : IAsyncDisposable
         }
     }
 
+    private int CurrentConcurrency()
+    {
+        lock (_concurrencyGate)
+        {
+            return _concurrency;
+        }
+    }
+
+    // 趟次并发数由章级并发反推，两者共享同一个总预算（MaximumConcurrency）：
+    // 章级 1 → 趟次 4，章级 2 → 趟次 2，章级 3~4 → 趟次 1。
+    //
+    // 这样"同时在途的整章请求"始终不超过预算。否则章级 3 × 趟次 3 = 9 个并发请求，
+    // 又会重现"一批同时打出去撞 429、然后整批一起失败"的雪崩。
+    private int CurrentRoundConcurrency()
+    {
+        lock (_concurrencyGate)
+        {
+            return Math.Max(1, MaximumConcurrency / Math.Max(1, _concurrency));
+        }
+    }
+
+    private void RecordChapterSuccess()
+    {
+        lock (_concurrencyGate)
+        {
+            if (DateTimeOffset.UtcNow < _raiseBlockedUntil)
+            {
+                return;
+            }
+
+            if (++_consecutiveSuccesses < SuccessesBeforeRaise || _concurrency >= MaximumConcurrency)
+            {
+                return;
+            }
+
+            _concurrency++;
+            _consecutiveSuccesses = 0;
+        }
+    }
+
+    private void RecordChapterFailure()
+    {
+        lock (_concurrencyGate)
+        {
+            if (_concurrency > MinimumConcurrency)
+            {
+                _concurrency--;
+            }
+
+            _consecutiveSuccesses = 0;
+            _raiseBlockedUntil = DateTimeOffset.UtcNow.Add(ConcurrencyCooldown);
+
+            // 冷却从"最后一次失败"起算：连续失败会不断延后，直到真正打住。
+            var until = DateTimeOffset.UtcNow.Add(ChapterFailureCooldown);
+            if (until > _coolDownUntil)
+            {
+                _coolDownUntil = until;
+            }
+        }
+    }
+
+    // 冷却期内整轮让路：这样才不会"降了并发但节奏不变"地继续撞限流。
+    private async ValueTask WaitForFailureCoolDownAsync(CancellationToken cancellationToken)
+    {
+        while (true)
+        {
+            TimeSpan remaining;
+            lock (_concurrencyGate)
+            {
+                remaining = _coolDownUntil - DateTimeOffset.UtcNow;
+            }
+
+            if (remaining <= TimeSpan.Zero)
+            {
+                return;
+            }
+
+            await Task.Delay(remaining, cancellationToken);
+        }
+    }
+
+    // 单章执行 + 故障隔离：任一章出错只把这一章标记为 failed，同批其余章继续跑。
+    // 租约丢失/外部取消例外——那属于批级收尾，不在这里吞掉。
+    private async Task ProcessChapterWithIsolationAsync(
+        SqliteReferenceMaterializationRunStore store,
+        ReferenceMaterializationBatchClaim claim,
+        int chapterIndex,
+        ReferenceCandidateBuildResult? legacyBuild,
+        ConcurrentBag<(int ChapterIndex, ReferenceMaterializationChapterDiagnosticsSink Sink)> sinks,
+        SemaphoreSlim concurrencyGate,
+        CancellationTokenSource leaseLost,
+        CancellationToken cancellationToken)
+    {
+        await concurrencyGate.WaitAsync(CancellationToken.None);
+        // 每章独立 store：store 每次操作都新开连接，本就无共享连接，
+        // 但仍按章隔离实例，杜绝任何实例级状态在并发下被踩到。
+        var chapterStore = new SqliteReferenceMaterializationRunStore(_databasePathResolver);
+        try
+        {
+            var sink = new ReferenceMaterializationChapterDiagnosticsSink();
+            sinks.Add((chapterIndex, sink));
+            // 把这一章的整条执行流标记为后台：其内部所有模型调用都会先给
+            // 作者正在等待的前台请求（写作/聊天/高级素材分析）让出配额。
+            // 标记沿异步流下传，子调用无需感知。
+            using (ModelRequestArbiter.BeginBackground())
+            {
+                await ProcessChapterAsync(chapterStore, claim.RunId, chapterIndex, legacyBuild, sink, cancellationToken);
+            }
+
+            RecordChapterSuccess();
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (ReferenceMaterializationException exception)
+        {
+            RecordChapterFailure();
+            await chapterStore.FailChapterAsync(
+                claim, chapterIndex, exception.ErrorCode, Sanitize(exception.Message), CancellationToken.None);
+        }
+        catch (Exception exception)
+        {
+            RecordChapterFailure();
+            await chapterStore.FailChapterAsync(
+                claim,
+                chapterIndex,
+                ReferenceMaterializationErrorCodes.LlmRequestFailed,
+                Sanitize(exception.Message),
+                CancellationToken.None);
+        }
+        finally
+        {
+            concurrencyGate.Release();
+        }
+    }
+
     // 章节处理分派：有章节级文本分段（材料化入队补建）走"整章直接提取"，
     // 否则回退 legacy 窗口切分 + 逐个打分管线。
     private async Task ProcessChapterAsync(
@@ -336,6 +528,7 @@ public sealed class ReferenceMaterializationWorker : IAsyncDisposable
         string runId,
         int chapterIndex,
         ReferenceCandidateBuildResult? legacyBuild,
+        ReferenceMaterializationChapterDiagnosticsSink sink,
         CancellationToken cancellationToken)
     {
         if (_chapterMaterialExtractor is not null &&
@@ -362,7 +555,7 @@ public sealed class ReferenceMaterializationWorker : IAsyncDisposable
                     runId, chapterIndex, cancellationToken);
                 if (undecidedCount > 0)
                 {
-                    await QualifyAndEmbedChapterAsync(store, runId, chapterIndex, cancellationToken);
+                    await QualifyAndEmbedChapterAsync(store, runId, chapterIndex, sink, cancellationToken);
                     return;
                 }
 
@@ -380,29 +573,67 @@ public sealed class ReferenceMaterializationWorker : IAsyncDisposable
                 var plan = await store.ReadExtractionPlanAsync(runId, chapterIndex, cancellationToken);
                 if (plan is null)
                 {
+                    var planStarted = Stopwatch.GetTimestamp();
                     var rounds = await _chapterMaterialExtractor.PlanChapterExtractionAsync(request, cancellationToken);
+                    sink.AddPlan(Stopwatch.GetElapsedTime(planStarted).TotalMilliseconds);
+                    sink.AddModelCalls(1);
                     await store.SaveExtractionPlanAsync(runId, chapterIndex, rounds, cancellationToken);
                     plan = new SqliteReferenceMaterializationRunStore.ExtractionPlanState(rounds, 0);
                 }
 
                 var requestCount = 0;
                 var extractedCount = decidedCount;
-                for (; plan.RoundIndex < plan.Rounds.Count; plan = plan with { RoundIndex = plan.RoundIndex + 1 })
+
+                // 趟次并发：同一章的各趟只是"通读全章的不同镜头"，彼此没有数据依赖，
+                // 串行执行等于把埋点里 round 那 80% 的时间白白等掉。
+                //
+                // 落库仍按序串行：PersistExtractionRound / AdvanceExtractionRound 会推进
+                // 章节的趟次状态，并发写会互相踩踏。先并发拿到全部结果，再按序落库，
+                // 既拿到提速又不碰状态推进的并发安全。
+                var pendingRounds = extractedCount >= ReferenceMaterializationChatCompletionQualifier.MaxExtractedMaterialsPerChapter
+                    ? []
+                    : plan.Rounds.Skip(plan.RoundIndex).ToArray();
+
+                if (pendingRounds.Length > 0)
                 {
-                    if (extractedCount >= ReferenceMaterializationChatCompletionQualifier.MaxExtractedMaterialsPerChapter)
+                    var roundResults = new ReferenceChapterExtractionResult[pendingRounds.Length];
+                    var roundConcurrency = Math.Min(pendingRounds.Length, CurrentRoundConcurrency());
+                    using var roundGate = new SemaphoreSlim(roundConcurrency, roundConcurrency);
+                    var roundTasks = new List<Task>(pendingRounds.Length);
+                    for (var position = 0; position < pendingRounds.Length; position++)
                     {
-                        break;
+                        var slot = position;
+                        roundTasks.Add(Task.Run(async () =>
+                        {
+                            await roundGate.WaitAsync(cancellationToken);
+                            try
+                            {
+                                var roundStarted = Stopwatch.GetTimestamp();
+                                var result = await _chapterMaterialExtractor.ExtractChapterRoundAsync(
+                                    request, pendingRounds[slot], cancellationToken);
+                                sink.AddRound(Stopwatch.GetElapsedTime(roundStarted).TotalMilliseconds);
+                                // 一趟可能因为掐流续跑成多次请求：按实际调用数记账，
+                                // 否则界面上的"模型调用"会少报，作者看到的成本是错的。
+                                sink.AddModelCalls(Math.Max(1, result.ModelCallCount));
+                                roundResults[slot] = result;
+                            }
+                            finally
+                            {
+                                roundGate.Release();
+                            }
+                        }, cancellationToken));
                     }
 
-                    var round = plan.Rounds[plan.RoundIndex];
-                    var roundResult = await _chapterMaterialExtractor.ExtractChapterRoundAsync(request, round, cancellationToken);
-                    // 一趟可能因为掐流续跑成多次请求：按实际调用数记账，
-                    // 否则界面上的"模型调用"会少报，作者看到的成本是错的。
-                    requestCount += Math.Max(1, roundResult.ModelCallCount);
-                    var persisted = await store.PersistExtractionRoundAsync(
-                        runId, chapterIndex, roundResult.Materials, cancellationToken);
-                    await store.AdvanceExtractionRoundAsync(runId, chapterIndex, cancellationToken);
-                    extractedCount += persisted.PersistedExcerpts.Count;
+                    await Task.WhenAll(roundTasks);
+
+                    foreach (var roundResult in roundResults)
+                    {
+                        requestCount += Math.Max(1, roundResult.ModelCallCount);
+                        var persisted = await store.PersistExtractionRoundAsync(
+                            runId, chapterIndex, roundResult.Materials, cancellationToken);
+                        await store.AdvanceExtractionRoundAsync(runId, chapterIndex, cancellationToken);
+                        extractedCount += persisted.PersistedExcerpts.Count;
+                    }
                 }
 
                 var completed = await store.CompleteExtractionAsync(
@@ -417,7 +648,9 @@ public sealed class ReferenceMaterializationWorker : IAsyncDisposable
                 }
 
                 var embeddingWork = await store.ReadEmbeddingWorkItemAsync(runId, chapterIndex, cancellationToken);
+                var embedStarted = Stopwatch.GetTimestamp();
                 var embeddings = await _embedder.EmbedAsync(embeddingWork.Request, cancellationToken);
+                sink.AddEmbed(Stopwatch.GetElapsedTime(embedStarted).TotalMilliseconds);
                 await store.PersistEmbeddingsAsync(runId, chapterIndex, embeddings, cancellationToken);
                 return;
             }
@@ -464,6 +697,7 @@ public sealed class ReferenceMaterializationWorker : IAsyncDisposable
             built.ChapterIndex,
             built.PendingCandidateCount,
             built.AcceptedCandidateCount,
+            sink,
             cancellationToken);
     }
 
@@ -473,6 +707,7 @@ public sealed class ReferenceMaterializationWorker : IAsyncDisposable
         int chapterIndex,
         int pendingCandidateCount,
         int acceptedCandidateCount,
+        ReferenceMaterializationChapterDiagnosticsSink sink,
         CancellationToken cancellationToken)
     {
         if (pendingCandidateCount == 0)
@@ -484,12 +719,14 @@ public sealed class ReferenceMaterializationWorker : IAsyncDisposable
             }
 
             var prequalifiedEmbeddingWork = await store.ReadEmbeddingWorkItemAsync(runId, chapterIndex, cancellationToken);
+            var prequalifiedStarted = Stopwatch.GetTimestamp();
             var prequalifiedEmbeddings = await _embedder.EmbedAsync(prequalifiedEmbeddingWork.Request, cancellationToken);
+            sink.AddEmbed(Stopwatch.GetElapsedTime(prequalifiedStarted).TotalMilliseconds);
             await store.PersistEmbeddingsAsync(runId, chapterIndex, prequalifiedEmbeddings, cancellationToken);
             return;
         }
 
-        await QualifyAndEmbedChapterAsync(store, runId, chapterIndex, cancellationToken);
+        await QualifyAndEmbedChapterAsync(store, runId, chapterIndex, sink, cancellationToken);
     }
 
     // 判定阶段收尾：把章节内未判定候选交给判定模型打分，随后推进到嵌入；
@@ -498,13 +735,17 @@ public sealed class ReferenceMaterializationWorker : IAsyncDisposable
         SqliteReferenceMaterializationRunStore store,
         string runId,
         int chapterIndex,
+        ReferenceMaterializationChapterDiagnosticsSink sink,
         CancellationToken cancellationToken)
     {
         ReferenceMaterializationQualificationPersistenceResult persistedQualification;
         do
         {
             var qualificationWork = await store.ReadQualificationWorkItemAsync(runId, chapterIndex, cancellationToken);
+            var qualifyStarted = Stopwatch.GetTimestamp();
             var qualification = await _qualifier.QualifyAsync(qualificationWork.Request, cancellationToken);
+            sink.AddQualify(Stopwatch.GetElapsedTime(qualifyStarted).TotalMilliseconds);
+            sink.AddModelCalls(1);
             persistedQualification = await store.PersistQualificationAsync(runId, chapterIndex, qualification, cancellationToken);
         }
         while (!persistedQualification.IsComplete);
@@ -515,7 +756,9 @@ public sealed class ReferenceMaterializationWorker : IAsyncDisposable
         }
 
         var embeddingWork = await store.ReadEmbeddingWorkItemAsync(runId, chapterIndex, cancellationToken);
+        var embedStarted = Stopwatch.GetTimestamp();
         var embeddings = await _embedder.EmbedAsync(embeddingWork.Request, cancellationToken);
+        sink.AddEmbed(Stopwatch.GetElapsedTime(embedStarted).TotalMilliseconds);
         await store.PersistEmbeddingsAsync(runId, chapterIndex, embeddings, cancellationToken);
     }
 

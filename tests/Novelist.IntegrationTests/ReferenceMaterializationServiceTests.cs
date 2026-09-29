@@ -38,7 +38,7 @@ public sealed class ReferenceMaterializationServiceTests : IDisposable
 
         Assert.Equal(1, preflight.CallCount);
         Assert.Equal(ReferenceMaterializationRunStates.Queued, created.Status);
-        Assert.Equal(1, created.ChapterBatchSize);
+        Assert.Equal(ReferenceMaterializationBatchSizes.Concurrent, created.ChapterBatchSize);
         Assert.Equal("llm-provider", created.Llm.Provider);
         Assert.Equal("embedding-model", created.Embedding.ModelId);
         Assert.NotNull(status);

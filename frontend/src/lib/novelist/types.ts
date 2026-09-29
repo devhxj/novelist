@@ -1020,6 +1020,21 @@ has_more: boolean
 
   export type RetryMaterializationInput = GetMaterializationStatusInput
 
+  // 重新分组尚未开始的章节：让批大小已冻结的旧 run 改用新的批大小，
+  // 不必重跑已完成章节。取值受后端 CHECK (1, 5, 10) 约束。
+  export interface RebatchMaterializationInput {
+    novel_id: number
+    anchor_id: number
+    chapter_batch_size: number
+    run_id?: string | null
+  }
+
+  export interface MaterializationRebatchResult {
+    applied: boolean
+    rebatched_chapters: number
+    added_batches: number
+  }
+
   export interface ListMaterializationChapterProgressInput extends GetMaterializationStatusInput {
     page: number
     size: number
@@ -1092,6 +1107,9 @@ has_more: boolean
     split_profile_id: string
     generation_id: string
     status: string
+    // 建 run 时冻结：> 1 表示该轮按批并行处理，旧 run 仍为 1。
+    // 此前前端类型漏同步这个字段（后端 payload 一直有）。
+    chapter_batch_size: number
     total_chapters: number
     processed_chapters: number
     total_chapter_batches: number

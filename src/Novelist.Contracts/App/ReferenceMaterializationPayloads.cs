@@ -22,10 +22,19 @@ public static class ReferenceChapterSplitProfileStates
 
 public static class ReferenceMaterializationBatchSizes
 {
-    // 批次概念已废除：材料化始终逐章处理（一次一章、失败只挂一章）。
-    // 状态表保留 chapter_batch_size 列以兼容旧库（恒写 1），对外契约不再接受入参。
+    // 逐章：一次一章、失败只挂一章。保留供历史库兼容与回滚。
     public const int ChapterWise = 1;
-    public const int Default = ChapterWise;
+
+    // 并发批：一个租约批覆盖多章，由 worker 按自适应并发度并行处理。
+    // 前提是章级失败隔离（FailChapterAsync）——否则单章故障会放大成整批报废，
+    // 那正是当年废除批次的理由。
+    //
+    // 取值 5 而非任意值：reference_materialization_runs 上有
+    // CHECK (chapter_batch_size IN (1, 5, 10)) 约束，改这个常量前先确认该约束。
+    // 批大小只需 >= worker 的并发上限（4），让并发窗口始终有章可做。
+    public const int Concurrent = 5;
+
+    public const int Default = Concurrent;
 }
 
 public static class ReferenceMaterializationRunStates
@@ -167,6 +176,21 @@ public sealed record GetReferenceMaterializationStatusPayload(
     [property: JsonPropertyName("novel_id")] long NovelId,
     [property: JsonPropertyName("anchor_id")] long AnchorId,
     [property: JsonPropertyName("run_id")] string? RunId = null);
+
+// 重新分组尚未开始的章节。批大小在建 run 时冻结，旧 run（值为 1）跑不了并发；
+// 重排让它在不重跑已完成章节的前提下改用新的批大小。
+// chapter_batch_size 受 CHECK (chapter_batch_size IN (1, 5, 10)) 约束。
+public sealed record RebatchReferenceMaterializationPayload(
+    [property: JsonPropertyName("novel_id")] long NovelId,
+    [property: JsonPropertyName("anchor_id")] long AnchorId,
+    [property: JsonPropertyName("chapter_batch_size")] int ChapterBatchSize,
+    [property: JsonPropertyName("run_id")] string? RunId = null);
+
+// applied = false 表示没有可重排的章节（都已开始或已完成），不是错误。
+public sealed record ReferenceMaterializationRebatchResultPayload(
+    [property: JsonPropertyName("applied")] bool Applied,
+    [property: JsonPropertyName("rebatched_chapters")] int RebatchedChapters,
+    [property: JsonPropertyName("added_batches")] int AddedBatches);
 
 public sealed record RetryReferenceMaterializationPayload(
     [property: JsonPropertyName("novel_id")] long NovelId,

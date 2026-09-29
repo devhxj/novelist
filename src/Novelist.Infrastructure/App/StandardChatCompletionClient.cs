@@ -39,18 +39,27 @@ public sealed class StandardChatCompletionClient : IChatCompletionClient
         [EnumeratorCancellation] CancellationToken cancellationToken)
     {
         ValidateMaxOutputTokens(request);
-        var provider = await ResolveProviderAsync(request, cancellationToken);
-        var payload = BuildPayload(provider, request, stream: true, titleGeneration: false);
-        await PaceProviderStartAsync(provider.Key, cancellationToken);
-        await foreach (var item in StreamAttemptAsync(provider, payload, cancellationToken))
+        await ModelRequestArbiter.YieldToForegroundAsync(cancellationToken);
+        ModelRequestArbiter.Enter();
+        try
         {
-            if (item.Event is { } streamEvent)
+            var provider = await ResolveProviderAsync(request, cancellationToken);
+            var payload = BuildPayload(provider, request, stream: true, titleGeneration: false);
+            await PaceProviderStartAsync(provider.Key, cancellationToken);
+            await foreach (var item in StreamAttemptAsync(provider, payload, cancellationToken))
             {
-                yield return streamEvent;
-                continue;
-            }
+                if (item.Event is { } streamEvent)
+                {
+                    yield return streamEvent;
+                    continue;
+                }
 
-            throw item.Failure ?? ProviderError("模型服务返回流式错误。", retryable: true);
+                throw item.Failure ?? ProviderError("模型服务返回流式错误。", retryable: true);
+            }
+        }
+        finally
+        {
+            ModelRequestArbiter.Exit();
         }
     }
 
@@ -204,30 +213,39 @@ public sealed class StandardChatCompletionClient : IChatCompletionClient
         CancellationToken cancellationToken)
     {
         ValidateMaxOutputTokens(request);
-        var provider = await ResolveProviderAsync(request, cancellationToken);
-        var payload = BuildPayload(provider, request, stream: false, titleGeneration: true);
-        await PaceProviderStartAsync(provider.Key, cancellationToken);
-        using var httpRequest = CreateHttpRequest(provider, payload);
-
-        HttpResponseMessage response;
+        await ModelRequestArbiter.YieldToForegroundAsync(cancellationToken);
+        ModelRequestArbiter.Enter();
         try
         {
-            response = await SendAsync(httpRequest, cancellationToken);
-        }
-        catch (HttpRequestException ex)
-        {
-            throw ProviderError($"请求失败: {ex.Message}", retryable: true);
-        }
+            var provider = await ResolveProviderAsync(request, cancellationToken);
+            var payload = BuildPayload(provider, request, stream: false, titleGeneration: true);
+            await PaceProviderStartAsync(provider.Key, cancellationToken);
+            using var httpRequest = CreateHttpRequest(provider, payload);
 
-        var body = await ReadContentLimitedAsync(response.Content, cancellationToken);
-        if ((int)response.StatusCode >= 400)
-        {
-            throw WithBurstProtectionGuidance(ProviderError(
-                FormatProviderError(response.StatusCode, body, provider.ApiKey),
-                Retryable(response.StatusCode)));
-        }
+            HttpResponseMessage response;
+            try
+            {
+                response = await SendAsync(httpRequest, cancellationToken);
+            }
+            catch (HttpRequestException ex)
+            {
+                throw ProviderError($"请求失败: {ex.Message}", retryable: true);
+            }
 
-        return ParseGeneratedText(provider, body);
+            var body = await ReadContentLimitedAsync(response.Content, cancellationToken);
+            if ((int)response.StatusCode >= 400)
+            {
+                throw WithBurstProtectionGuidance(ProviderError(
+                    FormatProviderError(response.StatusCode, body, provider.ApiKey),
+                    Retryable(response.StatusCode)));
+            }
+
+            return ParseGeneratedText(provider, body);
+        }
+        finally
+        {
+            ModelRequestArbiter.Exit();
+        }
     }
 
     private static string ParseGeneratedText(ResolvedProvider provider, byte[] body)

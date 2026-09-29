@@ -89,6 +89,7 @@ public static class BridgeCompatibilityAppMethods
         "ExportReferenceCorpusPackage",
         "ImportReferenceCorpusPackage",
         "GetReferenceMaterializationStatus",
+        "RebatchReferenceMaterialization",
         "RetryReferenceMaterialization",
         "GetReferenceMaterialTagReviewQueue",
         "GetReferenceSourceSegmentDetail",

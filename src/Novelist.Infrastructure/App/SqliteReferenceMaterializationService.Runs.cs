@@ -433,6 +433,29 @@ public sealed partial class SqliteReferenceMaterializationService
         return status is null || status.AnchorId != input.AnchorId ? null : status;
     }
 
+    public async ValueTask<ReferenceMaterializationRebatchResultPayload> RebatchMaterializationAsync(
+        RebatchReferenceMaterializationPayload input,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(input);
+        ValidateReferenceInput(input.NovelId, input.AnchorId);
+        await EnsureAnchorAccessibleAsync(input.NovelId, input.AnchorId, cancellationToken);
+        var current = string.IsNullOrWhiteSpace(input.RunId)
+            ? await _runStore.GetLatestForAnchorAsync(input.AnchorId, cancellationToken)
+            : await _runStore.GetAsync(input.RunId, cancellationToken);
+        if (current is null || current.AnchorId != input.AnchorId)
+        {
+            throw new ArgumentException("Materialization run does not exist.", nameof(input));
+        }
+
+        // 只重排尚未开始的章节：已完成的保留原批号，故不必重跑任何一章。
+        var result = await _runStore.RebatchPendingChaptersAsync(current.RunId, input.ChapterBatchSize, cancellationToken);
+        return new ReferenceMaterializationRebatchResultPayload(
+            result.Applied,
+            result.RebatchedChapters,
+            result.AddedBatches);
+    }
+
     public async ValueTask<ReferenceMaterializationStatusPayload> RetryMaterializationAsync(
         RetryReferenceMaterializationPayload input,
         CancellationToken cancellationToken)

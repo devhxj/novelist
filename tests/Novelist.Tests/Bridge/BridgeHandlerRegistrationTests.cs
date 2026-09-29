@@ -135,8 +135,8 @@ public sealed class BridgeHandlerRegistrationTests
     [Fact]
     public void CompatibilityAppMethodListHasExpectedCoverage()
     {
-        // I6 三件套后为 191；退役早期分析管线桥暴露 15 个方法后为 176；高级写作素材三件套 +3、生产触发 +1 后为 180。
-        Assert.Equal(180, BridgeCompatibilityAppMethods.MethodNames.Count);
+        // I6 三件套后为 191；退役早期分析管线桥暴露 15 个方法后为 176；高级写作素材三件套 +3、生产触发 +1 后为 180；重新分组 +1 后为 181。
+        Assert.Equal(181, BridgeCompatibilityAppMethods.MethodNames.Count);
         Assert.Contains("GetChapterCorpusCoverage", BridgeCompatibilityAppMethods.MethodNames);
         Assert.Contains("AdvanceChapterPlan", BridgeCompatibilityAppMethods.MethodNames);
         Assert.Contains("ExportReferenceCorpusPackage", BridgeCompatibilityAppMethods.MethodNames);
@@ -155,6 +155,7 @@ public sealed class BridgeHandlerRegistrationTests
         Assert.Contains("EnqueueReferenceMaterialization", BridgeCompatibilityAppMethods.MethodNames);
         Assert.Contains("GetReferenceMaterializationStatus", BridgeCompatibilityAppMethods.MethodNames);
         Assert.Contains("RetryReferenceMaterialization", BridgeCompatibilityAppMethods.MethodNames);
+        Assert.Contains("RebatchReferenceMaterialization", BridgeCompatibilityAppMethods.MethodNames);
         Assert.Contains("ListReferenceMaterializationChapterProgress", BridgeCompatibilityAppMethods.MethodNames);
         Assert.Contains("ListReferenceMaterializationCandidates", BridgeCompatibilityAppMethods.MethodNames);
         Assert.Contains("ReviewReferenceMaterializationCandidate", BridgeCompatibilityAppMethods.MethodNames);

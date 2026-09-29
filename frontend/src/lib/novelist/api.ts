@@ -114,6 +114,7 @@ export interface NovelistAppApi {
  ReconcileReferenceCorpusRun: AppMethod<[{ anchor_id: number; new_run_id: string }], { superseded_observations: number; superseded_specimens: number; conflicts_queued: number; aggregates_marked_stale: number }>
  EnqueueReferenceMaterialization: AppMethod<[reference.EnqueueMaterializationInput], reference.MaterializationStatus>
  RetryReferenceMaterialization: AppMethod<[reference.RetryMaterializationInput], reference.MaterializationStatus>
+ RebatchReferenceMaterialization: AppMethod<[reference.RebatchMaterializationInput], reference.MaterializationRebatchResult>
  ListReferenceMaterializationChapterProgress: AppMethod<[reference.ListMaterializationChapterProgressInput], storage.PageResult_reference_MaterializationChapterProgress_>
  ListReferenceMaterializationCandidates: AppMethod<[reference.ListMaterializationCandidatesInput], storage.PageResult_reference_MaterializationCandidate_>
  ReviewReferenceMaterializationCandidate: AppMethod<[reference.ReviewMaterializationCandidateInput], reference.MaterializationCandidateReviewResult>
@@ -323,6 +324,7 @@ RebuildReferenceCorpusDedupGroups: appMethod<NovelistAppApi['RebuildReferenceCor
  ReconcileReferenceCorpusRun: appMethod<NovelistAppApi['ReconcileReferenceCorpusRun']>('ReconcileReferenceCorpusRun'),
  EnqueueReferenceMaterialization: appMethod<NovelistAppApi['EnqueueReferenceMaterialization']>('EnqueueReferenceMaterialization'),
  RetryReferenceMaterialization: appMethod<NovelistAppApi['RetryReferenceMaterialization']>('RetryReferenceMaterialization'),
+ RebatchReferenceMaterialization: appMethod<NovelistAppApi['RebatchReferenceMaterialization']>('RebatchReferenceMaterialization'),
  ListReferenceMaterializationChapterProgress: appMethod<NovelistAppApi['ListReferenceMaterializationChapterProgress']>('ListReferenceMaterializationChapterProgress'),
  ListReferenceMaterializationCandidates: appMethod<NovelistAppApi['ListReferenceMaterializationCandidates']>('ListReferenceMaterializationCandidates'),
  ReviewReferenceMaterializationCandidate: appMethod<NovelistAppApi['ReviewReferenceMaterializationCandidate']>('ReviewReferenceMaterializationCandidate'),

@@ -44,6 +44,13 @@ public static class ReferenceMaterializationBridgeHandlers
                 ReadObjectArg<RetryReferenceMaterializationPayload>(context.Payload, 0, "input"),
                 cancellationToken)));
 
+        // 重新分组：让已经建好的 run（批大小冻结为 1、跑不了并发的旧 run）
+        // 在不重跑已完成章节的前提下改用新的批大小。
+        dispatcher.Register("RebatchReferenceMaterialization", async (context, cancellationToken) =>
+            await service.RebatchMaterializationAsync(
+                ReadObjectArg<RebatchReferenceMaterializationPayload>(context.Payload, 0, "input"),
+                cancellationToken));
+
         dispatcher.Register("ListReferenceMaterializationChapterProgress", async (context, cancellationToken) =>
             await ExecuteProgressAsync(() => service.ListMaterializationChapterProgressAsync(
                 ReadObjectArg<ListReferenceMaterializationChapterProgressPayload>(context.Payload, 0, "input"),

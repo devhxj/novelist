@@ -58,8 +58,15 @@ public sealed class ReferenceMaterializationStateMachineTests
     }
 
     [Fact]
-    public void EnqueueContractIsChapterWiseOnly()
+    public void EnqueueContractUsesABatchSizeAllowedBySchema()
     {
-        Assert.Equal(1, ReferenceMaterializationBatchSizes.Default);
+        // 批大小受 reference_materialization_runs 上的
+        // CHECK (chapter_batch_size IN (1, 5, 10)) 约束，取值必须落在其中。
+        //
+        // M1 起默认走并发批（一个租约批覆盖多章，worker 按自适应并发度并行处理）；
+        // 但逐章值必须保留：既要能回滚，也要兼容旧库里已按 1 划分的 run。
+        Assert.Contains(ReferenceMaterializationBatchSizes.Default, new[] { 1, 5, 10 });
+        Assert.Equal(1, ReferenceMaterializationBatchSizes.ChapterWise);
+        Assert.Equal(ReferenceMaterializationBatchSizes.Concurrent, ReferenceMaterializationBatchSizes.Default);
     }
 }

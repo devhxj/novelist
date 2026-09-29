@@ -32,18 +32,21 @@ public sealed class ReferenceMaterializationRunStoreTests : IDisposable
 
         Assert.Equal(ReferenceMaterializationRunStates.Queued, created.Status);
         Assert.Equal(12, created.TotalChapters);
-        // 逐章处理：每批恰一章。
-        Assert.Equal(12, created.TotalChapterBatches);
+        // 批在建 run 时冻结：每批 Concurrent 章（5），尾批收剩余章。
+        var batchSize = ReferenceMaterializationBatchSizes.Concurrent;
+        Assert.Equal(3, created.TotalChapterBatches);
         Assert.Equal(0, created.CurrentBatchIndex);
         Assert.Equal(1, created.CurrentBatchStartChapter);
-        Assert.Equal(1, created.CurrentBatchEndChapter);
+        Assert.Equal(batchSize, created.CurrentBatchEndChapter);
         Assert.Equal(12, progress.Total);
         Assert.All(progress.Items, item => Assert.Equal(ReferenceMaterializationChapterStates.Pending, item.Status));
-        Assert.Equal(Enumerable.Range(0, 12).ToArray(), progress.Items.Select(item => item.BatchIndex).ToArray());
+        Assert.Equal(
+            Enumerable.Range(0, 12).Select(index => index / batchSize).ToArray(),
+            progress.Items.Select(item => item.BatchIndex).ToArray());
     }
 
     [Fact]
-    public async Task CreateRunAlwaysRunsChapterWise()
+    public async Task CreateRunFreezesBatchesAtTheConcurrentBatchSize()
     {
         var options = CreateOptions();
         var anchor = await CreateAnchorAsync(options, chapterCount: 2);
@@ -56,10 +59,12 @@ public sealed class ReferenceMaterializationRunStoreTests : IDisposable
             CancellationToken.None);
         var store = new SqliteReferenceMaterializationRunStore(new ReferenceCorpusDatabasePathResolver(options));
 
-        // 批次概念已废除：run 恒为逐章（批=章）。
+        // M1：一个租约批覆盖多章，批在建 run 时冻结（2 章不足一批，故只有 1 批）。
+        // 逐章值仍保留在契约里，供回滚与兼容旧库。
         var created = await store.CreateAsync(CreateSeed(anchor.AnchorId, profile.SplitProfileId), CancellationToken.None);
-        Assert.Equal(1, created.ChapterBatchSize);
-        Assert.Equal(created.TotalChapters, created.TotalChapterBatches);
+        Assert.Equal(ReferenceMaterializationBatchSizes.Concurrent, created.ChapterBatchSize);
+        Assert.Equal(1, created.TotalChapterBatches);
+        Assert.Equal(1, ReferenceMaterializationBatchSizes.ChapterWise);
     }
 
     [Fact]
@@ -327,7 +332,8 @@ public sealed class ReferenceMaterializationRunStoreTests : IDisposable
     public async Task GenerationVectorIndexCompletesOnlyWhenTheWholeCurrentBatchHasCompleteVectors()
     {
         var options = CreateOptions();
-        var anchor = await CreateAnchorAsync(options, chapterCount: 2);
+        // 6 章跨 2 批（批大小 5）：保留"整批都有完整向量才推进下一批"的多批推进语义。
+        var anchor = await CreateAnchorAsync(options, chapterCount: 6);
         var splitService = new SqliteReferenceMaterializationService(options, new EmptyChapterSplitAnalyzer());
         var profile = await splitService.PreviewChapterSplitAsync(
             new PreviewReferenceChapterSplitPayload(anchor.NovelId, anchor.AnchorId, "# {title}"),
@@ -343,7 +349,7 @@ public sealed class ReferenceMaterializationRunStoreTests : IDisposable
                 "embedding-provider", "https://example.invalid", "key", "embedding-model", 8, null)),
             new FixedEmbeddingClient(dimensions: 8));
 
-        foreach (var chapterIndex in new[] { 1, 2 })
+        foreach (var chapterIndex in Enumerable.Range(1, 6))
         {
             await store.BuildCandidatesForChapterAsync(run.RunId, chapterIndex, CancellationToken.None);
             var qualification = await store.ReadQualificationWorkItemAsync(run.RunId, chapterIndex, CancellationToken.None);
@@ -363,7 +369,8 @@ public sealed class ReferenceMaterializationRunStoreTests : IDisposable
 
         var vec = new RecordingVecProvisioner();
         var indexer = new ReferenceMaterializationVectorIndexer(resolver, vec);
-        // 逐章处理：先索引第一章（批 0），再索引第二章（批 1），两章都完成。
+        // 批冻结：先索引批 0（前 5 章），再索引批 1（第 6 章）——每次都要
+        // 当前批全部章都已有完整向量，才推进到下一批。
         var firstIndexed = await indexer.IndexCurrentBatchAsync(run.RunId, CancellationToken.None);
         var secondIndexed = await indexer.IndexCurrentBatchAsync(run.RunId, CancellationToken.None);
         var progress = await store.ListChapterProgressAsync(run.RunId, page: 1, size: 10, CancellationToken.None);
@@ -375,12 +382,12 @@ public sealed class ReferenceMaterializationRunStoreTests : IDisposable
         Assert.Equal(secondIndexed.VectorCount, vec.LastRequest?.Vectors.Count);
         Assert.Contains("vec_reference_materialization_", vec.LastRequest?.TableName, StringComparison.Ordinal);
         Assert.All(progress.Items, item => Assert.Equal(ReferenceMaterializationChapterStates.Completed, item.Status));
-        Assert.Equal(2, status?.ProcessedChapters);
+        Assert.Equal(6, status?.ProcessedChapters);
         Assert.Equal(2, status?.CompletedChapterBatches);
     }
 
     [Fact]
-    public async Task WorkerProcessesChaptersInTheFrozenBatchSequentiallyBeforeAdvancing()
+    public async Task WorkerProcessesTheWholeFrozenBatchBeforeAdvancing()
     {
         var options = CreateOptions();
         var anchor = await CreateAnchorAsync(options, chapterCount: 2);
@@ -407,7 +414,9 @@ public sealed class ReferenceMaterializationRunStoreTests : IDisposable
         Assert.Equal(ReferenceMaterializationRunStates.Queued, before?.Status);
         Assert.Equal(0, before?.CurrentBatchIndex);
 
-        // 逐章处理：一次 pump 只推进一章，循环直至完成；相邻模型调用保持串行。
+        // 批冻结：一次 pump 推进整个批（2 章同批），批内按自适应并发度并行。
+        // 并发度上限受 worker 内部控制，这里只断言"不超起步并发度"——
+        // 录制型 qualifier 立即返回，是否真的重叠取决于调用耗时，不做强断言。
         for (var pump = 0; pump < 4; pump++)
         {
             if (!await worker.ProcessRunOnceAsync(run.RunId, CancellationToken.None))
@@ -420,10 +429,11 @@ public sealed class ReferenceMaterializationRunStoreTests : IDisposable
         var status = await store.GetAsync(run.RunId, CancellationToken.None);
 
         Assert.Equal(2, qualifier.InvocationCount);
-        Assert.Equal(1, qualifier.MaximumConcurrency);
+        Assert.True(qualifier.MaximumConcurrency <= 2, $"并发度 {qualifier.MaximumConcurrency} 超出起步并发度 2。");
         Assert.All(progress.Items, item => Assert.Equal(ReferenceMaterializationChapterStates.Completed, item.Status));
         Assert.Equal(2, status?.ProcessedChapters);
-        Assert.Equal(2, status?.CompletedChapterBatches);
+        // 2 章不足一批（批大小 5），故只完成 1 批。
+        Assert.Equal(1, status?.CompletedChapterBatches);
         Assert.Null(status?.CurrentBatchIndex);
         Assert.True(
             status?.Status == ReferenceMaterializationRunStates.Completed,
@@ -1408,8 +1418,10 @@ public sealed class ReferenceMaterializationRunStoreTests : IDisposable
             CancellationToken.None);
 
         Assert.NotNull(reclaimed);
-        // 逐章处理：过期租约只重置被中断的那一章。
-        Assert.Equal([1], reclaimed!.ChapterIndexes);
+        // 批冻结：过期租约只重置被中断的那一批（批 0 = 前 Concurrent 章），
+        // 后续批不受影响——这正是"只重置当前未完成批"的语义。
+        var batchSize = ReferenceMaterializationBatchSizes.Concurrent;
+        Assert.Equal(Enumerable.Range(1, batchSize).ToArray(), reclaimed!.ChapterIndexes);
         Assert.NotEmpty(pendingCandidates.Items);
         Assert.All(pendingCandidates.Items, item =>
         {
@@ -1425,6 +1437,164 @@ public sealed class ReferenceMaterializationRunStoreTests : IDisposable
         });
         var later = Assert.Single(progress.Items, item => item.BatchIndex == 1);
         Assert.Equal(ReferenceMaterializationChapterStates.Pending, later.Status);
+    }
+
+    [Fact]
+    public async Task FailChapterAsyncMarksOnlyTheNamedChapterAndKeepsTheBatchAlive()
+    {
+        var options = CreateOptions();
+        var anchor = await CreateAnchorAsync(options, chapterCount: 6);
+        var splitService = new SqliteReferenceMaterializationService(options, new EmptyChapterSplitAnalyzer());
+        var profile = await splitService.PreviewChapterSplitAsync(
+            new PreviewReferenceChapterSplitPayload(anchor.NovelId, anchor.AnchorId, "# {title}"),
+            CancellationToken.None);
+        await splitService.ConfirmChapterSplitAsync(
+            new ConfirmReferenceChapterSplitPayload(anchor.NovelId, anchor.AnchorId, profile.SplitProfileId),
+            CancellationToken.None);
+        var store = new SqliteReferenceMaterializationRunStore(new ReferenceCorpusDatabasePathResolver(options));
+        var run = await store.CreateAsync(CreateSeed(anchor.AnchorId, profile.SplitProfileId), CancellationToken.None);
+        var claim = await store.ClaimCurrentBatchAsync(
+            run.RunId, "isolation-owner", TimeSpan.FromMinutes(1), CancellationToken.None);
+        Assert.NotNull(claim);
+        Assert.Equal(5, claim!.ChapterIndexes.Count);
+
+        await store.FailChapterAsync(claim, 3, "test_failure", "章节 3 故意失败", CancellationToken.None);
+
+        var progress = await store.ListChapterProgressAsync(run.RunId, page: 1, size: 10, CancellationToken.None);
+        var failed = Assert.Single(progress.Items, item =>
+            item.Status == ReferenceMaterializationChapterStates.Failed);
+        Assert.Equal(3, failed.ChapterIndex);
+        Assert.Equal("test_failure", failed.LastErrorCode);
+
+        // 同批其余章不受牵连——这正是"一章失败判死整批"的反面。
+        Assert.All(
+            progress.Items.Where(item => item.ChapterIndex != 3),
+            item => Assert.Equal(ReferenceMaterializationChapterStates.Pending, item.Status));
+
+        // run 未被终结：仍可继续推进，失败章等着被重做。
+        var status = await store.GetAsync(run.RunId, CancellationToken.None);
+        Assert.Equal(ReferenceMaterializationRunStates.Running, status?.Status);
+
+        // 租约保留：批内其余章还能在同一租约下继续跑（别的 worker 抢不走）。
+        var contended = await store.ClaimCurrentBatchAsync(
+            run.RunId, "another-owner", TimeSpan.FromMinutes(1), CancellationToken.None);
+        Assert.Null(contended);
+    }
+
+    [Fact]
+    public async Task ConcurrentBatchAttemptsEveryChapterEvenWhenAllOfThemFail()
+    {
+        var options = CreateOptions();
+        var anchor = await CreateAnchorAsync(options, chapterCount: 6);
+        var splitService = new SqliteReferenceMaterializationService(options, new EmptyChapterSplitAnalyzer());
+        var profile = await splitService.PreviewChapterSplitAsync(
+            new PreviewReferenceChapterSplitPayload(anchor.NovelId, anchor.AnchorId, "# {title}"),
+            CancellationToken.None);
+        await splitService.ConfirmChapterSplitAsync(
+            new ConfirmReferenceChapterSplitPayload(anchor.NovelId, anchor.AnchorId, profile.SplitProfileId),
+            CancellationToken.None);
+        var resolver = new ReferenceCorpusDatabasePathResolver(options);
+        var store = new SqliteReferenceMaterializationRunStore(resolver);
+        var run = await store.CreateAsync(CreateSeed(anchor.AnchorId, profile.SplitProfileId), CancellationToken.None);
+        var worker = new ReferenceMaterializationWorker(
+            resolver,
+            new FailingQualifier(),
+            new AcceptingEmbedder(),
+            new ReferenceMaterializationVectorIndexer(resolver, new RecordingVecProvisioner()),
+            workerId: "test-materialization-worker");
+
+        await worker.ProcessRunOnceAsync(run.RunId, CancellationToken.None);
+
+        // 批 0 的 5 章各自独立失败并被记录，而不是"第一章失败就整批停摆"。
+        // 这是章级失败隔离在并发下的可观测效果。
+        var progress = await store.ListChapterProgressAsync(run.RunId, page: 1, size: 10, CancellationToken.None);
+        var batch = progress.Items.Where(item => item.BatchIndex == 0).ToArray();
+        Assert.Equal(5, batch.Length);
+        Assert.All(batch, item =>
+            Assert.Equal(ReferenceMaterializationChapterStates.Failed, item.Status));
+        Assert.All(batch, item => Assert.False(string.IsNullOrEmpty(item.LastErrorCode)));
+    }
+
+    [Fact]
+    public async Task RebatchRegroupsOnlyChaptersThatHaveNotStarted()
+    {
+        var options = CreateOptions();
+        var anchor = await CreateAnchorAsync(options, chapterCount: 12);
+        var splitService = new SqliteReferenceMaterializationService(options, new EmptyChapterSplitAnalyzer());
+        var profile = await splitService.PreviewChapterSplitAsync(
+            new PreviewReferenceChapterSplitPayload(anchor.NovelId, anchor.AnchorId, "# {title}"),
+            CancellationToken.None);
+        await splitService.ConfirmChapterSplitAsync(
+            new ConfirmReferenceChapterSplitPayload(anchor.NovelId, anchor.AnchorId, profile.SplitProfileId),
+            CancellationToken.None);
+        var store = new SqliteReferenceMaterializationRunStore(new ReferenceCorpusDatabasePathResolver(options));
+        var run = await store.CreateAsync(CreateSeed(anchor.AnchorId, profile.SplitProfileId), CancellationToken.None);
+
+        // 建 run 时按批大小 5 分组：12 章 → 批 0/1/2。
+        var before = await store.ListChapterProgressAsync(run.RunId, page: 1, size: 20, CancellationToken.None);
+        Assert.Equal(3, before.Items.Max(item => item.BatchIndex) + 1);
+
+        var result = await store.RebatchPendingChaptersAsync(run.RunId, 10, CancellationToken.None);
+
+        // 全部章节都还没开始，故 12 章整体重排成 2 批。
+        Assert.True(result.Applied);
+        Assert.Equal(12, result.RebatchedChapters);
+        Assert.Equal(2, result.AddedBatches);
+
+        var after = await store.ListChapterProgressAsync(run.RunId, page: 1, size: 20, CancellationToken.None);
+        // 新批号从原最大批号 +1 起算，不与旧分组撞号。
+        Assert.All(after.Items.Take(10), item => Assert.Equal(3, item.BatchIndex));
+        Assert.All(after.Items.Skip(10), item => Assert.Equal(4, item.BatchIndex));
+
+        var status = await store.GetAsync(run.RunId, CancellationToken.None);
+        Assert.Equal(10, status?.ChapterBatchSize);
+    }
+
+    [Fact]
+    public async Task RebatchAcceptsAnyBatchSizeInTheAdjustableRange()
+    {
+        var options = CreateOptions();
+        var anchor = await CreateAnchorAsync(options, chapterCount: 12);
+        var splitService = new SqliteReferenceMaterializationService(options, new EmptyChapterSplitAnalyzer());
+        var profile = await splitService.PreviewChapterSplitAsync(
+            new PreviewReferenceChapterSplitPayload(anchor.NovelId, anchor.AnchorId, "# {title}"),
+            CancellationToken.None);
+        await splitService.ConfirmChapterSplitAsync(
+            new ConfirmReferenceChapterSplitPayload(anchor.NovelId, anchor.AnchorId, profile.SplitProfileId),
+            CancellationToken.None);
+        var store = new SqliteReferenceMaterializationRunStore(new ReferenceCorpusDatabasePathResolver(options));
+        var run = await store.CreateAsync(CreateSeed(anchor.AnchorId, profile.SplitProfileId), CancellationToken.None);
+
+        // 滑块给到 1-5，其中 2/3/4 过去被 schema 白名单拒绝；约束移除后必须都可用。
+        foreach (var size in new[] { 2, 3, 4 })
+        {
+            var result = await store.RebatchPendingChaptersAsync(run.RunId, size, CancellationToken.None);
+            Assert.True(result.Applied, $"批大小 {size} 应当可用。");
+            Assert.Equal(12, result.RebatchedChapters);
+            Assert.Equal((12 + size - 1) / size, result.AddedBatches);
+        }
+    }
+
+    [Fact]
+    public async Task RebatchRejectsABatchSizeOutsideTheAdjustableRange()
+    {
+        var options = CreateOptions();
+        var anchor = await CreateAnchorAsync(options, chapterCount: 2);
+        var splitService = new SqliteReferenceMaterializationService(options, new EmptyChapterSplitAnalyzer());
+        var profile = await splitService.PreviewChapterSplitAsync(
+            new PreviewReferenceChapterSplitPayload(anchor.NovelId, anchor.AnchorId, "# {title}"),
+            CancellationToken.None);
+        await splitService.ConfirmChapterSplitAsync(
+            new ConfirmReferenceChapterSplitPayload(anchor.NovelId, anchor.AnchorId, profile.SplitProfileId),
+            CancellationToken.None);
+        var store = new SqliteReferenceMaterializationRunStore(new ReferenceCorpusDatabasePathResolver(options));
+        var run = await store.CreateAsync(CreateSeed(anchor.AnchorId, profile.SplitProfileId), CancellationToken.None);
+
+        // 白名单已移除，但边界仍然要守：0 无意义，11 超出可调上界。
+        await Assert.ThrowsAsync<ArgumentOutOfRangeException>(async () =>
+            await store.RebatchPendingChaptersAsync(run.RunId, 0, CancellationToken.None));
+        await Assert.ThrowsAsync<ArgumentOutOfRangeException>(async () =>
+            await store.RebatchPendingChaptersAsync(run.RunId, 11, CancellationToken.None));
     }
 
     [Fact]
